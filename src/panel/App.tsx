@@ -1,0 +1,397 @@
+import { api } from '../shared/api';
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import type { Cuboid } from '../shared/cuboid';
+import { upsertKeyframe } from '../shared/edit';
+import { actionFor, comboOf } from '../shared/keymap';
+import { stateAt } from '../shared/interp';
+import { CONTENT_SOURCE, type ContentMessage } from '../shared/protocol';
+import { summarize } from '../shared/summary';
+import { buildRows } from '../shared/table';
+import type { CvatAnnotations, CvatJob, CvatLabel, CvatTrack } from '../shared/types';
+import { BatchReview } from './BatchReview';
+import { JobInfo } from './JobInfo';
+import { KeysPanel } from './KeysPanel';
+import { UploadDialog } from './UploadDialog';
+import { ShiftPanel } from './ShiftPanel';
+import { attrKey, motionKey, shiftStore, useIgnored, useShifts } from './shiftStore';
+import { parseLabelSpecs } from '../shared/attributes';
+import { suggestAttributes } from '../shared/attrSuggest';
+import { fmtDuration, shiftName, computeKpi } from '../shared/shift';
+import { emitAction, isCapturing, useKeymap } from './actions';
+import { ObjectTable } from './ObjectTable';
+import { parentOrigin, post, resolveBinary, resolveRpc, session } from './bridge';
+
+export interface Data {
+  job: CvatJob;
+  labels: CvatLabel[];
+  ann: CvatAnnotations; // baseline: đúng như CVAT trả về
+  removedIds: number[];
+}
+
+// --- nháp chỉnh sửa (chỉ trong bộ nhớ, chưa upload) ---
+interface Entry { idx: number; before: CvatTrack; after: CvatTrack; keys: string[]; added: string[] }
+interface Draft { work: CvatAnnotations | null; edited: Set<string>; undo: Entry[]; redo: Entry[] }
+type Action =
+  | { t: 'load'; ann: CvatAnnotations }
+  | { t: 'edit'; idx: number; frame: number; cub: Cuboid }
+  | { t: 'track'; idx: number; track: CvatTrack; frames: number[] } // đổi keyframe hàng loạt
+  | { t: 'undo' | 'redo' | 'reset'; baseline?: CvatAnnotations };
+
+const replaceTrack = (a: CvatAnnotations, idx: number, tr: CvatTrack): CvatAnnotations => {
+  const tracks = a.tracks.slice();
+  tracks[idx] = tr;
+  return { ...a, tracks };
+};
+
+function applyChange(s: Draft, idx: number, after: CvatTrack, frames: number[]): Draft {
+  if (!s.work || !frames.length) return s;
+  const before = s.work.tracks[idx]!;
+  const keys = frames.map((f) => `${idx + 1}:${f}`);
+  const added = keys.filter((k) => !s.edited.has(k));
+  return {
+    work: replaceTrack(s.work, idx, after),
+    edited: new Set([...s.edited, ...keys]),
+    undo: [...s.undo, { idx, before, after, keys, added }],
+    redo: [],
+  };
+}
+
+function reducer(s: Draft, a: Action): Draft {
+  switch (a.t) {
+    case 'load':
+      return { work: a.ann, edited: new Set(), undo: [], redo: [] };
+    case 'reset':
+      return { work: a.baseline ?? s.work, edited: new Set(), undo: [], redo: [] };
+    case 'edit':
+      return s.work ? applyChange(s, a.idx, upsertKeyframe(s.work.tracks[a.idx]!, a.frame, a.cub), [a.frame]) : s;
+    case 'track':
+      return applyChange(s, a.idx, a.track, a.frames);
+    case 'undo': {
+      const e = s.undo[s.undo.length - 1];
+      if (!e || !s.work) return s;
+      const edited = new Set(s.edited);
+      for (const k of e.added) edited.delete(k);
+      return { work: replaceTrack(s.work, e.idx, e.before), edited, undo: s.undo.slice(0, -1), redo: [...s.redo, e] };
+    }
+    case 'redo': {
+      const e = s.redo[s.redo.length - 1];
+      if (!e || !s.work) return s;
+      return {
+        work: replaceTrack(s.work, e.idx, e.after), edited: new Set([...s.edited, ...e.keys]),
+        undo: [...s.undo, e], redo: s.redo.slice(0, -1),
+      };
+    }
+  }
+}
+
+let VERSION = '?';
+try { VERSION = api.runtime.getManifest().version; } catch { /* extension vừa được Reload */ }
+
+const EMPTY: Draft = { work: null, edited: new Set<string>(), undo: [], redo: [] };
+
+type State = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ok'; data: Data };
+type Tab = 'objects' | 'review' | 'shift' | 'keys' | 'job';
+
+const loadSync = () => { try { return localStorage.getItem('cvla-sync') !== '0'; } catch { return true; } };
+
+export function App() {
+  const [state, setState] = useState<State>({ kind: 'loading' });
+  const [draft, dispatch] = useReducer(reducer, EMPTY);
+  const [tab, setTab] = useState<Tab>('objects');
+  const [uploading, setUploading] = useState(false);
+  const { active: shift } = useShifts();
+  const [, tickShift] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => tickShift((x) => x + 1), 30000);
+    return () => window.clearInterval(t);
+  }, []);
+  const [toast, setToast] = useState('');
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(''), 9000);
+    return () => window.clearTimeout(t);
+  }, [toast]);
+  const [pushOut, setPushOutState] = useState(() => { try { return localStorage.getItem('cvla-sync-out') !== '0'; } catch { return true; } });
+  const pushOutRef = useRef(pushOut);
+  const setPushOut = (v: boolean) => { setPushOutState(v); pushOutRef.current = v; try { localStorage.setItem('cvla-sync-out', v ? '1' : '0'); } catch { /* bỏ qua */ } };
+  const viewFrames = useRef<number[]>([]);
+  const selFrameRef = useRef<number | null>(null);
+  const hoverFrameRef = useRef<number | null>(null);
+  const focusRef = useRef<() => void>(() => {});
+  const workRef = useRef<CvatAnnotations | null>(null);
+  const [keymap, setKeymap] = useKeymap();
+  const [sync, setSyncState] = useState(loadSync);
+  const [focus, setFocus] = useState<{ frame: number; nonce: number } | null>(null);
+  const syncRef = useRef(sync);
+  const countRef = useRef(0);
+  const lastCvatNum = useRef<number | null>(null);
+  const lastCvatFrame = useRef<number | null>(null);
+  const setSync = (v: boolean) => { setSyncState(v); syncRef.current = v; try { localStorage.setItem('cvla-sync', v ? '1' : '0'); } catch { /* bỏ qua */ } };
+  const [selectedNum, setSelectedNum] = useState<number | null>(null);
+  const [startWindow, setStartWindow] = useState(0);
+
+  useEffect(() => {
+    const onMsg = (ev: MessageEvent) => {
+      if (ev.origin !== parentOrigin) return; // origin + mã phiên; không so ev.source (Firefox bọc cửa sổ khác Chrome)
+      const m = ev.data as ContentMessage;
+      if (m?.source !== CONTENT_SOURCE || m.session !== session) return;
+      if (m.type === 'loading') setState({ kind: 'loading' });
+      else if (m.type === 'error') setState({ kind: 'error', message: m.message });
+      else if (m.type === 'data') {
+        setState({ kind: 'ok', data: { job: m.job, labels: m.labels, ann: m.annotations, removedIds: m.removedIds } });
+        dispatch({ t: 'load', ann: m.annotations });
+        countRef.current = m.annotations.tracks.length;
+      } else if (m.type === 'cvatDbl') {
+        // Bấm đúp trong CVAT: luôn chọn object đó và chuyển sang Batch Review (không phụ thuộc ô đồng bộ).
+        if (m.num >= 1 && m.num <= countRef.current) {
+          lastCvatNum.current = m.num;
+          setSelectedNum(m.num);
+          setTab('review');
+          if (m.frame !== null) {
+            lastCvatFrame.current = m.frame;
+            setFocus({ frame: m.frame, nonce: Date.now() });
+          }
+        }
+      } else if (m.type === 'cvat') {
+        // Chọn object / đổi frame trong giao diện CVAT → tool chọn đúng object đó.
+        if (syncRef.current && m.num !== null && m.num !== lastCvatNum.current && m.num >= 1 && m.num <= countRef.current) {
+          lastCvatNum.current = m.num;
+          setSelectedNum(m.num);
+          setTab((t) => (t === 'job' || t === 'keys' ? t : 'review'));
+        } else if (m.num === null) lastCvatNum.current = null;
+        // Đổi frame trong CVAT → cửa sổ của tool chạy theo.
+        if (syncRef.current && m.frame !== null && m.frame !== lastCvatFrame.current && countRef.current > 0) {
+          lastCvatFrame.current = m.frame;
+          setFocus({ frame: m.frame, nonce: Date.now() });
+        }
+      } else if (m.type === 'rpc') resolveRpc(m.reqId, m.result);
+      else if (m.type === 'binary') resolveBinary(m.reqId, m.buf, m.error);
+    };
+    window.addEventListener('message', onMsg);
+    post({ type: 'ready' });
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+
+  const keymapRef = useRef(keymap);
+  keymapRef.current = keymap;
+  // Báo cho content script phím bật tắt cửa sổ hiện hành để nó nghe được cả khi con trỏ đang ở trang CVAT.
+  useEffect(() => { post({ type: 'hotkeys', toggle: keymap['window.toggle'] ?? [] }); }, [keymap]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isCapturing()) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const combo = comboOf(e);
+      const id = combo ? actionFor(keymapRef.current, combo) : null;
+      if (!id) return;
+      e.preventDefault();
+      if (id === 'undo') dispatch({ t: 'undo' });
+      else if (id === 'redo') dispatch({ t: 'redo' });
+      else if (id === 'focus.cvat') focusRef.current();
+      else if (id === 'window.toggle') post({ type: 'toggleWindow' });
+      else emitAction(id);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const data = state.kind === 'ok' ? state.data : null;
+  const work = draft.work;
+  workRef.current = work;
+
+  /** Nút Focus: thu nhỏ tool và đưa camera 3D của CVAT lại gần object đang chọn (đổi frame CVAT nếu object không có ở frame đó). */
+  focusRef.current = () => {
+    const w = workRef.current;
+    if (selectedNum === null || !w) { setToast('Chọn một object trước khi Focus.'); return; }
+    const track = w.tracks[selectedNum - 1];
+    if (!track) return;
+    const has = (f: number) => !!stateAt(track, f).cuboid;
+    let frame: number | null = null;
+    // Zoom vào object ở frame đang trỏ chuột (khi bấm phím F), không thì frame đang được chọn trong tool.
+    const pref = hoverFrameRef.current ?? selFrameRef.current;
+    if (pref !== null && !has(pref)) setToast(`Frame ${pref}: object không có box ở frame này (outside / chưa xuất hiện) nên không zoom vào được; dùng frame gần nhất có box.`);
+    if (pref !== null && has(pref)) frame = pref;
+    else if (lastCvatFrame.current !== null && has(lastCvatFrame.current)) frame = lastCvatFrame.current;
+    else {
+      const pool = viewFrames.current.filter(has);
+      const ref = lastCvatFrame.current ?? viewFrames.current[0] ?? 0;
+      if (pool.length) frame = pool.reduce((a, f) => (Math.abs(f - ref) < Math.abs(a - ref) ? f : a));
+    }
+    if (frame !== null) lastCvatFrame.current = frame;
+    lastCvatNum.current = selectedNum;
+    post({ type: 'cvatFocus', num: selectedNum, frame, zoom: true, minimize: true });
+  };
+
+  /** Chọn object từ phía tool (ô nhập ID, ↑/↓, bảng object) → chuyển focus bên CVAT sang object đó. */
+  const selectFromTool = (num: number) => {
+    setSelectedNum(num);
+    lastCvatNum.current = num; // tiếng vọng từ CVAT không kích hoạt lại
+    const w = workRef.current;
+    if (!pushOutRef.current || !w) return;
+    const track = w.tracks[num - 1];
+    if (!track) return;
+    let frame: number | null = null;
+    const cur = lastCvatFrame.current;
+    if (cur === null || !stateAt(track, cur).cuboid) {
+      // Object không có box ở frame CVAT đang mở → chọn frame có box: ưu tiên trong cửa sổ tool đang xem, rồi gần nhất.
+      const inView = viewFrames.current.filter((f) => stateAt(track, f).cuboid);
+      const pool = inView.length ? inView : Array.from({ length: (data?.job.stop_frame ?? 0) + 1 }, (_, i) => i).filter((f) => stateAt(track, f).cuboid);
+      if (pool.length) {
+        const ref = cur ?? pool[0]!;
+        frame = pool.reduce((a, f) => (Math.abs(f - ref) < Math.abs(a - ref) ? f : a));
+      }
+    }
+    if (frame !== null) lastCvatFrame.current = frame; // không để cửa sổ tool nhảy theo chính thao tác này
+    post({ type: 'cvatFocus', num, frame });
+  };
+  const ignAll = useIgnored();
+  // Số gợi ý thuộc tính theo object (tính ở frame có box đầu tiên), không tính gợi ý đã bỏ qua.
+  const attrHints = useMemo(() => {
+    const m = new Map<number, number>();
+    if (!data || !work) return m;
+    const specs = parseLabelSpecs(data.labels);
+    const peds = (f: number) => work.tracks
+      .filter((t) => specs.get(t.label_id)?.name.toLowerCase() === 'pedestrian')
+      .map((t) => stateAt(t, f).cuboid)
+      .filter((c): c is NonNullable<typeof c> => !!c);
+    work.tracks.forEach((t, i) => {
+      const spec = specs.get(t.label_id);
+      const first = t.shapes.find((s) => !s.outside);
+      if (!spec || !first) return;
+      const hints = suggestAttributes({ track: t, label: spec.name, spec, frame: first.frame, box: stateAt(t, first.frame).cuboid, pedestrians: peds(first.frame) });
+      const n = hints.filter((h) => !ignAll.has(attrKey(data.job.id, i + 1, h.spec.id, h.scope === 'frame' ? first.frame : null))).length;
+      if (n) m.set(i + 1, n);
+    });
+    return m;
+  }, [data, work, ignAll]);
+  const rows = useMemo(
+    () => (data && work
+      ? buildRows(work, data.labels, data.job.start_frame, data.job.stop_frame, (num, f) => ignAll.has(motionKey(data.job.id, num, f)))
+      : []),
+    [data, work, ignAll],
+  );
+
+  const reload = () => {
+    if (draft.edited.size && !confirm(`Có ${draft.edited.size} frame đã sửa chưa upload. Tải lại sẽ bỏ nháp. Tiếp tục?`)) return;
+    post({ type: 'load' });
+  };
+
+  const tabBtn = (t: Tab, label: string) => (
+    <button
+      onClick={() => setTab(t)}
+      style={{ fontWeight: tab === t ? 700 : 400, marginRight: 4 }}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div style={{ font: '13px system-ui', padding: 10, color: '#111' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <b>CVAT 3D Assistant · v{VERSION}</b>
+        <span>
+          <label title="Khi bạn chọn một object trong giao diện CVAT, tool tự chọn object đó và nhảy tới frame hiện tại của CVAT">
+            <input type="checkbox" checked={sync} onChange={(e) => setSync(e.target.checked)} /> CVAT → tool
+          </label>{' '}
+          <label title="Khi bạn chọn object trong tool, giao diện CVAT chuyển focus sang object đó (đổi frame nếu object không có ở frame hiện tại)">
+            <input type="checkbox" checked={pushOut} onChange={(e) => setPushOut(e.target.checked)} /> tool → CVAT
+          </label>{' '}
+          <button onClick={() => focusRef.current()} disabled={selectedNum === null} title="Thu nhỏ tool và đưa camera 3D của CVAT lại gần object đang chọn (như bấm đúp vào object trong CVAT). Phím F.">🎯 Focus</button>{' '}
+          <button onClick={reload}>Tải lại</button>
+        </span>
+      </div>
+      <div style={{ margin: '4px 0', display: 'flex', gap: 8, alignItems: 'center' }}>
+        {shift ? (
+          <>
+            <span style={{ background: '#fde2e2', border: '1px solid #c33', padding: '1px 8px', borderRadius: 3 }}>
+              ● Ca <b>{shift.name}</b> · {fmtDuration(computeKpi(shift).durationMin)} · {computeKpi(shift).totals.objects} object đã upload
+            </span>
+            <button
+              onClick={() => {
+                const pending = draft.edited.size;
+                if (pending && !confirm(`Còn ${pending} frame đã sửa CHƯA upload — sẽ không tính vào KPI của ca. Vẫn ra ca?`)) return;
+                if (!pending && !confirm(`Ra ca ${shift.name}?`)) return;
+                shiftStore.end();
+                setTab('shift');
+              }}
+            >■ Ra ca</button>
+          </>
+        ) : (
+          <button onClick={() => { shiftStore.start(); }} title={`Tên ca sẽ là ${shiftName(new Date())}`}>
+            ▶ Vào ca ({shiftName(new Date())})
+          </button>
+        )}
+      </div>
+      <div style={{ margin: '6px 0' }}>
+        {tabBtn('objects', 'Bảng object')}
+        {tabBtn('review', 'Batch Review')}
+        {tabBtn('shift', 'Ca / KPI')}
+        {tabBtn('keys', 'Phím tắt')}
+        {tabBtn('job', 'Thông tin job')}
+        {data && (
+          <span style={{ marginLeft: 12, padding: '2px 6px', background: draft.edited.size ? '#fff3cd' : '#eee' }}>
+            Nháp: <b>{draft.edited.size}</b> frame đã sửa (chỉ trong bộ nhớ, <b>chưa upload</b>){' '}
+            <button disabled={!draft.undo.length} onClick={() => dispatch({ t: 'undo' })}>Hoàn tác</button>{' '}
+            <button disabled={!draft.redo.length} onClick={() => dispatch({ t: 'redo' })}>Làm lại</button>{' '}
+            <button
+              disabled={!draft.edited.size}
+              onClick={() => { if (confirm('Bỏ toàn bộ chỉnh sửa trong nháp?')) dispatch({ t: 'reset', baseline: data.ann }); }}
+            >Bỏ nháp</button>{' '}
+            <button onClick={() => setUploading(true)} style={{ fontWeight: 700, background: draft.edited.size ? '#d7f7d7' : undefined }}>⬆ Upload lên CVAT…</button>
+          </span>
+        )}
+      </div>
+      {uploading && data && work && (
+        <UploadDialog
+          baseline={data.ann} working={work} job={data.job} labels={data.labels}
+          onClose={() => setUploading(false)}
+          onUploaded={(tracks) => shiftStore.upload({ time: new Date().toISOString(), jobId: data.job.id, tracks })}
+          onReload={() => {
+            setUploading(false);
+            setTab('review');
+            setToast('Đã upload thành công, tool đã nạp lại dữ liệu từ CVAT. Nhớ tải lại tab CVAT (F5) trước khi bấm Save ở đó.');
+            post({ type: 'load' });
+          }}
+        />
+      )}
+      {toast && (
+        <div style={{ background: '#e8ffe8', border: '1px solid #0a0', padding: 6, margin: '6px 0' }}>
+          {toast} <button onClick={() => setToast('')}>×</button>
+        </div>
+      )}
+      {state.kind === 'loading' && <p>Đang đọc…</p>}
+      {state.kind === 'error' && <p style={{ color: '#b00' }}>Lỗi: {state.message}</p>}
+      {data && data.removedIds.length > 0 && (
+        <div style={{ background: '#fdd', border: '1px solid #b00', padding: 8, marginBottom: 8 }}>
+          CẢNH BÁO: ID đã biến mất so với lần đọc trước: {data.removedIds.join(', ')}
+        </div>
+      )}
+      {data && work && tab === 'objects' && (
+        <ObjectTable
+          rows={rows} hints={attrHints}
+          onOpen={(num, first) => {
+            selectFromTool(num);
+            setStartWindow(Math.max(0, Math.floor(((first ?? 0) - data.job.start_frame) / 5)));
+            setTab('review');
+          }}
+        />
+      )}
+      {data && work && tab === 'review' && (
+        <BatchReview
+          labels={data.labels} job={data.job} ann={work} rows={rows} selectedNum={selectedNum} setSelectedNum={selectFromTool}
+          onSel={(f) => { selFrameRef.current = f; }}
+          onHoverFrame={(f) => { hoverFrameRef.current = f; }}
+          onView={(f) => {
+            viewFrames.current = f;
+            if (data && f.length) setStartWindow(Math.max(0, Math.floor((f[0]! - data.job.start_frame) / 5))); // nhớ cửa sổ đang xem để quay lại đúng chỗ
+          }} initialWindow={startWindow} edited={draft.edited} focus={focus}
+          onEdit={(idx, frame, cub) => { dispatch({ t: 'edit', idx, frame, cub }); shiftStore.edit(data.job.id, idx + 1); }}
+          onTrack={(idx, track, frames) => { dispatch({ t: 'track', idx, track, frames }); shiftStore.edit(data.job.id, idx + 1); }}
+        />
+      )}
+      {tab === 'shift' && <ShiftPanel />}
+      {tab === 'keys' && <KeysPanel map={keymap} setMap={setKeymap} />}
+      {data && tab === 'job' && <JobInfo s={summarize(data.job, data.labels, data.ann)} />}
+    </div>
+  );
+}

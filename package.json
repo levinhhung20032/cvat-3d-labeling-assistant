@@ -1,0 +1,32 @@
+{
+  "name": "cvat-3d-labeling-assistant",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build:firefox": "node build.mjs --target=firefox",
+    "build:all": "node build.mjs && node build.mjs --target=firefox",
+    "lint:firefox": "web-ext lint --source-dir dist-firefox",
+    "start:firefox": "web-ext run --source-dir dist-firefox --start-url https://cvat-a.example.com/",
+    "package:firefox": "web-ext build --source-dir dist-firefox --artifacts-dir web-ext-artifacts --overwrite-dest"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.268",
+    "@types/node": "^22.20.5",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2",
+    "vitest": "^2.0.5",
+    "web-ext": "^10.8.0"
+  }
+}

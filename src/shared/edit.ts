@@ -1,0 +1,138 @@
+import { serializeCuboid, type Cuboid } from './cuboid';
+import { sortedShapes } from './interp';
+import type { CvatShape, CvatTrack } from './types';
+
+export type View = 'top' | 'side' | 'front';
+export type Axis = 'u' | 'v' | 'w'; // u: dọc hướng box, v: sang trái, w: lên
+
+/** Hộp trong hệ tọa độ của box lúc bắt đầu kéo (gốc = tâm box ban đầu, trục u theo yaw ban đầu). */
+export interface LocalBox {
+  cu: number; cv: number; cw: number; // tâm
+  dyaw: number; // xoay thêm quanh trục z
+  sx: number; sy: number; sz: number;
+}
+
+export const identityBox = (c: Cuboid): LocalBox => ({ cu: 0, cv: 0, cw: 0, dyaw: 0, sx: c.sx, sy: c.sy, sz: c.sz });
+
+export function applyLocalBox(base: Cuboid, b: LocalBox): Cuboid {
+  const cos = Math.cos(base.yaw), sin = Math.sin(base.yaw);
+  return {
+    x: base.x + b.cu * cos - b.cv * sin,
+    y: base.y + b.cu * sin + b.cv * cos,
+    z: base.z + b.cw,
+    rx: 0, ry: 0, // 7-DoF: luôn 0
+    yaw: base.yaw + b.dyaw,
+    sx: b.sx, sy: b.sy, sz: b.sz,
+  };
+}
+
+const AXES: Record<View, [Axis, Axis]> = { top: ['u', 'v'], side: ['u', 'w'], front: ['v', 'w'] };
+const CENTER = { u: 'cu', v: 'cv', w: 'cw' } as const;
+const SIZE = { u: 'sx', v: 'sy', w: 'sz' } as const;
+const MIN_SIZE = 0.05;
+export const HANDLE_OFFSET = 0.4; // mét, từ mặt trước tới tay nắm xoay (ngắn)
+export const HANDLE_MIN_PX = 12; // nhưng luôn cách mặt trước ít nhất ngần này px để không dính tay nắm cạnh
+/** Khoảng cách (m) từ mặt trước tới tay nắm xoay ở tỉ lệ k px/m. */
+export const handleOffset = (k: number) => Math.max(HANDLE_OFFSET, HANDLE_MIN_PX / k);
+
+/** Độ dời (mét) theo trục object ứng với dịch chuyển màn hình (dx, dy px); k = px/mét. */
+export function axisDelta(view: View, axis: Axis, dx: number, dy: number, k: number): number {
+  if (view === 'top') return axis === 'u' ? -dy / k : axis === 'v' ? -dx / k : 0;
+  if (view === 'side') return axis === 'u' ? dx / k : axis === 'w' ? -dy / k : 0;
+  return axis === 'v' ? dx / k : axis === 'w' ? -dy / k : 0;
+}
+
+export function dragMove(view: View, b: LocalBox, dx: number, dy: number, k: number): LocalBox {
+  const r = { ...b };
+  for (const a of AXES[view]) r[CENTER[a]] += axisDelta(view, a, dx, dy, k);
+  return r;
+}
+
+/** Kéo một cạnh: chỉ cạnh đó dịch chuyển, cạnh đối diện đứng yên. sign = +1 cho cạnh ở phía trục dương. */
+export function dragEdge(view: View, b: LocalBox, axis: Axis, sign: 1 | -1, dx: number, dy: number, k: number): LocalBox {
+  const r = { ...b };
+  const size = Math.max(MIN_SIZE, b[SIZE[axis]] + sign * axisDelta(view, axis, dx, dy, k));
+  r[CENTER[axis]] += (sign * (size - b[SIZE[axis]])) / 2;
+  r[SIZE[axis]] = size;
+  return r;
+}
+
+/** Xoay yaw trên hình chiếu từ trên: (px, py) so với tâm ô, hướng box quay về phía con trỏ. */
+export function dragRotate(b: LocalBox, px: number, py: number): LocalBox {
+  return { ...b, dyaw: Math.atan2(-px, -py) };
+}
+
+/**
+ * Xoay tương đối: góc con trỏ quanh tâm ô (px, py tính từ tâm) so với lúc bắt đầu kéo, nên không bị nhảy.
+ * Dùng cho tay nắm đỏ và cho chế độ giữ Alt. Nếu điểm bắt đầu quá sát tâm thì góc không xác định → không xoay.
+ */
+export function dragRotateRel(b: LocalBox, p0x: number, p0y: number, px: number, py: number): LocalBox {
+  if (Math.hypot(p0x, p0y) < 4 || Math.hypot(px, py) < 4) return b;
+  let d = Math.atan2(-px, -py) - Math.atan2(-p0x, -p0y);
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d <= -Math.PI) d += 2 * Math.PI;
+  return { ...b, dyaw: d };
+}
+
+/** Xoay theo độ dời ngang (dùng ở view Bên / Trước, nơi không đọc được góc yaw từ con trỏ): kéo sang trái = +yaw. */
+export const YAW_PER_PX = (0.5 * Math.PI) / 180;
+export function dragYawByX(b: LocalBox, dx: number): LocalBox {
+  return { ...b, dyaw: -dx * YAW_PER_PX };
+}
+
+export type Hit = { mode: 'rotate' } | { mode: 'edge'; axis: Axis; sign: 1 | -1 } | { mode: 'move' } | null;
+
+const EDGES: Record<View, { left: [Axis, 1 | -1]; right: [Axis, 1 | -1]; top: [Axis, 1 | -1]; bottom: [Axis, 1 | -1] }> = {
+  top: { left: ['v', 1], right: ['v', -1], top: ['u', 1], bottom: ['u', -1] },
+  side: { left: ['u', -1], right: ['u', 1], top: ['w', 1], bottom: ['w', -1] },
+  front: { left: ['v', -1], right: ['v', 1], top: ['w', 1], bottom: ['w', -1] },
+};
+
+/** Hộp (dyaw = 0) trên màn hình ô: left/right/top/bottom theo px. */
+export function screenRect(view: View, b: LocalBox, size: number, half: number) {
+  const k = size / (2 * half), c = size / 2;
+  const hu = b.sx / 2, hv = b.sy / 2, hw = b.sz / 2;
+  if (view === 'top') return { left: c - (b.cv + hv) * k, right: c - (b.cv - hv) * k, top: c - (b.cu + hu) * k, bottom: c - (b.cu - hu) * k };
+  if (view === 'side') return { left: c + (b.cu - hu) * k, right: c + (b.cu + hu) * k, top: c - (b.cw + hw) * k, bottom: c - (b.cw - hw) * k };
+  return { left: c + (b.cv - hv) * k, right: c + (b.cv + hv) * k, top: c - (b.cw + hw) * k, bottom: c - (b.cw - hw) * k };
+}
+
+export function hitTest(view: View, b: LocalBox, px: number, py: number, size: number, half: number, tol = 4): Hit {
+  const k = size / (2 * half), c = size / 2;
+  if (view === 'top') {
+    const tx = c - b.cv * k, ty = c - (b.cu + b.sx / 2 + handleOffset(k)) * k; // đầu mũi tên
+    if (Math.hypot(px - tx, py - ty) <= 6) return { mode: 'rotate' };
+  }
+  const r = screenRect(view, b, size, half);
+  const inX = px >= r.left - tol && px <= r.right + tol;
+  const inY = py >= r.top - tol && py <= r.bottom + tol;
+  if (!inX || !inY) return null;
+  const cand: { d: number; e: [Axis, 1 | -1] }[] = [
+    { d: Math.abs(px - r.left), e: EDGES[view].left },
+    { d: Math.abs(px - r.right), e: EDGES[view].right },
+    { d: Math.abs(py - r.top), e: EDGES[view].top },
+    { d: Math.abs(py - r.bottom), e: EDGES[view].bottom },
+  ].filter((x) => x.d <= tol);
+  if (cand.length) {
+    const best = cand.reduce((a, x) => (x.d < a.d ? x : a));
+    return { mode: 'edge', axis: best.e[0], sign: best.e[1] };
+  }
+  return { mode: 'move' };
+}
+
+/** Đặt/ghi đè keyframe tại `frame` với cuboid mới; mọi chỉnh sửa đều thành keyframe. Không đổi ID track. */
+export function upsertKeyframe(track: CvatTrack, frame: number, cub: Cuboid, outside = false): CvatTrack {
+  const shapes = sortedShapes(track);
+  const existing = shapes.find((s) => s.frame === frame);
+  const prev = [...shapes].reverse().find((s) => s.frame < frame) ?? shapes[0]!;
+  const tpl = existing ?? prev;
+  const points = serializeCuboid(cub, tpl.points);
+  let shape: CvatShape;
+  if (existing) shape = { ...existing, points, outside };
+  else {
+    const { id: _id, ...rest } = structuredClone(tpl);
+    shape = { ...rest, type: 'cuboid', frame, outside, rotation: 0, points };
+  }
+  const next = shapes.filter((s) => s.frame !== frame).concat(shape).sort((a, b) => a.frame - b.frame);
+  return { ...track, frame: Math.min(track.frame, frame), shapes: next };
+}

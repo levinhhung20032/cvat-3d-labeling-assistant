@@ -1,0 +1,120 @@
+# CVAT 3D Labeling Assistant
+
+Extension trình duyệt (Manifest V3) giúp **review và sửa nhãn cuboid 3D trên point cloud** ngay trong tab job của CVAT (bản tự host, CVAT 2.77.1). Tool đọc và ghi nhãn **bằng chính phiên đăng nhập sẵn có của tab**, không cần tải dữ liệu về máy.
+
+Chạy trên **Edge / Chrome** (đã dùng thử) và **Firefox 128+** (bản thử, xem [Firefox](#firefox)).
+
+> ⚠️ Môi trường mục tiêu là **dữ liệu thật**, không có job sandbox. Mọi thao tác ghi đều đi qua màn hình xem lại, có nhật ký để hoàn nguyên. Xem [Luật an toàn](#luật-an-toàn).
+
+## Tính năng
+
+| Nhóm | Mô tả |
+| --- | --- |
+| **Batch Review** | 6 frame mỗi lượt (cửa sổ trượt bước 5) × 3 hình chiếu (Trên / Bên / Trước) quanh một object; ID object theo đúng ID hiển thị của CVAT; tải trước các frame phía sau trong lúc bạn làm việc |
+| **Bảng object** | Số frame được gán / outside / thiếu keyframe outside, cảnh báo đi xa, gợi ý thuộc tính; lọc và sắp xếp |
+| **Chỉnh sửa trực tiếp** | Kéo thả trên 3 hình chiếu: dời, đổi kích thước (cạnh đối diện đứng yên), xoay yaw (chấm trắng hoặc giữ Alt); zoom chung mọi frame; hoàn tác / làm lại |
+| **Keyframe** | Khoá / mở khoá từng frame, mở khoá keyframe ở giữa một khoảng, khoá tất cả thành keyframe, gắn keyframe outside (O) |
+| **Cảnh báo & gợi ý** | Box lệch khỏi cụm điểm (kèm box gợi ý nét đứt, chấp nhận bằng A), vật đi xa bất thường, ít điểm (< 6), đáy lơ lửng / chìm, **ground snap** (G) |
+| **Thuộc tính (attribute)** | Hiện và sửa attribute của object; gợi ý theo kích thước box (loại xe, tuổi / tư thế người đi bộ, có người lái xe hai bánh…) |
+| **Upload** | Màn hình xem lại → ghi bằng `PATCH …/annotations?action=update` chia lô → đọc lại so khớp; tự điền keyframe outside, tự khoá hết thành keyframe cho object đã tác động; nhật ký + hoàn nguyên |
+| **Ca làm việc / KPI** | Vào ca / ra ca (tên ca `Oct21AM`, `Oct21PM`…), KPI: object đã tác động, số frame outside, keyframe thêm / gỡ / sửa, gợi ý chấp nhận / bỏ qua |
+| **Liên kết với CVAT** | Chọn object trong CVAT → tool chọn theo; chọn trong tool → CVAT kích hoạt object (đổi frame nếu cần); bấm đúp trong CVAT mở rộng tool; nút **Focus** thu nhỏ tool và zoom cận cảnh object trong khung 3D của CVAT |
+| **Giao diện** | Cửa sổ nổi kéo / đổi cỡ / thu nhỏ / phóng to; cỡ ô tự khớp màn hình; phím tắt tùy chỉnh; xem ảnh camera với kính lúp |
+
+## Luật an toàn
+
+Các luật này được kiểm tra bằng code và test, không có ngoại lệ (chi tiết ở tài liệu nội bộ của dự án):
+
+1. **Không bao giờ xóa hay đổi ID.** Không có đường nào gửi `action=delete` hoặc `PUT` thay cả annotation; trước mỗi lần ghi, ID nào biến mất so với lúc đọc thì dừng.
+2. **Mọi frame outside đều có keyframe** (`outside: true`); thiếu thì được tự điền trước khi gửi.
+3. **Box 7-DoF:** chỉ xoay yaw, `rx = ry = 0`.
+4. **Quyền riêng tư:** không xin quyền `cookies`, không đọc / lưu token hay mật khẩu; chỉ có host của CVAT (`https://cvat-a.example.com/*`); request là `fetch` cùng origin với `credentials: 'include'`; token CSRF chỉ đọc đúng lúc gửi, không lưu.
+5. **Dữ liệu không rời tab:** không export file, không telemetry, không tải thư viện lúc chạy, không gửi gì tới host khác ngoài CVAT.
+6. Không giả header hay giả nhịp thao tác người; thay đổi ghi qua API chuẩn của CVAT dưới tài khoản người dùng.
+
+## Cài đặt
+
+Cần Node.js 20+.
+
+```bash
+npm install
+npm run build           # Edge / Chrome → dist/
+npm run build:firefox   # Firefox      → dist-firefox/
+```
+
+### Edge / Chrome
+
+1. Mở `edge://extensions` (hoặc `chrome://extensions`) → bật **Developer mode**.
+2. **Load unpacked** → chọn thư mục `dist`.
+3. Mở một job dạng `https://<host>/tasks/<id>/jobs/<id>`, bấm biểu tượng extension để bật tool.
+4. Cập nhật: build lại rồi bấm **Reload** trên thẻ extension (giữ nguyên thư mục để ID extension không đổi), sau đó tải lại tab CVAT.
+
+### Firefox
+
+Bản Firefox là **bản thử**: đã build và qua `web-ext lint` (0 lỗi) nhưng **chưa được chạy trong Firefox thật**.
+
+```bash
+npm run lint:firefox     # kiểm tra manifest và mã
+npm run start:firefox    # mở Firefox với extension tạm (cần Firefox cài sẵn)
+```
+
+Hoặc `about:debugging` → *This Firefox* → **Load Temporary Add-on** → chọn `dist-firefox/manifest.json` (mất khi tắt Firefox). Lần bấm biểu tượng đầu tiên Firefox sẽ hỏi cấp quyền truy cập host của CVAT. Cài lâu dài cần ký (`npm run package:firefox` tạo file zip để nộp ký, loại không công khai) hoặc dùng Firefox Developer Edition / ESR. Lưu ý ký qua Mozilla nghĩa là mã nguồn extension được tải lên Mozilla.
+
+## Sử dụng nhanh
+
+- **Vào ca** trước khi làm để có KPI; **Ra ca** khi xong.
+- Tab **Bảng object**: bấm một dòng để mở Batch Review của object đó. Hoặc nhập ID ở ô *Object ID*.
+- Sửa trên các hình chiếu (kéo trong box = dời, kéo cạnh = đổi cỡ, giữ **Alt** kéo = xoay). Mọi sửa đổi nằm trong **nháp** (chỉ trong bộ nhớ) cho tới khi bấm **⬆ Upload lên CVAT…**.
+- Sau khi upload, tool tự quay về Batch Review. **Tải lại tab CVAT (F5) trước khi bấm Save ở CVAT**, vì giao diện CVAT còn giữ bản cũ.
+
+### Phím tắt mặc định (đổi được ở tab *Phím tắt*)
+
+| Phím | Tác dụng |
+| --- | --- |
+| `←` `→` | Cửa sổ frame trước / sau |
+| `↑` `↓` | Object trước / sau (ID ∓ 1) |
+| `,` `.` | Chọn cột frame bên trái / phải |
+| `K` | Khoá / mở khoá keyframe |
+| `O` | Gắn keyframe outside / đưa object trở lại |
+| `G` | Ground snap (đáy box chạm mặt đường) |
+| `A` / `I` | Chấp nhận / bỏ qua gợi ý sửa box |
+| `F` | Focus: thu nhỏ tool, zoom cận cảnh object trong CVAT |
+| `+` `-` `0` | Zoom vào / ra / về vừa object |
+| `Ctrl+Z` `Ctrl+Y` | Hoàn tác / làm lại |
+| `` ` `` | Thu nhỏ / mở lại cửa sổ tool (dùng được cả ở trang CVAT) |
+
+`K`, `O`, `G`, `A`, `I` tác dụng lên **cột frame đang trỏ chuột** (viền xanh), nếu không thì frame đã chọn, và với `G` / `A` / `I` là cả cửa sổ.
+
+## Phát triển
+
+```bash
+npm test               # vitest, dùng dữ liệu tổng hợp, không cần CVAT
+npm run typecheck      # tsc --noEmit
+npm run build:all      # cả hai bản
+```
+
+- **Công nghệ:** TypeScript + Vite, giao diện React trong iframe của extension (tránh CSP của trang), canvas 2D cho hình chiếu điểm, `fflate` giải nén ảnh camera. Mọi thứ đóng gói sẵn, không tải gì lúc chạy.
+- **Kiến trúc:** content script là điểm **duy nhất** gọi API CVAT; panel (iframe) nói chuyện với content script qua `postMessage` có kiểm tra origin và mã phiên ngẫu nhiên; background chỉ bật / tắt theo tab và chạy một hàm nhỏ trong ngữ cảnh trang để zoom camera 3D của CVAT.
+
+```
+src/
+  background/   bật tắt theo tab; chạy hàm focus camera 3D trong ngữ cảnh trang
+  content/      cvatClient (đọc; ghi chỉ update/create, dry-run mặc định), uploader, cửa sổ nổi, đọc / điều khiển DOM của CVAT
+  panel/        giao diện React: bảng object, Batch Review, thuộc tính, upload, ca / KPI, phím tắt
+  shared/       logic thuần (nội suy, luật, gợi ý, ground snap, upload, KPI, keymap…) — phần lớn code test được
+test/           unit test với fixtures tự tạo (không dùng dữ liệu thật)
+public/         manifest.json (Edge / Chrome) và manifest.firefox.json
+PLAN.md         kế hoạch đã duyệt        GUIDELINE.md  guideline gán nhãn gốc
+NOTES.md        nhật ký quyết định, kết quả khảo sát và những gì chưa xác minh
+```
+
+Test dùng dữ liệu tổng hợp; một số test đối chiếu dữ liệu thật tự bỏ qua nếu không có thư mục `backups/` (thư mục này **không bao giờ được commit**, đã nằm trong `.gitignore`).
+
+## Giới hạn đã biết
+
+- Tool dựa vào **nội bộ của CVAT 2.77.1** (tên class trong DOM, kho trạng thái React, hàm `focus` của canvas 3D); đổi phiên bản CVAT có thể phải sửa.
+- Chưa tạo track mới, chưa nội suy cải tiến / bake tối thiểu, chưa có đề xuất cuboid đầy đủ (fit L-shape, mặt đường toàn cảnh); chưa chặn upload khi thiếu attribute bắt buộc.
+- Bản Firefox chưa chạy thử thật; tính năng điều khiển giao diện CVAT (sự kiện giả lập, tin nhắn giữa iframe và content script) là chỗ dễ khác nhau giữa trình duyệt.
+- Gợi ý attribute dựa vào kích thước box (ngưỡng cố định trong code); quy tắc cho Animal / Obstacle chưa kiểm trên dữ liệu thật.
+
+Chi tiết từng quyết định và số liệu khảo sát nằm trong [`NOTES.md`](NOTES.md).
