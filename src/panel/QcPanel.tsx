@@ -1,10 +1,14 @@
 import { useMemo } from 'react';
 import { notesOfJob, notesToRows } from '../shared/qc';
 import { buildXlsx } from '../shared/xlsx';
+import type { CvatTrack } from '../shared/types';
+import { QcCompare } from './QcCompare';
 import { qcStore, useQcMode, useQcNotes } from './qcStore';
 
 /** Danh sách ghi chú QC của job, xuất Excel (ID, frame, note), bật/tắt QC mode. */
-export function QcPanel({ jobId, count, onOpen }: { jobId: number; count: number; onOpen: (num: number, frame: number) => void }) {
+export function QcPanel({ jobId, count, tracks, labels, start, stop, onOpen }: {
+  jobId: number; count: number; tracks: CvatTrack[]; labels: string[]; start: number; stop: number; onOpen: (num: number, frame: number) => void;
+}) {
   const all = useQcNotes();
   const mode = useQcMode();
   const list = useMemo(() => notesOfJob(all, jobId), [all, jobId]);
@@ -55,6 +59,7 @@ export function QcPanel({ jobId, count, onOpen }: { jobId: number; count: number
           </tbody>
         </table>
       )}
+      <QcCompare jobId={jobId} tracks={tracks} labels={labels} start={start} stop={stop} onOpen={onOpen} />
     </>
   );
 }

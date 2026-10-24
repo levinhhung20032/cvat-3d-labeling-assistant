@@ -17,8 +17,10 @@ import { JobInfo } from './JobInfo';
 import { KeysPanel } from './KeysPanel';
 import { UploadDialog } from './UploadDialog';
 import { QcPanel } from './QcPanel';
+import { DynSizePanel } from './DynSizePanel';
+import { dynClassStore } from './dynClassStore';
 import { ShiftPanel } from './ShiftPanel';
-import { attrKey, motionKey, overlapKey, shiftStore, useIgnored, useShifts } from './shiftStore';
+import { attrKey, issueKey, motionKey, overlapKey, shiftStore, useIgnored, useShifts } from './shiftStore';
 import { parseLabelSpecs } from '../shared/attributes';
 import { suggestAttributes } from '../shared/attrSuggest';
 import { fmtDuration, shiftName, computeKpi } from '../shared/shift';
@@ -104,7 +106,23 @@ try { VERSION = api.runtime.getManifest().version; } catch { /* extension vừa 
 const EMPTY: Draft = { work: null, edited: new Set<string>(), undo: [], redo: [] };
 
 type State = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ok'; data: Data };
-type Tab = 'objects' | 'review' | 'shift' | 'qc' | 'keys' | 'job';
+type Tab = 'objects' | 'review' | 'shift' | 'qc' | 'dyn' | 'keys' | 'job';
+
+/** Giao diện chung: nút bo góc, tab rõ ràng, thanh đầu (tiêu đề, ca, tab, nút upload) dính ở đầu khi cuộn. */
+const STYLE = `
+.cvla-root button { font: inherit; border: 1px solid #9aa4b2; background: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+.cvla-root button:hover:not(:disabled) { background: #eaf1fb; border-color: #5b7db1; }
+.cvla-root button:disabled { opacity: .45; cursor: default; }
+.cvla-root input[type=text], .cvla-root input:not([type]), .cvla-root select { font: inherit; border: 1px solid #9aa4b2; border-radius: 4px; padding: 1px 4px; }
+.cvla-root input:focus-visible, .cvla-root select:focus-visible, .cvla-root button:focus-visible { outline: 2px solid #2b6cb0; outline-offset: 1px; }
+.cvla-root table th { font-weight: 600; background: #f1f4f8; padding: 3px 6px; }
+.cvla-root table td { padding: 2px 6px; }
+.cvla-root fieldset { border-radius: 6px; }
+.cvla-root .cvla-tab { border-radius: 4px 4px 0 0; border-bottom: 2px solid transparent; background: #f1f4f8; }
+.cvla-root .cvla-tab.cvla-tab-on { background: #1f2937; color: #fff; border-color: #1f2937; font-weight: 700; }
+.cvla-root .cvla-tab.cvla-tab-on:hover:not(:disabled) { background: #1f2937; }
+.cvla-head { position: sticky; top: 0; z-index: 20; background: #fff; padding-bottom: 4px; border-bottom: 1px solid #d5dbe3; margin: -10px -10px 8px; padding: 8px 10px 6px; }
+`;
 
 const loadSync = () => { try { return kv.get('cvla-sync') !== '0'; } catch { return true; } };
 
@@ -143,6 +161,7 @@ export function App() {
   const countRef = useRef(0);
   const lastCvatNum = useRef<number | null>(null);
   const lastCvatFrame = useRef<number | null>(null);
+  const toolSelAt = useRef(0); // lúc tool vừa chọn object (CVAT còn báo object cũ trong lúc chuyển)
   const setSync = (v: boolean) => { setSyncState(v); syncRef.current = v; try { kv.set('cvla-sync', v ? '1' : '0'); } catch { /* bỏ qua */ } };
   const [selectedNum, setSelectedNum] = useState<number | null>(null);
   const [startFrame, setStartFrame] = useState(0); // frame đầu của cửa sổ đang xem, để quay lại đúng chỗ
@@ -167,6 +186,7 @@ export function App() {
         setRestorable(restorableRef.current);
         if (!chk.ok && chk.reason !== 'none') { setDraftNote(chk.message); kv.remove(draftKey(m.job.id)); }
         countRef.current = m.annotations.tracks.length;
+        dynClassStore.ensure(m.job.id, m.labels.map((l) => l.name)); // lấy class của job một lần
       } else if (m.type === 'cvatDbl') {
         // Bấm đúp trong CVAT: luôn chọn object đó và chuyển sang Batch Review (không phụ thuộc ô đồng bộ).
         if (m.num >= 1 && m.num <= countRef.current) {
@@ -180,7 +200,7 @@ export function App() {
         }
       } else if (m.type === 'cvat') {
         // Chọn object / đổi frame trong giao diện CVAT → tool chọn đúng object đó.
-        if (syncRef.current && m.num !== null && m.num !== lastCvatNum.current && m.num >= 1 && m.num <= countRef.current) {
+        if (syncRef.current && m.num !== null && m.num !== lastCvatNum.current && Date.now() - toolSelAt.current > 5000 && m.num >= 1 && m.num <= countRef.current) {
           lastCvatNum.current = m.num;
           setSelectedNum(m.num);
           setTab((t) => (t === 'job' || t === 'keys' ? t : 'review'));
@@ -261,6 +281,7 @@ export function App() {
 
   /** Chọn object từ phía tool (ô nhập ID, ↑/↓, bảng object) → chuyển focus bên CVAT sang object đó. */
   const selectFromTool = (num: number) => {
+    toolSelAt.current = Date.now();
     setSelectedNum(num);
     lastCvatNum.current = num; // tiếng vọng từ CVAT không kích hoạt lại
     const w = workRef.current;
@@ -302,12 +323,14 @@ export function App() {
     return m;
   }, [data, work, ignAll]);
   // Chồng lấn CHÉO giữa các object ở mọi frame của job (tính lại khi nháp đổi), bỏ các cặp đã được bỏ qua.
+  const labelNames = useMemo(() => new Map((data?.labels ?? []).map((l) => [l.id, l.name])), [data]);
+  const trackLabels = useMemo(() => (work ? work.tracks.map((t) => labelNames.get(t.label_id) ?? '') : []), [work, labelNames]);
   const overlaps = useMemo(() => {
     if (!data || !work) return [];
     const frames: number[] = [];
     for (let f = data.job.start_frame; f <= data.job.stop_frame; f++) frames.push(f);
-    return findOverlaps(work.tracks, frames).filter((o) => !ignAll.has(overlapKey(data.job.id, o.a, o.b)));
-  }, [data, work, ignAll]);
+    return findOverlaps(work.tracks, frames, work.tracks.map((t) => labelNames.get(t.label_id) ?? '')).filter((o) => !ignAll.has(overlapKey(data.job.id, o.a, o.b)));
+  }, [data, work, ignAll, labelNames]);
   const overlapFrames = useMemo(() => {
     const m = new Map<number, number>();
     for (const o of overlaps) { m.set(o.a, (m.get(o.a) ?? 0) + 1); m.set(o.b, (m.get(o.b) ?? 0) + 1); }
@@ -316,7 +339,7 @@ export function App() {
   const overlapPairs = useMemo(() => groupPairs(overlaps), [overlaps]);
   const rows = useMemo(
     () => (data && work
-      ? buildRows(work, data.labels, data.job.start_frame, data.job.stop_frame, (num, f) => ignAll.has(motionKey(data.job.id, num, f)))
+      ? buildRows(work, data.labels, data.job.start_frame, data.job.stop_frame, (num, f) => ignAll.has(motionKey(data.job.id, num, f)), (num, f, k) => ignAll.has(issueKey(data.job.id, num, f, k)))
       : []),
     [data, work, ignAll],
   );
@@ -329,14 +352,16 @@ export function App() {
   const tabBtn = (t: Tab, label: string) => (
     <button
       onClick={() => setTab(t)}
-      style={{ fontWeight: tab === t ? 700 : 400, marginRight: 4 }}
+      className={tab === t ? 'cvla-tab cvla-tab-on' : 'cvla-tab'}
     >
       {label}
     </button>
   );
 
   return (
-    <div style={{ font: '13px system-ui', padding: 10, color: '#111' }}>
+    <div className="cvla-root" style={{ font: '13px/1.4 system-ui', padding: 10, color: '#111' }}>
+      <style>{STYLE}</style>
+      <div className="cvla-head">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <b>CVAT 3D Assistant · v{VERSION}</b>
         <span>
@@ -372,11 +397,12 @@ export function App() {
           </button>
         )}
       </div>
-      <div style={{ margin: '6px 0' }}>
+      <div style={{ margin: '6px 0 0', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4 }}>
         {tabBtn('objects', 'Bảng object')}
         {tabBtn('review', 'Batch Review')}
         {tabBtn('shift', 'Ca / KPI')}
         {tabBtn('qc', 'QC')}
+        {tabBtn('dyn', 'Dynamic size')}
         {tabBtn('keys', 'Phím tắt')}
         {tabBtn('job', 'Thông tin job')}
         {data && (
@@ -391,6 +417,7 @@ export function App() {
             <button onClick={() => setUploading(true)} style={{ fontWeight: 700, background: draft.edited.size ? '#d7f7d7' : undefined }}>⬆ Upload lên CVAT…</button>
           </span>
         )}
+      </div>
       </div>
       {restorable && data && (
         <div style={{ background: '#e0f2fe', border: '1px solid #38bdf8', padding: '4px 8px', margin: '6px 0' }}>
@@ -409,7 +436,11 @@ export function App() {
         <UploadDialog
           baseline={data.ann} working={work} job={data.job} labels={data.labels}
           onClose={() => setUploading(false)}
-          onUploaded={(tracks) => shiftStore.upload({ time: new Date().toISOString(), jobId: data.job.id, tracks })}
+          onUploaded={(tracks) => {
+            // đã lên CVAT thì không còn là nháp: xóa ngay để lần nạp lại / F5 không hiện lại "bản nháp chưa upload"
+            kv.remove(draftKey(data.job.id)); restorableRef.current = null; setRestorable(null);
+            shiftStore.upload({ time: new Date().toISOString(), jobId: data.job.id, tracks });
+          }}
           onReload={() => {
             setUploading(false);
             setTab('review');
@@ -455,7 +486,8 @@ export function App() {
       )}
       {data && work && tab === 'qc' && (
         <QcPanel
-          jobId={data.job.id} count={work.tracks.length}
+          jobId={data.job.id} count={work.tracks.length} tracks={work.tracks} start={data.job.start_frame} stop={data.job.stop_frame}
+          labels={trackLabels}
           onOpen={(num, frame) => { selectFromTool(num); setStartFrame(frame); setTab('review'); }}
         />
       )}
@@ -473,6 +505,7 @@ export function App() {
           onTrack={(idx, track, frames) => { dispatch({ t: 'track', idx, track, frames }); shiftStore.edit(data.job.id, idx + 1); }}
         />
       )}
+      {data && work && tab === 'dyn' && <DynSizePanel jobId={data.job.id} labels={data.labels} tracks={work.tracks} />}
       {tab === 'shift' && <ShiftPanel />}
       {tab === 'keys' && <KeysPanel map={keymap} setMap={setKeymap} />}
       {data && tab === 'job' && <JobInfo s={summarize(data.job, data.labels, data.ann)} />}

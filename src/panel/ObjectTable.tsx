@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { ObjectRow } from '../shared/table';
 import type { OverlapPair } from '../shared/overlap';
 
-type SortKey = 'num' | 'assigned' | 'outside' | 'missing' | 'jumps' | 'hints' | 'overlap';
+type SortKey = 'num' | 'assigned' | 'outside' | 'missing' | 'jumps' | 'issues' | 'hints' | 'overlap';
 
 export function ObjectTable({ rows, hints, overlapFrames, overlapPairs, onOpen }: { rows: ObjectRow[]; hints: Map<number, number>; overlapFrames: Map<number, number>; overlapPairs: OverlapPair[]; onOpen: (num: number, first: number | null) => void }) {
   const [label, setLabel] = useState('');
@@ -36,7 +36,7 @@ export function ObjectTable({ rows, hints, overlapFrames, overlapPairs, onOpen }
       </div>
       <table style={{ borderCollapse: 'collapse', width: '100%' }}>
         <thead>
-          <tr>{th('num', 'ID')}<th style={{ textAlign: 'left' }}>Nhãn</th>{th('assigned', 'Được gán')}{th('outside', 'Outside')}{th('missing', 'Outside thiếu KF')}{th('jumps', '⚠ đi xa')}{th('hints', '💡 thuộc tính')}{th('overlap', '⚠ chồng lấn')}<th style={{ textAlign: 'left' }}>Khoảng frame</th><th>KF</th></tr>
+          <tr>{th('num', 'ID')}<th style={{ textAlign: 'left' }}>Nhãn</th>{th('assigned', 'Được gán')}{th('outside', 'Outside')}{th('missing', 'Outside thiếu KF')}{th('jumps', '⚠ đi xa')}{th('issues', '⚠ luật QC')}{th('hints', '💡 thuộc tính')}{th('overlap', '⚠ chồng lấn')}<th style={{ textAlign: 'left' }}>Khoảng frame</th><th>KF</th></tr>
         </thead>
         <tbody>
           {shown.map((r) => (
@@ -44,6 +44,7 @@ export function ObjectTable({ rows, hints, overlapFrames, overlapPairs, onOpen }
               <td><b>{r.num}</b> <span style={{ color: "#999", fontSize: 10 }}>db {r.id}</span></td><td>{r.label}</td><td>{r.assigned}</td><td>{r.outside}</td>
               <td style={{ color: r.missing ? '#b00' : undefined, fontWeight: r.missing ? 700 : 400 }}>{r.missing}</td>
               <td style={{ color: r.jumps ? '#a05a00' : undefined, fontWeight: r.jumps ? 700 : 400 }}>{r.jumps}</td>
+              <td style={{ color: r.issues ? '#a0006e' : undefined, fontWeight: r.issues ? 700 : 400 }} title="S scale không đồng bộ, K kích thước ngoài ngưỡng, Z z ngoài ngưỡng, H đổi hướng đột ngột, D quá xa">{r.issues}</td>
               <td style={{ color: h(r) ? '#006b7a' : undefined, fontWeight: h(r) ? 700 : 400 }}>{h(r)}</td>
               <td style={{ color: ov(r) ? '#b45a00' : undefined, fontWeight: ov(r) ? 700 : 400 }} title={overlapPairs.filter((p) => p.a === r.num || p.b === r.num).map((p) => `#${p.a}–#${p.b}: frame ${p.frames.join(', ')} (tối đa ${Math.round(p.max * 100)}%)`).join('\n')}>{ov(r)}</td>
               <td>{r.first === null ? '—' : `${r.first}–${r.last}`}</td><td>{r.keyframes}</td>

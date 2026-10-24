@@ -6,6 +6,7 @@ import {
   applyLocalBox, dragEdge, dragMove, dragRotateRel, dragTilt, dragYawByX, hitTest, identityBox, localBoxOf, type Hit, type LocalBox,
 } from '../shared/edit';
 import { referenceCuboid, stateAt, type FrameState } from '../shared/interp';
+import { upsertKeyframe as upsertKf } from '../shared/edit';
 import {
   bakeKeyframes, removeInnerKeyframes, restoreFrom, setOutsideFrom, setOutsideRange, toggleKeyframe,
   type TrackChange,
@@ -17,7 +18,7 @@ import { parseLabelSpecs } from '../shared/attributes';
 import { AttributePanel } from './AttributePanel';
 import { drawView, localize, STATUS_COLOR, type Local, type Scene, type View } from './render';
 import { Cancelled, pointClouds } from './stores';
-import { ignoreKey, ignoreStore, motionKey, overlapKey, shiftStore, useIgnored } from './shiftStore';
+import { issueKey, ignoreKey, ignoreStore, motionKey, overlapKey, shiftStore, useIgnored } from './shiftStore';
 import { CameraPanel } from './CameraPanel';
 import { qcStore, useQcMode, useQcNotes } from './qcStore';
 import { qcKey } from '../shared/qc';
@@ -25,7 +26,11 @@ import { onAction } from './actions';
 import { fitReport, type FitReport } from '../shared/fit';
 import { groundSnap, tiltFromPlane, type GroundResult } from '../shared/ground';
 import { motionJump, type MotionWarning } from '../shared/motion';
-import { isFixedSize, suggestBox, type Suggestion } from '../shared/suggest';
+import { trackIssues, type FrameIssue, type IssueKind } from '../shared/qcrules';
+import { flagKey, flagState, type FlagMark, type FlagState } from '../shared/qcimport';
+import { qcFlagStore, useFlagMarks, useQcImports } from './qcFlagStore';
+import { suggestBox, type Suggestion } from '../shared/suggest';
+import { defaultDyn, useDynClasses } from './dynClassStore';
 import { propagateSize, sameSize } from '../shared/dynsize';
 import type { OverlapItem } from '../shared/overlap';
 
@@ -46,7 +51,7 @@ const loadPrefs = (): Prefs => {
     const num = (v: unknown, d: number, lo: number, hi: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
     return {
       auto: p.auto ?? true, size: num(p.size, 200, CELL_MIN, CELL_MAX), slabMargin: num(p.slabMargin, 0.5, 0, 3),
-      perWin: Math.round(num(p.perWin, 6, 2, 12)), keyOnly: p.keyOnly === true, tilt: p.tilt !== false,
+      perWin: Math.round(num(p.perWin, 6, 2, 30)), keyOnly: p.keyOnly === true, tilt: p.tilt !== false,
     };
   } catch { return { ...PREFS_DEFAULT }; }
 };
@@ -163,8 +168,14 @@ function Cell({ view, size, loc, st, half, box, misfit, ghost, ground, mark, sce
   );
 }
 
-function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn }: {
+const NO_ISSUES: FrameIssue[] = [];
+interface FileFlag { kind: IssueKind; state: FlagState }
+const NO_FLAGS: FileFlag[] = [];
+
+function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag }: {
+  fileFlags: FileFlag[]; onMarkFlag: (f: number, kind: IssueKind, mark: FlagMark | null) => void;
   tiltOn: boolean;
+  issues: FrameIssue[]; issueIgnored: (kind: string) => boolean; onIgnoreIssue: (f: number, kind: string, on: boolean) => void;
   qcOn: boolean; qcNote: string; onQcNote: (f: number, text: string) => void;
   overlap: { other: number; ratio: number }[]; overlayCubs: Cuboid[]; onIgnoreOverlap: (other: number) => void; onOpenObject: (other: number) => void;
   onToggleOutside: (f: number) => void; onHover: (f: number | null) => void; scene: Scene;
@@ -242,6 +253,11 @@ function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fi
           >{st.status === 'key' ? '🔒' : '🔓'}</button>
         )}
       </div>
+      {VIEWS.map((v) => (
+        <Cell key={v} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={snap?.groundW ?? null} autoSnap={autoSnap} ghost={sug?.box ?? null} misfit={bad?.level === 'misfit'} view={v} size={size} loc={loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} />
+      ))}
+      {!pc && <div style={{ fontSize: 11, padding: 2 }}>{err ? `Lỗi: ${err}` : 'đang tải…'}</div>}
+      {/* cảnh báo / ghi chú đặt DƯỚI các view để các cột luôn thẳng hàng dù số cảnh báo khác nhau */}
       {bad && (
         <div style={{ background: bad.level === 'misfit' ? '#ffe0f7' : '#fff1d6', color: '#5a0040', fontSize: 11, padding: '1px 4px' }} title={bad.message}>
           ⚠ {bad.message}
@@ -274,6 +290,29 @@ function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fi
           <button onClick={(e) => { e.stopPropagation(); onIgnoreOverlap(o.other); }} style={{ padding: '0 4px' }} title="Bỏ qua cặp này ở mọi frame (ví dụ người ngồi trên xe máy)">✖ bỏ qua cặp</button>
         </div>
       ))}
+      {fileFlags.map((ff) => (
+        <div key={ff.kind} style={{ background: ff.state === 'open' ? '#ffd6d6' : ff.state === 'cleared' ? '#dff5df' : '#eee', color: ff.state === 'open' ? '#600' : '#333', fontSize: 11, padding: '1px 4px' }} title="Flag từ file QC đã nạp (tab QC)">
+          QC file: <b>{ff.kind}</b> {ff.state === 'open' ? 'còn lỗi' : ff.state === 'cleared' ? 'đã hết' : ff.state === 'ignore' ? 'bỏ qua' : 'đã sửa'}{' '}
+          {(ff.state === 'open' || ff.state === 'cleared') && (
+            <>
+              <button onClick={(e) => { e.stopPropagation(); onMarkFlag(f, ff.kind, 'ignore'); }} style={{ padding: '0 4px' }}>ignore</button>{' '}
+              <button onClick={(e) => { e.stopPropagation(); onMarkFlag(f, ff.kind, 'fixed'); }} style={{ padding: '0 4px' }}>fixed</button>
+            </>
+          )}
+          {(ff.state === 'ignore' || ff.state === 'fixed') && <button onClick={(e) => { e.stopPropagation(); onMarkFlag(f, ff.kind, null); }} style={{ padding: '0 4px' }}>↺</button>}
+        </div>
+      ))}
+      {issues.map((i) => (issueIgnored(i.kind)
+        ? (
+          <div key={i.kind} style={{ background: '#eee', color: '#555', fontSize: 11, padding: '1px 4px' }}>
+            đã bỏ qua {i.kind}{' '}<button onClick={(e) => { e.stopPropagation(); onIgnoreIssue(f, i.kind, false); }} style={{ padding: '0 4px' }}>hoàn lại</button>
+          </div>
+        ) : (
+          <div key={i.kind} style={{ background: '#f9d4ee', color: '#5a0040', fontSize: 11, padding: '1px 4px' }} title={i.message}>
+            ⚠ <b>{i.kind}</b> {i.message}{' '}
+            <button onClick={(e) => { e.stopPropagation(); onIgnoreIssue(f, i.kind, true); }} style={{ padding: '0 4px' }}>✖ bỏ qua</button>
+          </div>
+        )))}
       {shownMotion && (
         <div style={{ background: '#ffe9c7', color: '#6b3a00', fontSize: 11, padding: '1px 4px' }} title={shownMotion.message}>
           ⚠ {shownMotion.message}{' '}
@@ -292,10 +331,6 @@ function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fi
           <button onClick={(e) => { e.stopPropagation(); onGround(f); }} style={{ padding: '0 4px' }} title="Dời box theo z để đáy chạm mặt đường (phím G)">snap</button>
         </div>
       )}
-      {VIEWS.map((v) => (
-        <Cell key={v} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={snap?.groundW ?? null} autoSnap={autoSnap} ghost={sug?.box ?? null} misfit={bad?.level === 'misfit'} view={v} size={size} loc={loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} />
-      ))}
-      {!pc && <div style={{ fontSize: 11, padding: 2 }}>{err ? `Lỗi: ${err}` : 'đang tải…'}</div>}
     </div>
   );
 }
@@ -343,7 +378,8 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
   const track = ann.tracks[num - 1] ?? null;
   // Danh sách frame cần xem: cả job hoặc khoảng [từ, đến] tự chọn; tùy chọn chỉ giữ keyframe của object đang chọn.
   const [viewFrom, setViewFrom] = useState('');
-  const [viewTo, setViewTo] = useState('');
+  const viewTo = ''; // khoảng xem luôn chạy tới hết job; cửa sổ [a, b] chọn bằng hai ô a → b (a bắt đầu cửa sổ, b - a + 1 = số frame)
+  const forceFirst = useRef(false); // vừa nhập điểm xuất phát a: về trang đầu
   const list = useMemo(() => {
     const a = Math.max(start, Math.min(stop, Number.isInteger(Number(viewFrom)) && viewFrom !== '' ? Number(viewFrom) : start));
     const b = Math.max(a, Math.min(stop, Number.isInteger(Number(viewTo)) && viewTo !== '' ? Number(viewTo) : stop));
@@ -375,10 +411,11 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
   const vp = useViewport();
   const row = rows.find((r) => r.num === num);
   // Dynamic size theo từng object (nhớ cục bộ). Mặc định: bật cho nhãn co giãn, tắt cho Vehicle / Obstacle.
+  const dynClasses = useDynClasses(job.id);
   const dynKey = `cvla-dyn:${job.id}:${num}`;
   const [, bumpDyn] = useState(0);
-  const dyn = (() => { try { const v = kv.get(dynKey); if (v === '1') return true; if (v === '0') return false; } catch { /* bỏ qua */ } return !isFixedSize(row?.label ?? ''); })();
-  const setDyn = (v: boolean) => { try { kv.set(dynKey, v ? '1' : '0'); } catch { /* bỏ qua */ } bumpDyn((x) => x + 1); };
+  const dyn = (() => { try { const v = kv.get(dynKey); if (v === '1') return true; if (v === '0') return false; } catch { /* bỏ qua */ } return dynClasses[row?.label ?? ''] ?? defaultDyn(row?.label ?? ''); })();
+  const setDyn = (v: boolean) => { try { kv.set(dynKey, v ? '1' : '0'); } catch { /* bỏ qua */ } bumpDyn((x) => x + 1); if (!v) unifySize(true); };
   /** Ghi cuboid mới vào frame f. Dynamic size tắt mà kích thước đổi → áp kích thước mới cho mọi keyframe. */
   const commit = (f: number, cub: Cuboid) => {
     const cur = track ? stateAt(track, f).cuboid : null;
@@ -391,7 +428,28 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
   const anchorRef = useRef(frames[0] ?? start);
   anchorRef.current = frames[0] ?? start;
   const listKey = `${list.length}:${list[0]}:${list[list.length - 1]}`;
-  useEffect(() => { setK(pageOf(list, anchorRef.current, prefs.perWin, overlap)); }, [prefs.perWin, prefs.keyOnly, listKey, num]);
+  useEffect(() => {
+    if (forceFirst.current) { forceFirst.current = false; setK(0); return; }
+    setK(pageOf(list, anchorRef.current, prefs.perWin, overlap));
+  }, [prefs.perWin, prefs.keyOnly, listKey, num]);
+  // Hai ô a → b luôn hiện cửa sổ đang xem; nhập a = điểm xuất phát (b tự thành a + số frame - 1), sửa b = đổi số frame hiển thị.
+  const [winA, setWinA] = useState('');
+  const [winB, setWinB] = useState('');
+  useEffect(() => { setWinA(String(frames[0] ?? '')); setWinB(String(frames[frames.length - 1] ?? '')); }, [framesKey]);
+  const commitA = () => {
+    const a = Number(winA);
+    if (winA.trim() === '' || !Number.isInteger(a) || a < start || a > stop) { setWinA(String(frames[0] ?? '')); return; }
+    if (a === frames[0]) return;
+    forceFirst.current = true;
+    setViewFrom(a === start ? '' : String(a));
+    if (a === start && viewFrom === '') { forceFirst.current = false; setK(0); }
+  };
+  const commitB = () => {
+    const b = Number(winB), a = frames[0] ?? start;
+    if (winB.trim() === '' || !Number.isInteger(b) || b < a + 1 || b > stop) { setWinB(String(frames[frames.length - 1] ?? '')); return; }
+    const n = prefs.keyOnly ? list.filter((f) => f >= a && f <= b).length : b - a + 1;
+    if (n >= 2) updatePrefs({ ...prefs, perWin: Math.min(30, n) });
+  };
   useEffect(() => { onView(frames); }, [framesKey]);
   // Chồng lấn của object đang chọn ở các frame đang xem, và box của object kia để vẽ lên ô.
   const ovAt = useMemo(() => {
@@ -438,6 +496,26 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
   }, [baseHalf, track, prefs.slabMargin]);
   const locHalf = baseHalf / ZOOM_MIN;
 
+  // Luật QC (S K Z H D) tính trên cả job để so mốc kích thước và frame liền trước đúng.
+  const issueMap = useMemo(
+    () => (track ? trackIssues(track, row?.label ?? '', Array.from({ length: stop - start + 1 }, (_, i) => start + i)) : new Map<number, FrameIssue[]>()),
+    [track, row?.label, start, stop],
+  );
+  // Flag từ file QC đã nạp cho object này, theo frame; "đã hết" = tool không còn thấy lỗi (ở dữ liệu hiện tại, kể cả nháp).
+  const qcImports = useQcImports();
+  const flagMarks = useFlagMarks();
+  const fileFlags = useMemo(() => {
+    const m = new Map<number, FileFlag[]>();
+    for (const fl of qcImports[String(job.id)]?.flags ?? []) {
+      if (fl.num !== num) continue;
+      const det = fl.kind === 'O'
+        ? overlaps.some((o) => o.frame === fl.frame && (o.a === num || o.b === num))
+        : (issueMap.get(fl.frame) ?? []).some((i) => i.kind === fl.kind);
+      m.set(fl.frame, [...(m.get(fl.frame) ?? []), { kind: fl.kind, state: flagState(flagMarks[flagKey(job.id, fl)], det) }]);
+    }
+    return m;
+  }, [qcImports, flagMarks, issueMap, overlaps, job.id, num]);
+  const openIssues = (f: number) => (issueMap.get(f) ?? NO_ISSUES).filter((i) => !ign.has(issueKey(job.id, num, f, i.kind)));
   const cols = useMemo(
     () => frames.map((f) => ({
       f,
@@ -482,23 +560,57 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
     apply(track ? toggleKeyframe(track, f) : null, `Đã đổi keyframe frame ${f}.`,
       'Không đổi được: chỉ bật/tắt keyframe ở frame có box; không gỡ keyframe outside hoặc keyframe đầu tiên của track.');
   /** Gắn keyframe outside tại frame f (tới keyframe kế tiếp); frame đang outside thì đưa object trở lại. */
+  // Sao lưu box trước khi đặt outside (nhất là frame đầu track) để khi đưa object trở lại thì có đúng vị trí cũ.
+  const bakKey = `cvla-bak:${job.id}:${num}`;
+  const readBak = (): Record<string, Cuboid> => { try { return JSON.parse(kv.get(bakKey) ?? '{}') as Record<string, Cuboid>; } catch { return {}; } };
+  const saveBak = (fr: number[]) => {
+    if (!track) return;
+    const m = readBak();
+    for (const f of fr) { const c = stateAt(track, f).cuboid; if (c) m[String(f)] = c; }
+    try { kv.set(bakKey, JSON.stringify(m)); } catch { /* bỏ qua */ }
+  };
   const toggleOutside = (f: number) => {
     if (!track) return;
     const st = stateAt(track, f);
     const isOut = st.status === 'outside' || st.status === 'outside-key';
-    const res = isOut ? restoreFrom(track, f, stop) : setOutsideFrom(track, f);
+    if (!isOut) saveBak([f]);
+    const bak = isOut ? readBak()[String(f)] : undefined;
+    const res = isOut ? (bak ? { track: upsertKf(track, f, bak, false), frames: [f] } : restoreFrom(track, f, stop)) : setOutsideFrom(track, f);
     apply(res, isOut ? `Frame ${f}: đã đưa object trở lại (có box).` : `Frame ${f}: đã gắn keyframe outside (tới keyframe kế tiếp).`,
       'Không đổi được: cần frame có box hoặc frame outside có box tham chiếu.');
   };
+  // Chế độ 3: chọn khoảng bằng chuột. Bật rồi bấm tiêu đề cột đầu và cột cuối (có thể ở hai cửa sổ khác nhau: đổi cửa sổ rồi bấm tiếp); Esc để hủy.
+  const [pick, setPick] = useState<{ first: number | null } | null>(null);
+  const onPickSelect = (f: number) => {
+    if (!pick) { setSelFrame(f); return; }
+    setSelFrame(f);
+    if (pick.first === null) { setPick({ first: f }); setNote(`Đã chọn đầu khoảng: frame ${f}. Bấm tiêu đề cột cuối khoảng (Esc để hủy).`); return; }
+    const a = Math.min(pick.first, f), b = Math.max(pick.first, f);
+    setPick(null);
+    setRangeFrom(String(a)); setRangeTo(String(b));
+    if (track) {
+      saveBak(Array.from({ length: b - a + 1 }, (_, i) => a + i));
+      apply(setOutsideRange(track, a, b, stop), `Đã đặt outside ${'{n}'} frame trong ${a}–${b}. Hoàn tác được.`, 'Không có frame nào trong khoảng này đổi được.');
+    }
+  };
+  useEffect(() => {
+    if (!pick) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setPick(null); setNote('Đã hủy chọn khoảng.'); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pick]);
   const outsideRange = () => {
     const r = range();
+    if (r && track) saveBak(Array.from({ length: Math.abs(r[1] - r[0]) + 1 }, (_, i) => Math.min(r[0], r[1]) + i));
     if (r && track) apply(setOutsideRange(track, r[0], r[1], stop), `Đã đặt outside ${'{n}'} frame trong ${r[0]}–${r[1]}. Hoàn tác được.`, 'Không có frame nào trong khoảng này đổi được.');
   };
-  const unifySize = () => {
-    const cur = track && selFrame !== null ? stateAt(track, selFrame).cuboid : null;
+  /** Áp kích thước của frame đang chọn (hoặc frame có box đầu tiên trong cửa sổ) cho mọi keyframe; auto = vừa tắt Dynamic size. */
+  const unifySize = (auto = false) => {
+    const src = selFrame ?? (track ? frames.find((f) => stateAt(track, f).cuboid) ?? null : null);
+    const cur = track && src !== null ? stateAt(track, src).cuboid : null;
     if (!track || !cur) { setNote('Chọn frame có box (bấm tiêu đề cột) để lấy kích thước.'); return; }
     const r = propagateSize(track, cur);
-    apply(r.frames.length ? { track: r.track, frames: r.frames } : null, `Đã áp kích thước frame ${selFrame} cho ${'{n}'} keyframe. Hoàn tác được.`, 'Mọi keyframe đã cùng kích thước.');
+    apply(r.frames.length ? { track: r.track, frames: r.frames } : null, `Đã áp kích thước frame ${src} cho ${'{n}'} keyframe. Hoàn tác được.`, 'Mọi keyframe đã cùng kích thước.');
   };
   const unlockInner = () => {
     const r = range();
@@ -615,7 +727,9 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
 
   return (
     <>
-      <div style={{ marginBottom: 6, display: 'flex', flexWrap: 'wrap', gap: '4px 12px', alignItems: 'center' }}>
+      <div style={{ marginBottom: 6, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'stretch' }}>
+        <fieldset style={{ border: '1px solid #c5ccd6', margin: 0, padding: '1px 8px 4px', display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center' }}>
+          <legend style={{ fontSize: 11, fontWeight: 700, color: '#456', padding: '0 4px' }}>Object & cửa sổ</legend>
         <span><IdBox value={num} max={max} onCommit={setSelectedNum} />{' '}
           {row && <b>{row.label}</b>} {row && <span style={{ color: '#555' }}>(gán {row.assigned}, outside {row.outside}, thiếu KF {row.missing}, ID database {row.id})</span>}</span>
         <span>
@@ -623,6 +737,17 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
           Cửa sổ {k + 1}/{nWin} (frame {frames[0]}–{frames[frames.length - 1]}){' '}
           <button disabled={k >= nWin - 1} onClick={() => setK(k + 1)}>▶</button>
         </span>
+        <span title="Cửa sổ đang hiện. Nhập a: bắt đầu cửa sổ từ frame a, b tự thành a + số frame - 1 (mặc định 6 frame). Sửa b: đổi số frame hiển thị (b - a + 1). Enter để áp dụng.">
+          Hiện frame{' '}
+          <input value={winA} onChange={(e) => setWinA(e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} onBlur={commitA} onFocus={(e) => e.target.select()} size={3} style={{ width: 44 }} /> →{' '}
+          <input value={winB} onChange={(e) => setWinB(e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} onBlur={commitB} onFocus={(e) => e.target.select()} size={3} style={{ width: 44 }} />{' '}
+          ({frames.length} frame){' '}
+          <label><input type="checkbox" checked={prefs.keyOnly} onChange={(e) => updatePrefs({ ...prefs, keyOnly: e.target.checked })} /> chỉ keyframe</label>
+          {viewFrom !== '' && <button style={{ marginLeft: 4 }} onClick={() => { forceFirst.current = true; setViewFrom(''); }} title="Quay về đầu job">⟲ từ đầu</button>}
+        </span>
+        </fieldset>
+        <fieldset style={{ border: '1px solid #c5ccd6', margin: 0, padding: '1px 8px 4px', display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center' }}>
+          <legend style={{ fontSize: 11, fontWeight: 700, color: '#456', padding: '0 4px' }}>Hiển thị</legend>
         <span>
           Zoom <button onClick={() => zoomBy(1 / 1.25)}>−</button> <b>{Math.round(zoom * 100)}%</b>{' '}
           <button onClick={() => zoomBy(1.25)}>+</button> <button onClick={() => setZoom(1)}>Vừa object</button>
@@ -635,42 +760,18 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
             onChange={(e) => updatePrefs({ ...prefs, auto: false, size: Number(e.target.value) })}
           /> {size}px
         </span>
-        <label title="Cho box nghiêng (roll / pitch): giữ Alt rồi kéo ở view Bên (pitch) / view Trước (roll), và Ground snap (G) nghiêng box song song mặt đường dốc. Tắt: Alt+kéo ở các view này chỉ xoay yaw và G chỉ dời z."><input type="checkbox" checked={prefs.tilt} onChange={(e) => updatePrefs({ ...prefs, tilt: e.target.checked })} /> nghiêng theo mặt đường</label>
-        <label title="QC mode: hiện ô ghi chú ở mỗi cột frame (xuất Excel ở tab QC)" style={{ fontWeight: 600 }}><input type="checkbox" checked={qcOn} onChange={(e) => qcStore.setMode(e.target.checked)} /> QC</label>
-        <span title="Số frame trên mỗi trang. Mặc định 6 (mỗi trang chung 1 frame với trang kề).">
-          Số frame{' '}
-          <select value={prefs.perWin} onChange={(e) => updatePrefs({ ...prefs, perWin: Number(e.target.value) })}>
-            {[2, 3, 4, 5, 6, 7, 8, 9, 10, 12].map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </span>
-        <span title="Chỉ xem các frame trong khoảng này (để trống = cả job). Bật 'chỉ keyframe' để bỏ qua frame nội suy.">
-          Xem{' '}
-          <input value={viewFrom} onChange={(e) => setViewFrom(e.target.value.replace(/D/g, ''))} placeholder={String(start)} size={3} style={{ width: 44 }} /> →{' '}
-          <input value={viewTo} onChange={(e) => setViewTo(e.target.value.replace(/D/g, ''))} placeholder={String(stop)} size={3} style={{ width: 44 }} />{' '}
-          <label><input type="checkbox" checked={prefs.keyOnly} onChange={(e) => updatePrefs({ ...prefs, keyOnly: e.target.checked })} /> chỉ keyframe</label>
-        </span>
         <span title="Độ dày lát cắt ở view Bên / Trước = nửa bề rộng box + biên này. Giảm để bớt tường và vật ở xa hai bên.">
           Lát cắt +{' '}
           <input type="range" min={0} max={3} step={0.1} value={prefs.slabMargin} onChange={(e) => updatePrefs({ ...prefs, slabMargin: Number(e.target.value) })} /> {prefs.slabMargin.toFixed(1)}m
         </span>
-        <label title="Cảnh báo box không bao đúng cụm điểm (điểm lọt ra ngoài box) hoặc dưới 6 điểm"><input type="checkbox" checked={warn} onChange={(e) => setWarn(e.target.checked)} /> cảnh báo lệch</label>
-        {warn && (misfitFrames.length > 0 || sparseFrames.length > 0) && (
-          <span style={{ color: '#a0006e', fontWeight: 600 }}>
-            ⚠ {misfitFrames.length ? `lệch: frame ${misfitFrames.join(', ')}` : ''}{misfitFrames.length && sparseFrames.length ? ' · ' : ''}{sparseFrames.length ? `ít điểm: frame ${sparseFrames.join(', ')}` : ''}
-          </span>
-        )}
-        {cols.some((c) => c.mot && !ign.has(motionKey(job.id, num, c.f))) && (
-          <span style={{ color: '#a05a00', fontWeight: 600 }}>
-            ⚠ đi xa bất thường: frame {cols.filter((c) => c.mot && !ign.has(motionKey(job.id, num, c.f))).map((c) => c.f).join(', ')}
-          </span>
-        )}
-        <span>cửa sổ: {loaded.size}/{frames.length} · đã tải trước: {cached}/{stop - start + 1}</span>
-      </div>
-      <div style={{ marginBottom: 6, display: 'flex', flexWrap: 'wrap', gap: '4px 12px', alignItems: 'center', background: '#f4f4f4', padding: '4px 6px' }}>
+        <label title="Cho box nghiêng (roll / pitch): giữ Alt rồi kéo ở view Bên (pitch) / view Trước (roll), và Ground snap (G) nghiêng box song song mặt đường dốc. Tắt: Alt+kéo ở các view này chỉ xoay yaw và G chỉ dời z."><input type="checkbox" checked={prefs.tilt} onChange={(e) => updatePrefs({ ...prefs, tilt: e.target.checked })} /> nghiêng theo mặt đường</label>
+        </fieldset>
+        <fieldset style={{ border: '1px solid #c5ccd6', margin: 0, padding: '1px 8px 4px', display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center', background: '#f4f4f4' }}>
+          <legend style={{ fontSize: 11, fontWeight: 700, color: '#456', padding: '0 4px' }}>Keyframe & kích thước</legend>
         <label title="BẬT: kích thước nội suy giữa các keyframe. TẮT: đổi kích thước ở một frame thì áp cho mọi keyframe của object." style={{ fontWeight: 600 }}>
           <input type="checkbox" checked={dyn} onChange={(e) => setDyn(e.target.checked)} /> Dynamic size
         </label>
-        {!dyn && <button disabled={selFrame === null} onClick={unifySize} title="Lấy kích thước của frame đang chọn áp cho mọi keyframe của object (hoàn tác được)">Đồng bộ size theo frame {selFrame ?? '…'}</button>}
+        {!dyn && <button disabled={selFrame === null} onClick={() => unifySize()} title="Lấy kích thước của frame đang chọn áp cho mọi keyframe của object (hoàn tác được)">Đồng bộ size theo frame {selFrame ?? '…'}</button>}
         <b>Keyframe</b>
         <span>
           frame{' '}
@@ -680,13 +781,26 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
         <button onClick={unlockInner} title="Gỡ mọi keyframe nằm hẳn bên trong khoảng, giữ hai đầu mút; frame về nội suy">🔓 Mở khoá KF giữa</button>
         <button onClick={() => lockAll(false)} title="Biến mọi frame có box trong khoảng thành keyframe (giá trị giữ nguyên)">🔒 Khoá tất cả thành KF</button>
         <button onClick={() => lockAll(true)} title="Như trên nhưng cho cả track">🔒 Cả track</button>
-        <span style={{ borderLeft: '1px solid #bbb', height: 18 }} />
+        <span style={{ color: '#555' }}>· 🔒/🔓 trên tiêu đề cột hoặc phím K: khoá/mở khoá frame đang chọn</span>
+
+        </fieldset>
+        <fieldset style={{ border: '1px solid #c5ccd6', margin: 0, padding: '1px 8px 4px', display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center', background: '#fff4f4' }}>
+          <legend style={{ fontSize: 11, fontWeight: 700, color: '#456', padding: '0 4px' }}>Outside</legend>
         <button
           disabled={selFrame === null}
           onClick={() => selFrame !== null && toggleOutside(selFrame)}
           title="Phím O. Frame có box → outside từ frame này tới keyframe kế tiếp; frame outside → đưa object trở lại. Chọn frame bằng cách bấm tiêu đề cột."
-        >⛔ Gắn KF outside / trở lại — frame {selFrame ?? '…'} (O)</button>
-        <span style={{ borderLeft: '1px solid #bbb', height: 18 }} />
+        >① ⛔ Từ frame đang chọn / trở lại — frame {selFrame ?? '…'} (O)</button>
+        <button onClick={outsideRange} title="Đặt outside cho mọi frame có box trong khoảng từ → đến; frame ngay sau khoảng giữ nguyên">② ⛔ Cả khoảng nhập tay</button>
+        <button
+          onClick={() => { if (pick) { setPick(null); setNote('Đã hủy chọn khoảng.'); } else { setPick({ first: null }); setNote('Chọn khoảng: bấm tiêu đề cột ĐẦU khoảng (Esc để hủy).'); } }}
+          style={{ background: pick ? '#ffd9d9' : undefined, fontWeight: pick ? 700 : 400 }}
+          title="Bấm rồi bấm tiêu đề hai cột (đầu và cuối khoảng): mọi frame có box trong khoảng thành outside"
+        >{pick ? (pick.first === null ? '③ Bấm cột đầu…' : `③ Bấm cột cuối (từ ${pick.first})…`) : '③ ⛔ Chọn khoảng bằng chuột'}</button>
+        <span style={{ color: '#555', fontSize: 11 }}>(② lấy khoảng ở ô frame → của nhóm Keyframe)</span>
+        </fieldset>
+        <fieldset style={{ border: '1px solid #c5ccd6', margin: 0, padding: '1px 8px 4px', display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center', background: '#f0fbff' }}>
+          <legend style={{ fontSize: 11, fontWeight: 700, color: '#456', padding: '0 4px' }}>Gợi ý & mặt đất</legend>
         <button
           onClick={acceptSelectedOrAll}
           disabled={![...sugs.values()].some(Boolean)}
@@ -705,8 +819,30 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
         <label title="Sau mỗi lần dời / đổi cỡ box bằng chuột, tự đặt lại độ cao cho đáy chạm mặt đường tại vị trí mới">
           <input type="checkbox" checked={autoSnap} onChange={(e) => setAutoSnap(e.target.checked)} /> tự bám mặt đất khi kéo
         </label>
-        <button onClick={outsideRange} title="Đặt outside cho mọi frame có box trong khoảng từ → đến; frame ngay sau khoảng giữ nguyên">⛔ Outside cả khoảng</button>
-        <span style={{ color: '#555' }}>· 🔒/🔓 trên tiêu đề cột hoặc phím K: khoá/mở khoá frame đang chọn</span>
+        </fieldset>
+        <fieldset style={{ border: '1px solid #c5ccd6', margin: 0, padding: '1px 8px 4px', display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center' }}>
+          <legend style={{ fontSize: 11, fontWeight: 700, color: '#456', padding: '0 4px' }}>QC & cảnh báo</legend>
+        <label title="QC mode: hiện ô ghi chú ở mỗi cột frame (xuất Excel ở tab QC)" style={{ fontWeight: 600 }}><input type="checkbox" checked={qcOn} onChange={(e) => qcStore.setMode(e.target.checked)} /> QC</label>
+        <label title="Cảnh báo box không bao đúng cụm điểm (điểm lọt ra ngoài box) hoặc dưới 6 điểm"><input type="checkbox" checked={warn} onChange={(e) => setWarn(e.target.checked)} /> cảnh báo lệch</label>
+        {warn && (misfitFrames.length > 0 || sparseFrames.length > 0) && (
+          <span style={{ color: '#a0006e', fontWeight: 600 }}>
+            ⚠ {misfitFrames.length ? `lệch: frame ${misfitFrames.join(', ')}` : ''}{misfitFrames.length && sparseFrames.length ? ' · ' : ''}{sparseFrames.length ? `ít điểm: frame ${sparseFrames.join(', ')}` : ''}
+          </span>
+        )}
+        {cols.some((c) => openIssues(c.f).length > 0) && (
+          <span style={{ color: '#a0006e', fontWeight: 600 }} title="Luật QC: S scale không đồng bộ, K kích thước ngoài ngưỡng, Z z ngoài ngưỡng, H đổi hướng đột ngột, D quá xa">
+            ⚠ QC: {cols.filter((c) => openIssues(c.f).length).map((c) => `${c.f}(${openIssues(c.f).map((i) => i.kind).join('')})`).join(', ')}
+          </span>
+        )}
+        {cols.some((c) => c.mot && !ign.has(motionKey(job.id, num, c.f))) && (
+          <span style={{ color: '#a05a00', fontWeight: 600 }}>
+            ⚠ đi xa bất thường: frame {cols.filter((c) => c.mot && !ign.has(motionKey(job.id, num, c.f))).map((c) => c.f).join(', ')}
+          </span>
+        )}
+        </fieldset>
+      </div>
+      <div style={{ marginBottom: 6, display: 'flex', flexWrap: 'wrap', gap: '4px 12px', alignItems: 'center' }}>
+        <span>cửa sổ: {loaded.size}/{frames.length} · đã tải trước: {cached}/{stop - start + 1}</span>
         {note && <span style={{ color: '#7a4b00' }}>{note}</span>}
       </div>
       <details open style={{ margin: '0 0 6px', background: '#f8fbff', border: '1px solid #cfe0f5', padding: '2px 6px' }}>
@@ -746,9 +882,9 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
             autoSnap={autoSnap} onGround={(f) => { if (!groundFrame(f)) setNote('Không snap được frame này.'); }}
             onSnap={(f, g) => setSnaps((m) => (m.get(f) === g ? m : new Map(m).set(f, g)))}
             onSuggest={(f, s) => setSugs((m) => (m.get(f) === s ? m : new Map(m).set(f, s)))} onAccept={accept}
-            onFit={(f, r) => setFits((m) => (m.get(f) === r ? m : new Map(m).set(f, r)))} onSelect={() => setSelFrame(c.f)}
+            onFit={(f, r) => setFits((m) => (m.get(f) === r ? m : new Map(m).set(f, r)))} onSelect={() => onPickSelect(c.f)}
             onLoaded={(f) => setLoaded((s) => new Set(s).add(f))}
-            onCommit={commit} onZoom={zoomBy} onToggleKf={toggleKf} overlap={ovAt.get(c.f) ?? []} overlayCubs={ovCubs.get(c.f) ?? EMPTY_CUBS} onIgnoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], true); setNote(`Đã bỏ qua cặp #${Math.min(num, o)}–#${Math.max(num, o)} (mọi frame).`); }} onOpenObject={setSelectedNum} tiltOn={prefs.tilt} qcOn={qcOn} qcNote={qcNotes[qcKey(job.id, num, c.f)] ?? ''} onQcNote={(f, t) => qcStore.set(job.id, num, f, t)} onToggleOutside={toggleOutside} onHover={(f) => { hoverRef.current = f; onHoverFrame(f); }} scene={scene}
+            onCommit={commit} onZoom={zoomBy} onToggleKf={toggleKf} overlap={ovAt.get(c.f) ?? []} overlayCubs={ovCubs.get(c.f) ?? EMPTY_CUBS} onIgnoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], true); setNote(`Đã bỏ qua cặp #${Math.min(num, o)}–#${Math.max(num, o)} (mọi frame).`); }} onOpenObject={setSelectedNum} tiltOn={prefs.tilt} fileFlags={fileFlags.get(c.f) ?? NO_FLAGS} onMarkFlag={(f, kind, mk) => qcFlagStore.mark(job.id, [{ num, frame: f, kind }], mk)} issues={issueMap.get(c.f) ?? NO_ISSUES} issueIgnored={(k) => ign.has(issueKey(job.id, num, c.f, k))} onIgnoreIssue={(f, k, on) => ignoreStore.set([issueKey(job.id, num, f, k)], on)} qcOn={qcOn} qcNote={qcNotes[qcKey(job.id, num, c.f)] ?? ''} onQcNote={(f, t) => qcStore.set(job.id, num, f, t)} onToggleOutside={toggleOutside} onHover={(f) => { hoverRef.current = f; onHoverFrame(f); }} scene={scene}
           />
         ))}
       </div>

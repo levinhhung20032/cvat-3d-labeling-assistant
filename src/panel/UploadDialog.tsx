@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { UploadResult } from '../content/uploader';
-import { outsideFrames, type ShiftTrackRec } from '../shared/shift';
+import { changedFrames, outsideFrames, type ShiftTrackRec } from '../shared/shift';
 import { buildUploadPlan } from '../shared/upload';
 import type { CvatAnnotations, CvatJob, CvatLabel } from '../shared/types';
 import { post, rpc } from './bridge';
@@ -63,6 +63,7 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
       onUploaded(plan.diffs.map((d, i) => ({
         num: d.index + 1, id: d.id, label: names.get(working.tracks[d.index]!.label_id) ?? '?',
         added: d.added, removed: d.removed, modified: d.modified, baked: d.baked, outsideFilled: d.outsideFilled,
+        changedFrames: changedFrames(plan.expected[i]!, plan.changed[i]!, job.start_frame, job.stop_frame),
         outsideBefore: outsideFrames(plan.expected[i]!, job.start_frame, job.stop_frame),
         outsideAfter: outsideFrames(plan.changed[i]!, job.start_frame, job.stop_frame),
       })));

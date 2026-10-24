@@ -277,15 +277,20 @@ function main() {
   }
 
   /** Tool chọn object → giao diện CVAT chuyển focus sang đúng object đó (đổi frame trước nếu object không có ở frame hiện tại). */
+  let focusSeq = 0; // lệnh chọn mới hủy lệnh cũ còn đang chờ (tránh kích hoạt nhầm object cũ)
   async function focusInCvat(num: number, targetFrame: number | null, zoom = false, minimize = false) {
+    const my = ++focusSeq;
+    const stale = () => my !== focusSeq;
     const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
     if (minimize && host) { geo.min = true; geo.max = false; applyGeo(); persist(); } // nhường chỗ để thấy giao diện CVAT
     if (targetFrame !== null) {
       // Luôn gửi lệnh đổi frame (không dựa vào số trong ô nhập: ô có thể đang hiện số vừa gõ mà CVAT chưa đổi frame).
       gotoFrame(targetFrame);
       await wait(300);
+      if (stale()) return;
     }
     for (let i = 0; i < 40; i++) {
+      if (stale()) return;
       if (activateObject(num)) break;
       await wait(250); // danh sách object của CVAT cập nhật sau khi đổi frame (nạp point cloud có thể mất vài giây)
     }
@@ -296,14 +301,16 @@ function main() {
       // để không zoom vào vị trí của frame cũ. Đợi tối đa ~14 giây vì nạp point cloud mất vài giây.
       let done = false;
       for (let i = 0; i < 40 && !done; i++) {
+        if (stale()) return;
         try {
           const r = (await api.runtime.sendMessage({ type: 'cvla-focus3d', num, frame: targetFrame })) as { ok?: boolean } | undefined;
           done = !!r?.ok;
         } catch { break; }
         if (!done) await wait(350);
       }
-      if (done) {
-        await wait(500); // CVAT vẽ lại object sau khi đổi frame; gọi thêm một lần cho chắc
+      if (done && !stale()) {
+        await wait(500);
+        if (stale()) return; // CVAT vẽ lại object sau khi đổi frame; gọi thêm một lần cho chắc
         try { await api.runtime.sendMessage({ type: 'cvla-focus3d', num, frame: targetFrame }); } catch { /* bỏ qua */ }
       }
     }

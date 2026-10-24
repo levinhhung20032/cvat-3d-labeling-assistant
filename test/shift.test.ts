@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { computeKpi, kpiText, outsideFrames, shiftName, uniqueShiftName, type Shift, type ShiftTrackRec } from '../src/shared/shift';
+import { changedFrames, computeKpi, kpiText, outsideFrames, shiftName, uniqueShiftName, type Shift, type ShiftTrackRec } from '../src/shared/shift';
 import { shape, track } from './fixtures';
+import { serializeCuboid } from '../src/shared/cuboid';
 
 describe('tên ca', () => {
   it('sáng 21/10 → Oct21AM; chiều → PM; không đệm số 0', () => {
@@ -77,5 +78,27 @@ describe('KPI ca', () => {
   it('ca đang chạy: thời lượng tính tới hiện tại', () => {
     const s = { ...base(), end: null };
     expect(computeKpi(s, new Date('2026-10-21T01:45:00.000Z')).durationMin).toBe(45);
+  });
+});
+
+describe('changedFrames (KPI: mọi frame đã thay đổi)', () => {
+  const c = (x: number) => ({ x, y: 0, z: 0, rx: 0, ry: 0, yaw: 0, sx: 4, sy: 2, sz: 1.5 });
+  const mk = (frames: [number, number, boolean?][]) =>
+    track(1, frames.map(([f, x, out]) => ({ ...shape(f, !!out), points: serializeCuboid(c(x), Array(16).fill(0)) })));
+  it('sửa 1 keyframe làm các frame nội suy kề đổi theo, không tính frame ngoài khoảng', () => {
+    const before = mk([[0, 0], [4, 4], [8, 8]]);
+    const after = mk([[0, 0], [4, 5], [8, 8]]);
+    expect(changedFrames(before, after, 0, 8)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  });
+  it('khoá thêm keyframe giữ nguyên giá trị thì không tính', () => {
+    const before = mk([[0, 0], [4, 4]]);
+    const after = mk([[0, 0], [2, 2], [4, 4]]);
+    expect(changedFrames(before, after, 0, 4)).toEqual([]);
+  });
+  it('đặt outside và lưu outside thành keyframe riêng đều tính', () => {
+    const before = mk([[0, 0], [2, 2, true]]);
+    const after = mk([[0, 0], [2, 2, true], [3, 2, true]]);
+    expect(changedFrames(before, after, 0, 4)).toEqual([3]);
+    expect(changedFrames(mk([[0, 0], [4, 4]]), mk([[0, 0], [2, 1, true], [4, 4]]), 0, 4)).toEqual([1, 2, 3]);
   });
 });

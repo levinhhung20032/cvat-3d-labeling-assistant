@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findOverlaps, groupPairs, intersectionArea, footprint, overlapRatio } from '../src/shared/overlap';
+import { findOverlaps, groupPairs, intersectionArea, footprint, overlapIou, allowedIou } from '../src/shared/overlap';
 import { propagateSize, sameSize } from '../src/shared/dynsize';
 import { serializeCuboid, type Cuboid } from '../src/shared/cuboid';
 import { shape, track } from './fixtures';
@@ -17,22 +17,31 @@ describe('chồng lấn', () => {
   it('xoay 90° vẫn đúng', () => {
     expect(intersectionArea(footprint(cub(0, 0)), footprint(cub(0, 0, { yaw: Math.PI / 2 })))).toBeCloseTo(4); // 2×2 ở giữa
   });
-  it('tỉ lệ trên box nhỏ hơn, cần chồng chiều cao', () => {
-    expect(overlapRatio(cub(0, 0), cub(0, 0, { sx: 1, sy: 1 }))).toBeCloseTo(1);
-    expect(overlapRatio(cub(0, 0), cub(0, 0, { z: 5 }))).toBe(0);
+  it('IoU và diện tích giao, cần chồng chiều cao', () => {
+    const r = overlapIou(cub(0, 0), cub(0, 0, { sx: 1, sy: 1 }));
+    expect(r.iou).toBeCloseTo(1 / 8); expect(r.inter).toBeCloseTo(1);
+    expect(overlapIou(cub(0, 0), cub(0, 0, { z: 5 })).iou).toBe(0);
   });
   it('tìm cặp giữa các ID khác nhau, bỏ qua frame outside và box chỉ chạm nhau', () => {
     const a = tr([[0, cub(0, 0)], [1, cub(0, 0)]]);
-    const b = tr([[0, cub(1, 0)], [1, cub(1, 0), true]]);
+    const b = tr([[0, cub(1, 0, { sx: 2 })], [1, cub(1, 0, { sx: 2 }), true]]);
     const c = tr([[0, cub(4, 0)], [1, cub(4, 0)]]); // chỉ chạm cạnh a (giao diện tích 0)
-    const items = findOverlaps([a, b, c], [0, 1]);
+    const items = findOverlaps([a, b, c], [0, 1], ['vehicles', 'vehicles', 'vehicles']);
     expect(items.map((i) => [i.a, i.b, i.frame])).toEqual([[1, 2, 0]]);
     expect(groupPairs(items)).toEqual([{ a: 1, b: 2, frames: [0], max: items[0]!.ratio }]);
   });
-  it('dưới ngưỡng 30% thì không cảnh báo', () => {
+  it('ngưỡng theo nhóm: xe không cho chồng, người / xe máy cho tới IoU 0.5', () => {
+    expect(allowedIou('vehicles')).toBe(0); expect(allowedIou('Two-wheels')).toBe(0.5); expect(allowedIou('pedestrian')).toBe(0.5);
     const a = tr([[0, cub(0, 0)]]);
-    const b = tr([[0, cub(3.5, 0)]]); // giao 0.5 × 2 = 1 → 12,5%
-    expect(findOverlaps([a, b], [0])).toEqual([]);
+    const b = tr([[0, cub(3.5, 0)]]); // giao 1 m² → IoU 1/15
+    expect(findOverlaps([a, b], [0], ['vehicles', 'vehicles']).length).toBe(1);
+    expect(findOverlaps([a, b], [0], ['pedestrian', 'pedestrian'])).toEqual([]);
+    expect(findOverlaps([a, b], [0], ['pedestrian', 'vehicles']).length).toBe(1); // khác nhóm: lấy mức chặt hơn
+  });
+  it('phần giao dưới 0.001 m² thì bỏ qua', () => {
+    const a = tr([[0, cub(0, 0)]]);
+    const b = tr([[0, cub(3.9995, 0)]]); // giao 0.0005 × 2 = 0.001 → vừa đủ không tính khi nhỏ hơn
+    expect(findOverlaps([a, b], [0], ['vehicles', 'vehicles'], { ...{ allowed: { vehicle: 0 }, defaultAllowed: 0, minZ: 0.01 }, minArea: 0.002 })).toEqual([]);
   });
 });
 

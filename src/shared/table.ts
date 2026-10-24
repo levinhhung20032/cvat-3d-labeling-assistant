@@ -1,6 +1,7 @@
 import { missingOutsideKeyframes } from './rules';
 import { stateAt } from './interp';
 import { motionJump } from './motion';
+import { trackIssues } from './qcrules';
 import type { CvatAnnotations, CvatLabel } from './types';
 
 export interface ObjectRow {
@@ -15,11 +16,13 @@ export interface ObjectRow {
   last: number | null;
   keyframes: number;
   jumps: number; // số frame bị cảnh báo "đi xa bất thường" (không tính frame đã bỏ qua)
+  issues: number; // số (frame, loại) vi phạm luật QC S/K/Z/H/D (không tính cái đã bỏ qua)
 }
 
 export function buildRows(
   ann: CvatAnnotations, labels: CvatLabel[], start: number, stop: number,
   isIgnored: (num: number, frame: number) => boolean = () => false,
+  isIssueIgnored: (num: number, frame: number, kind: string) => boolean = () => false,
 ): ObjectRow[] {
   const names = new Map(labels.map((l) => [l.id, l.name]));
   const rows: ObjectRow[] = [];
@@ -33,10 +36,14 @@ export function buildRows(
       if (s.cuboid) { assigned++; first ??= f; last = f; }
       else if (s.status === 'outside' || s.status === 'outside-key') outside++;
     }
+    let issues = 0;
+    for (const [f, list] of trackIssues(t, labelName, Array.from({ length: stop - start + 1 }, (_, i) => start + i))) {
+      issues += list.filter((i) => !isIssueIgnored(index + 1, f, i.kind)).length;
+    }
     rows.push({
       num: index + 1, id: t.id, labelId: t.label_id, label: names.get(t.label_id) ?? `#${t.label_id}`,
       assigned, outside, missing: missingOutsideKeyframes(t, stop).length, first, last,
-      keyframes: t.shapes.length, jumps,
+      keyframes: t.shapes.length, jumps, issues,
     });
   }
   return rows.sort((a, b) => a.num - b.num);

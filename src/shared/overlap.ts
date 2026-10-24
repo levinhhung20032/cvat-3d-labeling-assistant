@@ -1,12 +1,26 @@
 import type { Cuboid } from './cuboid';
 import { stateAt } from './interp';
+import { classKey } from './qcrules';
 import type { CvatTrack } from './types';
 
 export interface OverlapConfig {
-  ratio: number; // chồng box: phần giao trên hình chiếu từ trên / diện tích box nhỏ hơn (30%)
-  minZ: number; // m: hai box phải chồng nhau theo chiều cao ít nhất mức này (người ngồi trên xe máy vẫn bị tính; hai vật xếp chồng trên-dưới thì không)
+  /** IoU cho phép theo nhóm nhãn (chữ thường): chồng hơn mức này thì cảnh báo; 0 = không cho chồng chút nào. */
+  allowed: Record<string, number>;
+  defaultAllowed: number;
+  minArea: number; // m²: phần giao nhỏ hơn mức này thì bỏ qua
+  minZ: number; // m: hai box phải chồng nhau theo chiều cao ít nhất mức này (hai vật xếp chồng trên-dưới thì không tính)
 }
-export const DEFAULT_OVERLAP: OverlapConfig = { ratio: 0.3, minZ: 0.2 };
+export const DEFAULT_OVERLAP: OverlapConfig = {
+  allowed: { vehicle: 0, two_wheel: 0.5, pedestrian: 0.5, animal: 0.5, obstacle: 0 },
+  defaultAllowed: 0.5, minArea: 0.001, minZ: 0.01,
+};
+
+/** Mức IoU cho phép của một nhãn (tên nhãn CVAT). */
+export function allowedIou(label: string, cfg: OverlapConfig = DEFAULT_OVERLAP): number {
+  const l = label.trim().toLowerCase();
+  const key = classKey(l) ?? l;
+  return cfg.allowed[key] ?? cfg.defaultAllowed;
+}
 
 type P = [number, number];
 
@@ -43,13 +57,13 @@ export function intersectionArea(subject: P[], clip: P[]): number {
   return out.length >= 3 ? area(out) : 0;
 }
 
-/** Tỉ lệ chồng của hai box: giao hình chiếu / diện tích box nhỏ hơn. 0 nếu không chồng nhau theo chiều cao. */
-export function overlapRatio(a: Cuboid, b: Cuboid, cfg: OverlapConfig = DEFAULT_OVERLAP): number {
+/** IoU hình chiếu từ trên của hai box và diện tích giao (m²). 0 nếu không chồng nhau theo chiều cao. */
+export function overlapIou(a: Cuboid, b: Cuboid, cfg: OverlapConfig = DEFAULT_OVERLAP): { iou: number; inter: number } {
   const z = Math.min(a.z + a.sz / 2, b.z + b.sz / 2) - Math.max(a.z - a.sz / 2, b.z - b.sz / 2);
-  if (z < cfg.minZ) return 0;
-  const small = Math.min(a.sx * a.sy, b.sx * b.sy);
-  if (small <= 0) return 0;
-  return intersectionArea(footprint(a), footprint(b)) / small;
+  if (z < cfg.minZ) return { iou: 0, inter: 0 };
+  const inter = intersectionArea(footprint(a), footprint(b));
+  const union = a.sx * a.sy + b.sx * b.sy - inter;
+  return { iou: union > 0 ? inter / union : 0, inter };
 }
 
 export interface OverlapItem { a: number; b: number; frame: number; ratio: number } // a < b: số thứ tự object (ID hiển thị)
@@ -59,7 +73,7 @@ export interface OverlapPair { a: number; b: number; frames: number[]; max: numb
  * Tìm mọi cặp object chồng lấn nhau ở từng frame (xét CHÉO giữa các ID, không chỉ từng ID riêng).
  * Chỉ xét frame cả hai đều có box (không outside). Lọc thô bằng đường tròn bao trước khi tính giao chính xác.
  */
-export function findOverlaps(tracks: CvatTrack[], frames: number[], cfg: OverlapConfig = DEFAULT_OVERLAP): OverlapItem[] {
+export function findOverlaps(tracks: CvatTrack[], frames: number[], labels: string[] = [], cfg: OverlapConfig = DEFAULT_OVERLAP): OverlapItem[] {
   const out: OverlapItem[] = [];
   for (const f of frames) {
     const live: { num: number; c: Cuboid; r: number }[] = [];
@@ -71,8 +85,9 @@ export function findOverlaps(tracks: CvatTrack[], frames: number[], cfg: Overlap
       for (let j = i + 1; j < live.length; j++) {
         const p = live[i]!, q = live[j]!;
         if (Math.hypot(p.c.x - q.c.x, p.c.y - q.c.y) > p.r + q.r) continue;
-        const ratio = overlapRatio(p.c, q.c, cfg);
-        if (ratio >= cfg.ratio) out.push({ a: p.num, b: q.num, frame: f, ratio });
+        const { iou, inter } = overlapIou(p.c, q.c, cfg);
+        const allow = Math.min(allowedIou(labels[p.num - 1] ?? '', cfg), allowedIou(labels[q.num - 1] ?? '', cfg)); // cặp khác nhóm: lấy mức chặt hơn
+        if (inter >= cfg.minArea && iou > allow) out.push({ a: p.num, b: q.num, frame: f, ratio: iou });
       }
     }
   }

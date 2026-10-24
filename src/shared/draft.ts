@@ -44,7 +44,16 @@ export function checkDraft(raw: string | null, jobId: number, baseline: CvatAnno
   if (d.version !== baseline.version) {
     return { ok: false, reason: 'server-changed', message: `Bản nháp cũ (CVAT version ${d.version}) không còn khớp dữ liệu hiện tại trên CVAT (version ${baseline.version}); không áp dụng để tránh ghi đè thay đổi mới.` };
   }
-  return { ok: true, draft: d, trackCount: Object.keys(d.tracks).length };
+  // Track nào của nháp đã giống hệt CVAT (vừa upload xong, version có thể không đổi) thì không còn là nháp.
+  const left: Record<string, CvatTrack> = {};
+  for (const [k, t] of Object.entries(d.tracks)) {
+    const base = baseline.tracks[Number(k)];
+    if (!base || JSON.stringify(base.shapes) !== JSON.stringify(t.shapes)) left[k] = t;
+  }
+  if (!Object.keys(left).length) return { ok: false, reason: 'none', message: '' };
+  const keep = new Set(Object.keys(left).map((k) => Number(k) + 1));
+  const edited = d.edited.filter((key) => keep.has(Number(key.split(':')[0])));
+  return { ok: true, draft: { ...d, tracks: left, edited }, trackCount: Object.keys(left).length };
 }
 
 /** Áp bản nháp lên baseline. Track nào không khớp ID với baseline thì bỏ qua (và bỏ khóa edited của nó). */

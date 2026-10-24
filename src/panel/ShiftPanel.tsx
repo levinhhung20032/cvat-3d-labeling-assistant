@@ -13,6 +13,7 @@ function KpiView({ k }: { k: Kpi }) {
             ['Số lần upload', k.uploads],
             ['Object đã tác động (đã upload)', `${t.objects}${Object.keys(k.byLabel).length ? ' — ' + Object.entries(k.byLabel).map(([l, n]) => `${l} ${n}`).join(', ') : ''}`],
             ['Frame outside của các object đó', `${t.outsideNow} (mới đặt trong ca ${t.outsideNew}, đưa trở lại ${t.outsideRestored})`],
+            ['Frame đã thay đổi (sửa tay, nội suy, outside, lưu outside thành keyframe)', t.framesChanged],
             ['Keyframe', `+${t.added} thêm · −${t.removed} gỡ · ~${t.modified} sửa · ${t.baked} khoá thêm`],
             ['Gợi ý', `chấp nhận ${k.accepted} · bỏ qua ${k.ignored}`],
             ['Thao tác sửa trong nháp', k.edits],
@@ -23,12 +24,12 @@ function KpiView({ k }: { k: Kpi }) {
       </table>
       {k.objects.length > 0 && (
         <table style={{ borderCollapse: 'collapse', fontSize: 12 }}>
-          <thead><tr style={{ textAlign: 'left' }}><th>ID</th><th>Nhãn</th><th>upload</th><th>+KF</th><th>−KF</th><th>~KF</th><th>khoá</th><th>outside</th><th>mới</th><th>trở lại</th></tr></thead>
+          <thead><tr style={{ textAlign: 'left' }}><th>ID</th><th>Nhãn</th><th>upload</th><th>frame đổi</th><th>+KF</th><th>−KF</th><th>~KF</th><th>khoá</th><th>outside</th><th>mới</th><th>trở lại</th></tr></thead>
           <tbody>
             {k.objects.map((o) => (
               <tr key={`${o.jobId}:${o.num}`} style={{ borderTop: '1px solid #eee' }}>
                 <td><b>{o.num}</b>{k.objects.some((x) => x.jobId !== o.jobId) ? <span style={{ color: '#999' }}> (job {o.jobId})</span> : ''}</td>
-                <td>{o.label}</td><td>{o.uploads}</td><td>{o.added}</td><td>{o.removed}</td><td>{o.modified}</td><td>{o.baked}</td>
+                <td>{o.label}</td><td>{o.uploads}</td><td><b>{o.framesChanged}</b></td><td>{o.added}</td><td>{o.removed}</td><td>{o.modified}</td><td>{o.baked}</td>
                 <td>{o.outsideNow}</td><td>{o.outsideNew}</td><td>{o.outsideRestored}</td>
               </tr>
             ))}

@@ -73,6 +73,8 @@ export const ignoreKey = (jobId: number, num: number, frame: number) => `${jobId
 export const attrKey = (jobId: number, num: number, specId: number, frame: number | null) => `a:${jobId}:${num}:${specId}:${frame ?? 't'}`;
 /** Khóa bỏ qua cảnh báo chồng lấn của một cặp object (a < b; áp cho mọi frame). */
 export const overlapKey = (jobId: number, a: number, b: number) => `o:${jobId}:${Math.min(a, b)}:${Math.max(a, b)}`;
+/** Khóa bỏ qua một cảnh báo luật QC (S/K/Z/H/D) ở một frame. */
+export const issueKey = (jobId: number, num: number, frame: number, kind: string) => `q:${jobId}:${num}:${frame}:${kind}`;
 export const motionKey = (jobId: number, num: number, frame: number) => `m:${jobId}:${num}:${frame}`;
 export const ignoreStore = {
   set(keys: string[], on: boolean) {
