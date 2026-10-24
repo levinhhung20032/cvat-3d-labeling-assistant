@@ -5,6 +5,7 @@ import { checkIdsNotRemoved, trackIds } from '../shared/rules';
 import { CvatClient } from './cvatClient';
 import { activateObject, blurFrameInput, gotoFrame, readCvatState } from './cvatDom';
 import { runRevert, runUpload, type LogEntry, type UploadDeps } from './uploader';
+import type { InPagePanel } from '../panel/inpage';
 
 declare global {
   interface Window {
@@ -13,6 +14,7 @@ declare global {
 }
 
 const JOB_URL = /\/tasks\/\d+\/jobs\/(\d+)/;
+const log = (...a: unknown[]) => console.info('[CVLA]', ...a); // vết chẩn đoán: mở Console và lọc "[CVLA]"
 const TITLE_H = 28;
 
 type Out = ContentMessage extends infer M ? (M extends unknown ? Omit<M, 'source' | 'session'> : never) : never;
@@ -37,7 +39,8 @@ function main() {
   const session = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
     b.toString(16).padStart(2, '0'),
   ).join('');
-  const extOrigin = new URL(api.runtime.getURL('/')).origin;
+  // Dạng "moz-extension://uuid" / "chrome-extension://id", lấy từ chuỗi URL (URL.origin có thể trả "null" với scheme lạ).
+  const extOrigin = api.runtime.getURL('/').replace(/\/+$/, '');
   const geoKey = `geo:${location.origin}`;
   const client = new CvatClient({
     origin: location.origin,
@@ -66,13 +69,23 @@ function main() {
 
   let host: HTMLDivElement | null = null;
   let frame: HTMLIFrameElement | null = null;
+  let body: HTMLElement | null = null; // phần thân cửa sổ: iframe, hoặc vùng chứa panel ở chế độ nhúng
+  let inPage: InPagePanel | null = null;
+  let titleEl: HTMLSpanElement | null = null;
+  let gotReady = false;
+  let watchdog = 0;
   let toggleCombos: string[] = ['`']; // phím thu nhỏ / mở cửa sổ; panel gửi lại khi người dùng đổi phím
   let geo = defaultGeo();
   let poll = 0;
   let lastSync = '';
 
-  const send = (m: Out, transfer: Transferable[] = []) =>
-    frame?.contentWindow?.postMessage({ source: CONTENT_SOURCE, session, ...m }, extOrigin, transfer);
+  const send = (m: Out, transfer: Transferable[] = []) => {
+    const msg = { source: CONTENT_SOURCE, session, ...m } as ContentMessage;
+    if (inPage) inPage.deliver(msg);
+    else frame?.contentWindow?.postMessage(msg, extOrigin, transfer);
+  };
+  const setStatus = (text: string | null) => { if (titleEl) titleEl.textContent = 'CVAT 3D Assistant · ' + (text ?? 'kéo để di chuyển'); };
+  const focusPanel = () => { if (inPage) inPage.focus(); else frame?.contentWindow?.focus(); };
 
   async function load() {
     send({ type: 'loading' });
@@ -106,7 +119,7 @@ function main() {
   }
 
   function applyGeo() {
-    if (!host || !frame) return;
+    if (!host || !body) return;
     const vw = window.innerWidth, vh = window.innerHeight;
     if (geo.max) {
       Object.assign(host.style, { left: '0px', top: '0px', width: `${vw}px`, height: `${vh}px`, resize: 'none' });
@@ -120,7 +133,7 @@ function main() {
         height: geo.min ? `${TITLE_H}px` : `${geo.h}px`, resize: geo.min ? 'none' : 'both',
       });
     }
-    frame.style.display = geo.min ? 'none' : 'block';
+    body.style.display = geo.min ? 'none' : 'block';
   }
 
   function show() {
@@ -134,7 +147,8 @@ function main() {
       `flex:none;height:${TITLE_H}px;display:flex;align-items:center;justify-content:space-between;` +
       'background:#1f2937;color:#fff;font:600 12px system-ui;padding-left:8px;cursor:move;user-select:none;';
     const title = document.createElement('span');
-    title.textContent = 'CVAT 3D Assistant · kéo để di chuyển';
+    titleEl = title;
+    setStatus(null);
     const btns = document.createElement('span');
     const mk = (label: string, tip: string, on: () => void) => {
       const b = document.createElement('button');
@@ -170,11 +184,20 @@ function main() {
     bar.onpointerup = () => { if (drag) { drag = null; persist(); } };
     bar.ondblclick = () => { geo.max = !geo.max; applyGeo(); persist(); };
 
+    gotReady = false;
+    inPage = null;
     frame = document.createElement('iframe');
     frame.src = `${api.runtime.getURL('panel.html')}#session=${session}&origin=${encodeURIComponent(location.origin)}`;
     frame.style.cssText = 'flex:1;width:100%;border:0;background:#fff;min-height:0;';
+    body = frame;
+    frame.addEventListener('load', () => log('khung tool đã tải xong'));
     host.append(bar, frame);
     document.documentElement.append(host);
+    log('đã tạo khung tool', { src: frame.src.split('#')[0], extOrigin, pageOrigin: location.origin });
+    // Nếu khung không gửi "ready" (bị trình duyệt / chính sách của trang chặn, hoặc tin nhắn bị chặn âm thầm) thì chuyển sang
+    // chế độ nhúng trực tiếp trong trang thay vì để cửa sổ trống.
+    window.clearTimeout(watchdog);
+    watchdog = window.setTimeout(() => { if (!gotReady && host) void fallbackToInPage('khung tool không gửi "ready" sau 5 giây'); }, 5000);
 
     // nhớ kích thước khi người dùng kéo góc dưới phải
     new ResizeObserver(() => {
@@ -195,14 +218,41 @@ function main() {
     if (geo.min) geo.max = false;
     applyGeo();
     persist();
-    if (!geo.min) frame?.contentWindow?.focus();
+    if (!geo.min) focusPanel();
   }
 
   function hide() {
     window.clearInterval(poll);
+    window.clearTimeout(watchdog);
+    inPage?.destroy();
     host?.remove();
     host = null;
     frame = null;
+    body = null;
+    inPage = null;
+    titleEl = null;
+  }
+
+  /** Dự phòng: dựng panel thẳng trong trang (Shadow DOM) khi khung của extension không hoạt động. */
+  async function fallbackToInPage(reason: string) {
+    if (!host || inPage) return;
+    log('KHUNG KHÔNG PHẢN HỒI:', reason, '→ chuyển sang chế độ nhúng trong trang');
+    setStatus('khung bị chặn → chế độ nhúng');
+    frame?.remove();
+    frame = null;
+    const container = document.createElement('div');
+    container.style.cssText = 'flex:1;width:100%;min-height:0;position:relative;';
+    host.append(container);
+    body = container;
+    applyGeo();
+    try {
+      const { mountInPage } = await import('../panel/inpage');
+      inPage = await mountInPage(container, session, handlePanel);
+      log('đã nhúng panel trong trang');
+    } catch (e) {
+      log('nhúng trong trang thất bại', e);
+      setStatus('lỗi nhúng panel: ' + String(e));
+    }
   }
 
   /** Panel xin rộng hơn khi vào Batch Review: nới cửa sổ, không đổi vị trí nếu còn vừa màn hình. */
@@ -258,7 +308,7 @@ function main() {
       }
     }
     blurFrameInput();
-    if (!minimize) frame?.contentWindow?.focus(); // trả focus bàn phím cho tool để phím tắt vẫn hoạt động
+    if (!minimize) focusPanel(); // trả focus bàn phím cho tool để phím tắt vẫn hoạt động
   }
 
   async function rpcUpload(reqId: number, run: () => Promise<unknown>) {
@@ -270,12 +320,23 @@ function main() {
   }
 
   function onMessage(ev: MessageEvent) {
-    // Chỉ kiểm origin của extension + mã phiên ngẫu nhiên (bên dưới). Không so ev.source với contentWindow vì Firefox bọc
+    // Chỉ kiểm origin của extension + mã phiên ngẫu nhiên. Không so ev.source với contentWindow vì Firefox bọc
     // đối tượng cửa sổ khác nhau giữa content script và trang nên phép so sánh có thể sai.
-    if (ev.origin !== extOrigin || !frame) return;
-    const m = ev.data as PanelMessage;
-    if (m?.source !== PANEL_SOURCE || m.session !== session) return;
-    if (m.type === 'ready') { lastSync = ''; void load(); }
+    const m = ev.data as PanelMessage | undefined;
+    if (m?.source !== PANEL_SOURCE) return;
+    if (ev.origin !== extOrigin || !frame) { log('bỏ qua tin nhắn từ panel: origin', ev.origin, 'mong đợi', extOrigin); return; }
+    if (m.session !== session) { log('bỏ qua tin nhắn từ panel: sai mã phiên'); return; }
+    handlePanel(m);
+  }
+
+  function handlePanel(m: PanelMessage) {
+    if (m.type === 'ready') {
+      gotReady = true;
+      window.clearTimeout(watchdog);
+      log('panel sẵn sàng, chế độ', inPage ? 'nhúng trong trang' : 'khung (iframe)');
+      lastSync = '';
+      void load();
+    }
     else if (m.type === 'load') void load();
     else if (m.type === 'close') hide();
     else if (m.type === 'resize') { if (m.wide) ensureWide(); }

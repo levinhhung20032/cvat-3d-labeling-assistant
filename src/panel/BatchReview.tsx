@@ -1,3 +1,5 @@
+import { kv } from './storage';
+import { onViewport, viewport } from './bridge';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { azimuthDeg, type Cuboid } from '../shared/cuboid';
 import {
@@ -34,19 +36,15 @@ const CELL_MIN = 110, CELL_MAX = 520;
 interface Prefs { auto: boolean; size: number }
 const loadPrefs = (): Prefs => {
   try {
-    const p = JSON.parse(localStorage.getItem('cvla-prefs') ?? '{}') as Partial<Prefs>;
+    const p = JSON.parse(kv.get('cvla-prefs') ?? '{}') as Partial<Prefs>;
     return { auto: p.auto ?? true, size: Math.min(CELL_MAX, Math.max(CELL_MIN, p.size ?? 200)) };
   } catch { return { auto: true, size: 200 }; }
 };
-const savePrefs = (p: Prefs) => { try { localStorage.setItem('cvla-prefs', JSON.stringify(p)); } catch { /* bỏ qua */ } };
+const savePrefs = (p: Prefs) => { try { kv.set('cvla-prefs', JSON.stringify(p)); } catch { /* bỏ qua */ } };
 
 function useViewport() {
-  const [v, setV] = useState({ w: window.innerWidth, h: window.innerHeight });
-  useEffect(() => {
-    const on = () => setV({ w: window.innerWidth, h: window.innerHeight });
-    window.addEventListener('resize', on);
-    return () => window.removeEventListener('resize', on);
-  }, []);
+  const [v, setV] = useState(() => viewport());
+  useEffect(() => onViewport(() => setV(viewport())), []);
   return v;
 }
 
@@ -321,8 +319,8 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
   const [sugs, setSugs] = useState<Map<number, Suggestion | null>>(new Map());
   const ign = useIgnored();
   const [snaps, setSnaps] = useState<Map<number, GroundResult | null>>(new Map());
-  const [autoSnap, setAutoSnapState] = useState(() => { try { return localStorage.getItem('cvla-autosnap') === '1'; } catch { return false; } });
-  const setAutoSnap = (v: boolean) => { setAutoSnapState(v); try { localStorage.setItem('cvla-autosnap', v ? '1' : '0'); } catch { /* bỏ qua */ } };
+  const [autoSnap, setAutoSnapState] = useState(() => { try { return kv.get('cvla-autosnap') === '1'; } catch { return false; } });
+  const setAutoSnap = (v: boolean) => { setAutoSnapState(v); try { kv.set('cvla-autosnap', v ? '1' : '0'); } catch { /* bỏ qua */ } };
   const [rangeFrom, setRangeFrom] = useState('');
   const [rangeTo, setRangeTo] = useState('');
   const vp = useViewport();

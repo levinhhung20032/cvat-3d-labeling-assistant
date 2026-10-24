@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ACTIONS, assign, comboOf, defaultKeymap, prettyCombo, unassign, type Keymap } from '../shared/keymap';
 import { setCapturing } from './actions';
+import { keyTarget } from './bridge';
 
 /** Gán phím tùy ý cho từng thao tác. Bấm "+ thêm phím" rồi bấm tổ hợp phím muốn dùng (Esc để hủy). */
 export function KeysPanel({ map, setMap }: { map: Keymap; setMap: (m: Keymap) => void }) {
@@ -22,8 +23,9 @@ export function KeysPanel({ map, setMap }: { map: Keymap; setMap: (m: Keymap) =>
       setNote(`Đã gán ${prettyCombo(combo)}${taken ? ` (lấy từ "${taken}")` : ''}.`);
       setCapturingId(null);
     };
-    window.addEventListener('keydown', onKey, true);
-    return () => { window.removeEventListener('keydown', onKey, true); setCapturing(false); };
+    const kt = keyTarget();
+    kt.addEventListener('keydown', onKey as EventListener, true);
+    return () => { kt.removeEventListener('keydown', onKey as EventListener, true); setCapturing(false); };
   }, [capturingId, map]);
 
   return (

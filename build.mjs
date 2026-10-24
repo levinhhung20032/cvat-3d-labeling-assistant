@@ -6,7 +6,8 @@ import { cpSync, rmSync } from 'node:fs';
 // node build.mjs --target=firefox   → dist-firefox/  (Firefox, manifest.firefox.json)
 const firefox = process.argv.includes('--target=firefox');
 const out = firefox ? 'dist-firefox' : 'dist';
-const define = { __FIREFOX__: JSON.stringify(firefox) };
+// content script chứa cả React (chế độ nhúng dự phòng); thư viện đọc process.env.NODE_ENV nên phải khai báo ở build dạng lib.
+const define = { __FIREFOX__: JSON.stringify(firefox), 'process.env.NODE_ENV': JSON.stringify('production') };
 
 rmSync(out, { recursive: true, force: true });
 
@@ -20,10 +21,12 @@ for (const [name, entry] of [
     publicDir: false,
     logLevel: 'warn',
     define,
+    plugins: [react()], // content script chứa cả panel (chế độ nhúng dự phòng)
     build: {
       outDir: out,
       emptyOutDir: false,
       minify: false,
+      rollupOptions: { output: { inlineDynamicImports: true } },
       lib: { entry, formats: ['iife'], name: `cvla_${name}`, fileName: () => `${name}.js` },
     },
   });

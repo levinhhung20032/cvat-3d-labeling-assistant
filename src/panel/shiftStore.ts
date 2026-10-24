@@ -1,3 +1,4 @@
+import { kv } from './storage';
 import { useSyncExternalStore } from 'react';
 import { shiftName, uniqueShiftName, type Shift, type ShiftUpload } from '../shared/shift';
 
@@ -8,7 +9,7 @@ const MAX_HISTORY = 60;
 
 const load = (): State => {
   try {
-    const raw = JSON.parse(localStorage.getItem(KEY) ?? 'null') as State | null;
+    const raw = JSON.parse(kv.get(KEY) ?? 'null') as State | null;
     if (raw && Array.isArray(raw.history)) return { active: raw.active ?? null, history: raw.history };
   } catch { /* bỏ qua */ }
   return { active: null, history: [] };
@@ -18,7 +19,7 @@ let state: State = load();
 const listeners = new Set<() => void>();
 const commit = (next: State) => {
   state = next;
-  try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* bỏ qua */ }
+  try { kv.set(KEY, JSON.stringify(next)); } catch { /* bỏ qua */ }
   listeners.forEach((l) => l());
 };
 const subscribe = (cb: () => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; };
@@ -60,7 +61,7 @@ export const shiftStore = {
 // ---------- bỏ qua gợi ý ----------
 const IGN_KEY = 'cvla-ignore';
 let ignored: Set<string> = (() => {
-  try { return new Set<string>(JSON.parse(localStorage.getItem(IGN_KEY) ?? '[]') as string[]); } catch { return new Set<string>(); }
+  try { return new Set<string>(JSON.parse(kv.get(IGN_KEY) ?? '[]') as string[]); } catch { return new Set<string>(); }
 })();
 const ignListeners = new Set<() => void>();
 const ignSubscribe = (cb: () => void) => { ignListeners.add(cb); return () => { ignListeners.delete(cb); }; };
@@ -76,7 +77,7 @@ export const ignoreStore = {
     const next = new Set(ignored);
     for (const k of keys) { if (on) next.add(k); else next.delete(k); }
     ignored = next;
-    try { localStorage.setItem(IGN_KEY, JSON.stringify([...next].slice(-5000))); } catch { /* bỏ qua */ }
+    try { kv.set(IGN_KEY, JSON.stringify([...next].slice(-5000))); } catch { /* bỏ qua */ }
     ignListeners.forEach((l) => l());
   },
 };

@@ -1,3 +1,4 @@
+import { kv } from './storage';
 import { useEffect, useState } from 'react';
 import { normalizeKeymap, type Keymap } from '../shared/keymap';
 
@@ -13,9 +14,9 @@ export const emitAction = (id: string) => handlers.forEach((h) => h(id));
 // --- keymap lưu cục bộ (chỉ là tiện ích của người dùng) ---
 const KEY = 'cvla-keymap';
 export const loadKeymapPref = (): Keymap => {
-  try { return normalizeKeymap(JSON.parse(localStorage.getItem(KEY) ?? 'null')); } catch { return normalizeKeymap(null); }
+  try { return normalizeKeymap(JSON.parse(kv.get(KEY) ?? 'null')); } catch { return normalizeKeymap(null); }
 };
-export const saveKeymapPref = (m: Keymap) => { try { localStorage.setItem(KEY, JSON.stringify(m)); } catch { /* bỏ qua */ } };
+export const saveKeymapPref = (m: Keymap) => { try { kv.set(KEY, JSON.stringify(m)); } catch { /* bỏ qua */ } };
 
 /** Khi đang bấm phím để gán, tạm tắt bắt phím toàn cục. */
 let capturing = false;

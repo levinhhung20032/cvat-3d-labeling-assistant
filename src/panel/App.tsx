@@ -1,10 +1,11 @@
+import { kv } from './storage';
 import { api } from '../shared/api';
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { Cuboid } from '../shared/cuboid';
 import { upsertKeyframe } from '../shared/edit';
 import { actionFor, comboOf } from '../shared/keymap';
 import { stateAt } from '../shared/interp';
-import { CONTENT_SOURCE, type ContentMessage } from '../shared/protocol';
+import type { ContentMessage } from '../shared/protocol';
 import { summarize } from '../shared/summary';
 import { buildRows } from '../shared/table';
 import type { CvatAnnotations, CvatJob, CvatLabel, CvatTrack } from '../shared/types';
@@ -19,7 +20,7 @@ import { suggestAttributes } from '../shared/attrSuggest';
 import { fmtDuration, shiftName, computeKpi } from '../shared/shift';
 import { emitAction, isCapturing, useKeymap } from './actions';
 import { ObjectTable } from './ObjectTable';
-import { parentOrigin, post, resolveBinary, resolveRpc, session } from './bridge';
+import { diag, keyTarget, onContentMessage, post, resolveBinary, resolveRpc } from './bridge';
 
 export interface Data {
   job: CvatJob;
@@ -92,7 +93,7 @@ const EMPTY: Draft = { work: null, edited: new Set<string>(), undo: [], redo: []
 type State = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ok'; data: Data };
 type Tab = 'objects' | 'review' | 'shift' | 'keys' | 'job';
 
-const loadSync = () => { try { return localStorage.getItem('cvla-sync') !== '0'; } catch { return true; } };
+const loadSync = () => { try { return kv.get('cvla-sync') !== '0'; } catch { return true; } };
 
 export function App() {
   const [state, setState] = useState<State>({ kind: 'loading' });
@@ -111,9 +112,9 @@ export function App() {
     const t = window.setTimeout(() => setToast(''), 9000);
     return () => window.clearTimeout(t);
   }, [toast]);
-  const [pushOut, setPushOutState] = useState(() => { try { return localStorage.getItem('cvla-sync-out') !== '0'; } catch { return true; } });
+  const [pushOut, setPushOutState] = useState(() => { try { return kv.get('cvla-sync-out') !== '0'; } catch { return true; } });
   const pushOutRef = useRef(pushOut);
-  const setPushOut = (v: boolean) => { setPushOutState(v); pushOutRef.current = v; try { localStorage.setItem('cvla-sync-out', v ? '1' : '0'); } catch { /* bỏ qua */ } };
+  const setPushOut = (v: boolean) => { setPushOutState(v); pushOutRef.current = v; try { kv.set('cvla-sync-out', v ? '1' : '0'); } catch { /* bỏ qua */ } };
   const viewFrames = useRef<number[]>([]);
   const selFrameRef = useRef<number | null>(null);
   const hoverFrameRef = useRef<number | null>(null);
@@ -126,15 +127,19 @@ export function App() {
   const countRef = useRef(0);
   const lastCvatNum = useRef<number | null>(null);
   const lastCvatFrame = useRef<number | null>(null);
-  const setSync = (v: boolean) => { setSyncState(v); syncRef.current = v; try { localStorage.setItem('cvla-sync', v ? '1' : '0'); } catch { /* bỏ qua */ } };
+  const setSync = (v: boolean) => { setSyncState(v); syncRef.current = v; try { kv.set('cvla-sync', v ? '1' : '0'); } catch { /* bỏ qua */ } };
   const [selectedNum, setSelectedNum] = useState<number | null>(null);
   const [startWindow, setStartWindow] = useState(0);
+  // Chẩn đoán: nếu sau 6 giây vẫn chưa có dữ liệu thì nói rõ panel đang ở chế độ nào và đã bỏ qua tin nhắn nào.
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    if (state.kind !== 'loading') { setStuck(false); return; }
+    const t = window.setTimeout(() => setStuck(true), 6000);
+    return () => window.clearTimeout(t);
+  }, [state.kind]);
 
   useEffect(() => {
-    const onMsg = (ev: MessageEvent) => {
-      if (ev.origin !== parentOrigin) return; // origin + mã phiên; không so ev.source (Firefox bọc cửa sổ khác Chrome)
-      const m = ev.data as ContentMessage;
-      if (m?.source !== CONTENT_SOURCE || m.session !== session) return;
+    const onMsg = (m: ContentMessage) => {
       if (m.type === 'loading') setState({ kind: 'loading' });
       else if (m.type === 'error') setState({ kind: 'error', message: m.message });
       else if (m.type === 'data') {
@@ -167,9 +172,9 @@ export function App() {
       } else if (m.type === 'rpc') resolveRpc(m.reqId, m.result);
       else if (m.type === 'binary') resolveBinary(m.reqId, m.buf, m.error);
     };
-    window.addEventListener('message', onMsg);
+    const off = onContentMessage(onMsg);
     post({ type: 'ready' });
-    return () => window.removeEventListener('message', onMsg);
+    return off;
   }, []);
 
   const keymapRef = useRef(keymap);
@@ -191,8 +196,9 @@ export function App() {
       else if (id === 'window.toggle') post({ type: 'toggleWindow' });
       else emitAction(id);
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const kt = keyTarget();
+    kt.addEventListener('keydown', onKey as EventListener);
+    return () => kt.removeEventListener('keydown', onKey as EventListener);
   }, []);
 
   const data = state.kind === 'ok' ? state.data : null;
@@ -359,7 +365,20 @@ export function App() {
           {toast} <button onClick={() => setToast('')}>×</button>
         </div>
       )}
-      {state.kind === 'loading' && <p>Đang đọc…</p>}
+      {state.kind === 'loading' && (
+        <div>
+          <p>Đang đọc…</p>
+          {stuck && (
+            <p style={{ background: '#fff3cd', padding: 6, border: '1px solid #e0b100' }}>
+              Chưa nhận được dữ liệu từ trang CVAT sau 6 giây. Chế độ panel: <b>{diag.mode === 'inpage' ? 'nhúng trong trang' : 'khung (iframe)'}</b>.{' '}
+              {diag.rejected
+                ? `Đã bỏ qua ${diag.rejected} tin nhắn (lý do: ${diag.lastReason}; origin ${diag.lastOrigin || '?'}, mong đợi ${diag.expectedOrigin}).`
+                : 'Chưa có tin nhắn nào gửi tới panel.'}{' '}
+              Mở Console (F12) và tìm "[CVLA]" để xem chi tiết; bấm "Tải lại" để thử lại.
+            </p>
+          )}
+        </div>
+      )}
       {state.kind === 'error' && <p style={{ color: '#b00' }}>Lỗi: {state.message}</p>}
       {data && data.removedIds.length > 0 && (
         <div style={{ background: '#fdd', border: '1px solid #b00', padding: 8, marginBottom: 8 }}>
