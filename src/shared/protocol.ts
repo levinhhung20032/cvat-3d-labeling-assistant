@@ -12,6 +12,7 @@ export type PanelMessage = Envelope<typeof PANEL_SOURCE> &
     | { type: 'resize'; wide: boolean }
     | { type: 'binary'; kind: 'frame' | 'context'; n: number; reqId: number }
     // chuyển focus trong giao diện CVAT sang object (đổi frame nếu cần); zoom = camera 3D của CVAT lại gần object; minimize = thu nhỏ tool
+    | { type: 'reloadCvat' } // tải lại tab CVAT (sau upload) rồi tự mở lại tool
     | { type: 'toggleWindow' } // thu nhỏ / mở lại cửa sổ tool
     | { type: 'hotkeys'; toggle: string[] } // phím bật tắt cửa sổ để content script nghe ngay trên trang CVAT
     | { type: 'cvatFocus'; num: number; frame: number | null; zoom?: boolean; minimize?: boolean }

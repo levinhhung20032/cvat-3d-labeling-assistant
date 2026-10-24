@@ -1,4 +1,5 @@
 import { checkOutsideKeyframes, missingOutsideKeyframes, trackIds } from './rules';
+import { hasTilt, tiltTooLarge } from './cuboid';
 import { sortedShapes } from './interp';
 import { bakeKeyframes } from './keyframes';
 import type { CvatAnnotations, CvatShape, CvatTrack, Violation } from './types';
@@ -40,25 +41,19 @@ export function covers(server: CvatTrack, want: CvatTrack): boolean {
 }
 
 // ---------- chuẩn hóa track trước khi gửi ----------
-export interface Normalized { track: CvatTrack; outsideFilled: number; tiltFixed: number }
+export interface Normalized { track: CvatTrack; outsideFilled: number }
 
 /**
- * - Đưa rx = ry = 0 (box 7-DoF).
+ * - Roll / pitch (rx, ry) được giữ nguyên (chủ dự án cho phép box nghiêng theo mặt đường); vượt ±30° thì bị chặn ở bước kiểm tra.
  * - Mọi frame outside đều có keyframe outside riêng: sau mỗi shape outside, điền các frame còn thiếu tới
  *   shape kế tiếp hoặc tới frame cuối của job (luật 2).
  */
 export function normalizeTrack(t: CvatTrack, stopFrame: number): Normalized {
   const shapes = sortedShapes(t);
   const out: CvatShape[] = [];
-  let outsideFilled = 0, tiltFixed = 0;
+  let outsideFilled = 0;
   shapes.forEach((s, i) => {
-    let cur = s;
-    if (s.points[3] !== 0 || s.points[4] !== 0) {
-      const points = s.points.slice();
-      points[3] = 0; points[4] = 0;
-      cur = { ...s, points };
-      tiltFixed++;
-    }
+    const cur = s;
     out.push(cur);
     if (cur.outside) {
       const next = shapes[i + 1];
@@ -70,7 +65,19 @@ export function normalizeTrack(t: CvatTrack, stopFrame: number): Normalized {
       }
     }
   });
-  return { track: { ...t, shapes: out }, outsideFilled, tiltFixed };
+  return { track: { ...t, shapes: out }, outsideFilled };
+}
+
+/** Số keyframe (không outside) có roll/pitch ≠ 0 và khác với keyframe cùng frame của baseline. */
+export function countTiltSet(before: CvatTrack, after: CvatTrack): number {
+  const old = new Map(before.shapes.map((s) => [s.frame, s]));
+  let n = 0;
+  for (const s of after.shapes) {
+    if (s.outside || !hasTilt(s.points)) continue;
+    const o = old.get(s.frame);
+    if (!o || o.points[3] !== s.points[3] || o.points[4] !== s.points[4]) n++;
+  }
+  return n;
 }
 
 // ---------- kế hoạch upload ----------
@@ -81,7 +88,7 @@ export interface TrackDiff {
   removed: number; // keyframe gỡ
   modified: number; // keyframe giá trị đổi
   outsideFilled: number;
-  tiltFixed: number;
+  tiltSet: number; // keyframe có roll/pitch ≠ 0 mà khác baseline (thông tin; cần người dùng xác nhận khi upload)
   baked: number; // frame được khoá thêm thành keyframe
   attrs: number; // attribute cấp track đổi giá trị (attribute đổi theo frame nằm trong ~KF)
 }
@@ -91,7 +98,7 @@ export interface UploadPlan {
   expected: CvatTrack[]; // phiên bản baseline của đúng các track đó (để phát hiện xung đột)
   diffs: TrackDiff[];
   outsideFilled: number;
-  tiltFixed: number;
+  tiltSet: number;
   others: { tracks: number; frames: number }; // track không sửa mà vẫn thiếu keyframe outside (không gửi, trừ khi includeOthers)
   blockers: Violation[];
 }
@@ -129,7 +136,7 @@ export function buildUploadPlan(
     if (!trackIds(working).includes(id)) blockers.push({ rule: 'id-removed', trackId: id, message: `Track ${id} biến mất so với baseline` });
   }
   const changed: CvatTrack[] = [], expected: CvatTrack[] = [], diffs: TrackDiff[] = [];
-  let outsideFilled = 0, tiltFixed = 0, othersTracks = 0, othersFrames = 0;
+  let outsideFilled = 0, tiltSet = 0, othersTracks = 0, othersFrames = 0;
   working.tracks.forEach((w, index) => {
     const b = baseline.tracks[index];
     if (typeof w.id !== 'number' || !b || b.id !== w.id) {
@@ -157,11 +164,16 @@ export function buildUploadPlan(
     changed.push(finalTrack);
     expected.push(b);
     outsideFilled += n.outsideFilled;
-    tiltFixed += n.tiltFixed;
-    diffs.push({ index, id: w.id, ...diffTrack(b, finalTrack, n.outsideFilled + baked), outsideFilled: n.outsideFilled, tiltFixed: n.tiltFixed, baked, attrs: trackAttrChanges(b, finalTrack) });
+    const ts = countTiltSet(b, finalTrack);
+    tiltSet += ts;
+    diffs.push({ index, id: w.id, ...diffTrack(b, finalTrack, n.outsideFilled + baked), outsideFilled: n.outsideFilled, tiltSet: ts, baked, attrs: trackAttrChanges(b, finalTrack) });
   });
   blockers.push(...checkOutsideKeyframes({ ...working, tracks: changed }, stopFrame));
-  return { changed, expected, diffs, outsideFilled, tiltFixed, others: { tracks: othersTracks, frames: othersFrames }, blockers };
+  for (const t of changed) {
+    const bad = t.shapes.filter((x) => !x.outside && tiltTooLarge(x.points)).map((x) => x.frame);
+    if (bad.length) blockers.push({ rule: 'tilt-too-large', trackId: t.id, frames: bad, message: `Track ${t.id}: roll/pitch vượt ±30° ở frame ${bad.join(', ')}` });
+  }
+  return { changed, expected, diffs, outsideFilled, tiltSet, others: { tracks: othersTracks, frames: othersFrames }, blockers };
 }
 
 export const UPLOAD_BATCH = 10;

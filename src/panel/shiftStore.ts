@@ -71,6 +71,8 @@ export const ignoreKey = (jobId: number, num: number, frame: number) => `${jobId
 /** Khóa bỏ qua cảnh báo "đi xa bất thường" (tách với bỏ qua gợi ý sửa box). */
 /** Khóa bỏ qua gợi ý attribute: tĩnh → cả track (frame = null); đổi theo frame → từng frame. */
 export const attrKey = (jobId: number, num: number, specId: number, frame: number | null) => `a:${jobId}:${num}:${specId}:${frame ?? 't'}`;
+/** Khóa bỏ qua cảnh báo chồng lấn của một cặp object (a < b; áp cho mọi frame). */
+export const overlapKey = (jobId: number, a: number, b: number) => `o:${jobId}:${Math.min(a, b)}:${Math.max(a, b)}`;
 export const motionKey = (jobId: number, num: number, frame: number) => `m:${jobId}:${num}:${frame}`;
 export const ignoreStore = {
   set(keys: string[], on: boolean) {

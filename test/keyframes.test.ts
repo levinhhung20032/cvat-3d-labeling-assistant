@@ -101,8 +101,14 @@ describe('outside', () => {
     expect(missingOutsideKeyframes(r.track, STOP)).toEqual([3]);
     expect(missingOutsideKeyframes(normalizeTrack(r.track, STOP).track, STOP)).toEqual([]);
   });
-  it('không biến keyframe đầu tiên thành outside; frame không có box → null', () => {
-    expect(setOutsideFrom(t(), 0)).toBeNull();
+  it('keyframe đầu tiên đặt outside được (track bắt đầu bằng outside, giữ ID); frame không có box → null', () => {
+    const r = setOutsideFrom(t(), 0)!;
+    expect(r.track.id).toBe(1);
+    expect(stateAt(r.track, 0).status).toBe('outside-key');
+    expect(stateAt(r.track, 2).status).toBe('outside');
+    expect(missingOutsideKeyframes(normalizeTrack(r.track, STOP).track, STOP)).toEqual([]);
+    const back = restoreFrom(r.track, 0, STOP)!;
+    expect(stateAt(back.track, 0).status).toBe('key');
     expect(setOutsideFrom(setOutsideFrom(t(), 2)!.track, 3)).toBeNull();
   });
   it('O lần nữa trên frame outside: đưa trở lại bằng box gần nhất', () => {
@@ -129,9 +135,10 @@ describe('outside', () => {
     expect(stateAt(r.track, 3).status).toBe('key');
     expect(missingOutsideKeyframes(r.track, STOP)).toEqual([]);
   });
-  it('outside cả khoảng bỏ qua keyframe đầu tiên', () => {
+  it('outside cả khoảng gồm cả frame 0', () => {
     const r = setOutsideRange(t(), 0, 1, STOP)!;
-    expect(stateAt(r.track, 0).status).toBe('key');
+    expect(stateAt(r.track, 0).status).toBe('outside-key');
     expect(stateAt(r.track, 1).status).toBe('outside-key');
+    expect(missingOutsideKeyframes(normalizeTrack(r.track, STOP).track, STOP)).toEqual([]);
   });
 });

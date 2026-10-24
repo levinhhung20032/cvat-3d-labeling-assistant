@@ -341,6 +341,7 @@ function main() {
     else if (m.type === 'close') hide();
     else if (m.type === 'resize') { if (m.wide) ensureWide(); }
     else if (m.type === 'binary') void binary(m.kind, m.n, m.reqId);
+    else if (m.type === 'reloadCvat') { try { void api.runtime.sendMessage({ type: 'cvla-reload' }); } catch { /* bỏ qua */ } }
     else if (m.type === 'toggleWindow') toggleWindow();
     else if (m.type === 'hotkeys') toggleCombos = m.toggle;
     else if (m.type === 'cvatFocus') void focusInCvat(m.num, m.frame, !!m.zoom, !!m.minimize);

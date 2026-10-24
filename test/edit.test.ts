@@ -44,9 +44,9 @@ describe('kéo thả', () => {
     expect(dragRotate(identityBox(cub()), -20, 0).dyaw).toBeCloseTo(Math.PI / 2);
     expect(dragRotate(identityBox(cub()), 0, -20).dyaw).toBeCloseTo(0);
   });
-  it('luôn rx = ry = 0 sau khi áp', () => {
+  it('giữ nguyên rx, ry của box khi chỉ dời / đổi cỡ', () => {
     const c = applyLocalBox({ ...cub(), rx: 0.1, ry: 0.2 }, identityBox(cub()));
-    expect([c.rx, c.ry]).toEqual([0, 0]);
+    expect([c.rx, c.ry]).toEqual([0.1, 0.2]);
   });
 });
 

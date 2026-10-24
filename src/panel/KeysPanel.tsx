@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ACTIONS, assign, comboOf, defaultKeymap, prettyCombo, unassign, type Keymap } from '../shared/keymap';
+import { ACTIONS, assign, comboOf, conflictOf, defaultKeymap, duplicateCombos, prettyCombo, unassign, type Keymap } from '../shared/keymap';
 import { setCapturing } from './actions';
 import { keyTarget } from './bridge';
 
@@ -7,6 +7,16 @@ import { keyTarget } from './bridge';
 export function KeysPanel({ map, setMap }: { map: Keymap; setMap: (m: Keymap) => void }) {
   const [capturingId, setCapturingId] = useState<string | null>(null);
   const [note, setNote] = useState('');
+  // Phím vừa bấm bị vướng: chờ người dùng xác nhận thay thế hoặc hủy.
+  const [pending, setPending] = useState<{ id: string; combo: string; action: string | null; reserved: string | null } | null>(null);
+  const label = (id: string | null) => ACTIONS.find((a) => a.id === id)?.label ?? id ?? '';
+  const doAssign = (id: string, combo: string) => {
+    const r = assign(map, id, combo);
+    setMap(r.map);
+    setNote(`Đã gán ${prettyCombo(combo)}${r.stolenFrom ? ` (gỡ khỏi "${label(r.stolenFrom)}")` : ''}.`);
+    setPending(null);
+  };
+  const dups = duplicateCombos(map);
 
   useEffect(() => {
     if (!capturingId) return;
@@ -17,10 +27,9 @@ export function KeysPanel({ map, setMap }: { map: Keymap; setMap: (m: Keymap) =>
       if (e.key === 'Escape') { setCapturingId(null); setNote('Đã hủy.'); return; }
       const combo = comboOf(e);
       if (!combo) return; // mới chỉ bấm phím bổ trợ, chờ phím chính
-      const r = assign(map, capturingId, combo);
-      setMap(r.map);
-      const taken = r.stolenFrom ? ACTIONS.find((a) => a.id === r.stolenFrom)?.label : null;
-      setNote(`Đã gán ${prettyCombo(combo)}${taken ? ` (lấy từ "${taken}")` : ''}.`);
+      const c = conflictOf(map, capturingId, combo);
+      if (c.action || c.reserved) { setPending({ id: capturingId, combo, ...c }); setNote(''); }
+      else doAssign(capturingId, combo);
       setCapturingId(null);
     };
     const kt = keyTarget();
@@ -33,6 +42,20 @@ export function KeysPanel({ map, setMap }: { map: Keymap; setMap: (m: Keymap) =>
       <p style={{ margin: '4px 0' }}>
         Phím tắt chỉ hoạt động khi con trỏ đang ở trong cửa sổ tool (không phải trang CVAT). Mỗi thao tác gán được nhiều phím; một phím chỉ thuộc một thao tác.
       </p>
+      {dups.length > 0 && (
+        <p style={{ color: '#b00', fontWeight: 600 }}>
+          ⚠ Phím đang gán trùng: {dups.map(([c, ids]) => `${prettyCombo(c)} (${ids.map(label).join(' / ')})`).join('; ')}
+        </p>
+      )}
+      {pending && (
+        <p style={{ background: '#fff3cd', border: '1px solid #e0b000', padding: '4px 8px' }}>
+          <b>{prettyCombo(pending.combo)}</b> đang vướng:{' '}
+          {pending.action && <>đã dùng cho "<b>{label(pending.action)}</b>" (thay thế sẽ gỡ khỏi thao tác đó). </>}
+          {pending.reserved && <>trùng phím có sẵn ({pending.reserved}). </>}
+          <button onClick={() => doAssign(pending.id, pending.combo)}>Vẫn gán</button>{' '}
+          <button onClick={() => { setPending(null); setNote('Đã hủy, phím giữ nguyên.'); }}>Hủy</button>
+        </p>
+      )}
       <table style={{ borderCollapse: 'collapse' }}>
         <tbody>
           {ACTIONS.map((a) => (
@@ -40,7 +63,7 @@ export function KeysPanel({ map, setMap }: { map: Keymap; setMap: (m: Keymap) =>
               <td style={{ padding: '4px 12px 4px 0' }}>{a.label}</td>
               <td>
                 {(map[a.id] ?? []).map((c) => (
-                  <span key={c} style={{ display: 'inline-block', background: '#eef', border: '1px solid #99c', borderRadius: 3, padding: '0 6px', margin: '0 4px 0 0' }}>
+                  <span key={c} title={conflictOf(map, a.id, c).reserved ?? undefined} style={{ display: 'inline-block', background: conflictOf(map, a.id, c).reserved ? '#fff3cd' : '#eef', border: '1px solid #99c', borderRadius: 3, padding: '0 6px', margin: '0 4px 0 0' }}>
                     <b>{prettyCombo(c)}</b>{' '}
                     <button title="Gỡ phím này" style={{ border: 0, background: 'transparent', cursor: 'pointer' }} onClick={() => setMap(unassign(map, a.id, c))}>×</button>
                   </span>

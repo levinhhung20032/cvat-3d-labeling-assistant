@@ -1,6 +1,6 @@
 import { build } from 'vite';
 import react from '@vitejs/plugin-react';
-import { cpSync, rmSync } from 'node:fs';
+import { cpSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 
 // node build.mjs                    → dist/          (Edge / Chrome, manifest.json)
 // node build.mjs --target=firefox   → dist-firefox/  (Firefox, manifest.firefox.json)
@@ -42,6 +42,16 @@ await build({
   define,
   build: { outDir: out, emptyOutDir: false, rollupOptions: { input: 'panel.html' } },
 });
+
+// Chrome / Edge từ chối nạp content script không phải UTF-8 hợp lệ ("It isn't UTF-8 encoded"), ví dụ khi bundle chứa ký tự
+// không-ký-tự như U+FFFE. Kiểm tra mọi file js đầu ra để lỗi này không lọt tới người dùng.
+for (const f of readdirSync(out, { recursive: true })) {
+  if (!String(f).endsWith('.js')) continue;
+  const buf = readFileSync(`${out}/${f}`);
+  let text;
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { throw new Error(`${out}/${f} không phải UTF-8 hợp lệ`); }
+  if (/[￾￿]/.test(text)) throw new Error(`${out}/${f} chứa ký tự không hợp lệ (U+FFFE / U+FFFF); trình duyệt sẽ từ chối nạp`);
+}
 
 cpSync(firefox ? 'public/manifest.firefox.json' : 'public/manifest.json', `${out}/manifest.json`);
 console.log(`Build xong → ${out}/`);

@@ -1,3 +1,6 @@
+import { propagateSize } from '../shared/dynsize';
+import { findOverlaps, groupPairs } from '../shared/overlap';
+import { applyDraft, buildDraft, checkDraft, draftKey, type SavedDraft } from '../shared/draft';
 import { kv } from './storage';
 import { api } from '../shared/api';
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
@@ -13,8 +16,9 @@ import { BatchReview } from './BatchReview';
 import { JobInfo } from './JobInfo';
 import { KeysPanel } from './KeysPanel';
 import { UploadDialog } from './UploadDialog';
+import { QcPanel } from './QcPanel';
 import { ShiftPanel } from './ShiftPanel';
-import { attrKey, motionKey, shiftStore, useIgnored, useShifts } from './shiftStore';
+import { attrKey, motionKey, overlapKey, shiftStore, useIgnored, useShifts } from './shiftStore';
 import { parseLabelSpecs } from '../shared/attributes';
 import { suggestAttributes } from '../shared/attrSuggest';
 import { fmtDuration, shiftName, computeKpi } from '../shared/shift';
@@ -34,8 +38,9 @@ interface Entry { idx: number; before: CvatTrack; after: CvatTrack; keys: string
 interface Draft { work: CvatAnnotations | null; edited: Set<string>; undo: Entry[]; redo: Entry[] }
 type Action =
   | { t: 'load'; ann: CvatAnnotations }
-  | { t: 'edit'; idx: number; frame: number; cub: Cuboid }
+  | { t: 'edit'; idx: number; frame: number; cub: Cuboid; sizeAll?: boolean } // sizeAll: dynamic size tắt → kích thước mới áp cho mọi keyframe
   | { t: 'track'; idx: number; track: CvatTrack; frames: number[] } // đổi keyframe hàng loạt
+  | { t: 'restore'; work: CvatAnnotations; edited: Set<string> } // khôi phục bản nháp đã lưu
   | { t: 'undo' | 'redo' | 'reset'; baseline?: CvatAnnotations };
 
 const replaceTrack = (a: CvatAnnotations, idx: number, tr: CvatTrack): CvatAnnotations => {
@@ -61,10 +66,18 @@ function reducer(s: Draft, a: Action): Draft {
   switch (a.t) {
     case 'load':
       return { work: a.ann, edited: new Set(), undo: [], redo: [] };
+    case 'restore':
+      return { work: a.work, edited: a.edited, undo: [], redo: [] };
     case 'reset':
       return { work: a.baseline ?? s.work, edited: new Set(), undo: [], redo: [] };
     case 'edit':
-      return s.work ? applyChange(s, a.idx, upsertKeyframe(s.work.tracks[a.idx]!, a.frame, a.cub), [a.frame]) : s;
+      if (!s.work) return s;
+      {
+        const t1 = upsertKeyframe(s.work.tracks[a.idx]!, a.frame, a.cub);
+        if (!a.sizeAll) return applyChange(s, a.idx, t1, [a.frame]);
+        const r = propagateSize(t1, a.cub);
+        return applyChange(s, a.idx, r.track, [...new Set([a.frame, ...r.frames])]);
+      }
     case 'track':
       return applyChange(s, a.idx, a.track, a.frames);
     case 'undo': {
@@ -91,7 +104,7 @@ try { VERSION = api.runtime.getManifest().version; } catch { /* extension vừa 
 const EMPTY: Draft = { work: null, edited: new Set<string>(), undo: [], redo: [] };
 
 type State = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ok'; data: Data };
-type Tab = 'objects' | 'review' | 'shift' | 'keys' | 'job';
+type Tab = 'objects' | 'review' | 'shift' | 'qc' | 'keys' | 'job';
 
 const loadSync = () => { try { return kv.get('cvla-sync') !== '0'; } catch { return true; } };
 
@@ -107,6 +120,9 @@ export function App() {
     return () => window.clearInterval(t);
   }, []);
   const [toast, setToast] = useState('');
+  const [restorable, setRestorable] = useState<SavedDraft | null>(null);
+  const restorableRef = useRef<SavedDraft | null>(null);
+  const [draftNote, setDraftNote] = useState('');
   useEffect(() => {
     if (!toast) return;
     const t = window.setTimeout(() => setToast(''), 9000);
@@ -129,7 +145,7 @@ export function App() {
   const lastCvatFrame = useRef<number | null>(null);
   const setSync = (v: boolean) => { setSyncState(v); syncRef.current = v; try { kv.set('cvla-sync', v ? '1' : '0'); } catch { /* bỏ qua */ } };
   const [selectedNum, setSelectedNum] = useState<number | null>(null);
-  const [startWindow, setStartWindow] = useState(0);
+  const [startFrame, setStartFrame] = useState(0); // frame đầu của cửa sổ đang xem, để quay lại đúng chỗ
   // Chẩn đoán: nếu sau 6 giây vẫn chưa có dữ liệu thì nói rõ panel đang ở chế độ nào và đã bỏ qua tin nhắn nào.
   const [stuck, setStuck] = useState(false);
   useEffect(() => {
@@ -145,6 +161,11 @@ export function App() {
       else if (m.type === 'data') {
         setState({ kind: 'ok', data: { job: m.job, labels: m.labels, ann: m.annotations, removedIds: m.removedIds } });
         dispatch({ t: 'load', ann: m.annotations });
+        // Có bản nháp chưa upload từ lần trước (F5, đóng tab…) → hỏi khôi phục; nháp không còn khớp CVAT thì bỏ và báo.
+        const chk = checkDraft(kv.get(draftKey(m.job.id)), m.job.id, m.annotations);
+        restorableRef.current = chk.ok ? chk.draft : null;
+        setRestorable(restorableRef.current);
+        if (!chk.ok && chk.reason !== 'none') { setDraftNote(chk.message); kv.remove(draftKey(m.job.id)); }
         countRef.current = m.annotations.tracks.length;
       } else if (m.type === 'cvatDbl') {
         // Bấm đúp trong CVAT: luôn chọn object đó và chuyển sang Batch Review (không phụ thuộc ô đồng bộ).
@@ -203,6 +224,16 @@ export function App() {
 
   const data = state.kind === 'ok' ? state.data : null;
   const work = draft.work;
+  // Lưu nháp chưa upload (chỉ các track đã sửa) để F5 không mất công; dừng lưu khi đang chờ người dùng quyết định khôi phục.
+  useEffect(() => {
+    if (!data || !draft.work) return;
+    const t = window.setTimeout(() => {
+      if (restorableRef.current) return;
+      const d = buildDraft(data.job.id, data.ann, draft.work!, draft.edited);
+      if (d) kv.set(draftKey(data.job.id), JSON.stringify(d)); else kv.remove(draftKey(data.job.id));
+    }, 600);
+    return () => window.clearTimeout(t);
+  }, [draft.work, draft.edited, data]);
   workRef.current = work;
 
   /** Nút Focus: thu nhỏ tool và đưa camera 3D của CVAT lại gần object đang chọn (đổi frame CVAT nếu object không có ở frame đó). */
@@ -270,6 +301,19 @@ export function App() {
     });
     return m;
   }, [data, work, ignAll]);
+  // Chồng lấn CHÉO giữa các object ở mọi frame của job (tính lại khi nháp đổi), bỏ các cặp đã được bỏ qua.
+  const overlaps = useMemo(() => {
+    if (!data || !work) return [];
+    const frames: number[] = [];
+    for (let f = data.job.start_frame; f <= data.job.stop_frame; f++) frames.push(f);
+    return findOverlaps(work.tracks, frames).filter((o) => !ignAll.has(overlapKey(data.job.id, o.a, o.b)));
+  }, [data, work, ignAll]);
+  const overlapFrames = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const o of overlaps) { m.set(o.a, (m.get(o.a) ?? 0) + 1); m.set(o.b, (m.get(o.b) ?? 0) + 1); }
+    return m;
+  }, [overlaps]);
+  const overlapPairs = useMemo(() => groupPairs(overlaps), [overlaps]);
   const rows = useMemo(
     () => (data && work
       ? buildRows(work, data.labels, data.job.start_frame, data.job.stop_frame, (num, f) => ignAll.has(motionKey(data.job.id, num, f)))
@@ -332,6 +376,7 @@ export function App() {
         {tabBtn('objects', 'Bảng object')}
         {tabBtn('review', 'Batch Review')}
         {tabBtn('shift', 'Ca / KPI')}
+        {tabBtn('qc', 'QC')}
         {tabBtn('keys', 'Phím tắt')}
         {tabBtn('job', 'Thông tin job')}
         {data && (
@@ -347,6 +392,19 @@ export function App() {
           </span>
         )}
       </div>
+      {restorable && data && (
+        <div style={{ background: '#e0f2fe', border: '1px solid #38bdf8', padding: '4px 8px', margin: '6px 0' }}>
+          Có <b>bản nháp chưa upload</b> từ lần trước ({new Date(restorable.savedAt).toLocaleString()}): {restorable.edited.length} frame đã sửa, {Object.keys(restorable.tracks).length} object.{' '}
+          <button style={{ fontWeight: 700 }} onClick={() => {
+            const r = applyDraft(restorable, data.ann);
+            dispatch({ t: 'restore', work: r.work, edited: r.edited });
+            restorableRef.current = null; setRestorable(null);
+            setToast(r.skipped.length ? `Đã khôi phục nháp; bỏ qua object ${r.skipped.join(', ')} (ID không còn khớp).` : 'Đã khôi phục bản nháp.');
+          }}>Khôi phục</button>{' '}
+          <button onClick={() => { kv.remove(draftKey(data.job.id)); restorableRef.current = null; setRestorable(null); }}>Bỏ bản nháp</button>
+        </div>
+      )}
+      {draftNote && <div style={{ background: '#fff3cd', border: '1px solid #e0b000', padding: '4px 8px', margin: '6px 0' }}>{draftNote} <button onClick={() => setDraftNote('')}>×</button></div>}
       {uploading && data && work && (
         <UploadDialog
           baseline={data.ann} working={work} job={data.job} labels={data.labels}
@@ -355,7 +413,7 @@ export function App() {
           onReload={() => {
             setUploading(false);
             setTab('review');
-            setToast('Đã upload thành công, tool đã nạp lại dữ liệu từ CVAT. Nhớ tải lại tab CVAT (F5) trước khi bấm Save ở đó.');
+            setToast('Đã upload thành công, tool đã nạp lại dữ liệu từ CVAT. Nếu CVAT không tự tải lại, hãy F5 tab CVAT trước khi bấm Save ở đó.');
             post({ type: 'load' });
           }}
         />
@@ -387,24 +445,31 @@ export function App() {
       )}
       {data && work && tab === 'objects' && (
         <ObjectTable
-          rows={rows} hints={attrHints}
+          rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs}
           onOpen={(num, first) => {
             selectFromTool(num);
-            setStartWindow(Math.max(0, Math.floor(((first ?? 0) - data.job.start_frame) / 5)));
+            setStartFrame(first ?? data.job.start_frame);
             setTab('review');
           }}
         />
       )}
+      {data && work && tab === 'qc' && (
+        <QcPanel
+          jobId={data.job.id} count={work.tracks.length}
+          onOpen={(num, frame) => { selectFromTool(num); setStartFrame(frame); setTab('review'); }}
+        />
+      )}
       {data && work && tab === 'review' && (
         <BatchReview
+          overlaps={overlaps}
           labels={data.labels} job={data.job} ann={work} rows={rows} selectedNum={selectedNum} setSelectedNum={selectFromTool}
           onSel={(f) => { selFrameRef.current = f; }}
           onHoverFrame={(f) => { hoverFrameRef.current = f; }}
           onView={(f) => {
             viewFrames.current = f;
-            if (data && f.length) setStartWindow(Math.max(0, Math.floor((f[0]! - data.job.start_frame) / 5))); // nhớ cửa sổ đang xem để quay lại đúng chỗ
-          }} initialWindow={startWindow} edited={draft.edited} focus={focus}
-          onEdit={(idx, frame, cub) => { dispatch({ t: 'edit', idx, frame, cub }); shiftStore.edit(data.job.id, idx + 1); }}
+            if (f.length) setStartFrame(f[0]!);
+          }} initialFrame={startFrame} edited={draft.edited} focus={focus}
+          onEdit={(idx, frame, cub, sizeAll) => { dispatch({ t: 'edit', idx, frame, cub, sizeAll }); shiftStore.edit(data.job.id, idx + 1); }}
           onTrack={(idx, track, frames) => { dispatch({ t: 'track', idx, track, frames }); shiftStore.edit(data.job.id, idx + 1); }}
         />
       )}

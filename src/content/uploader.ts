@@ -1,3 +1,4 @@
+import { tiltTooLarge } from '../shared/cuboid';
 import { checkOutsideKeyframes } from '../shared/rules';
 import { UPLOAD_BATCH, covers, sameTrack } from '../shared/upload';
 import type { UploadPayload } from '../shared/plan';
@@ -74,8 +75,9 @@ export async function runUpload(deps: UploadDeps, req: UploadReq): Promise<Uploa
   if (new Set(ids).size !== ids.length) return fail('rules', 'Có ID track trùng nhau trong dữ liệu gửi.');
   const v = checkOutsideKeyframes({ ...server, tracks: req.changed }, req.stopFrame);
   if (v.length) return fail('rules', `Còn frame outside thiếu keyframe: ${v.map((x) => x.message).join('; ')}`);
-  const tilted = req.changed.filter((t) => t.shapes.some((s) => s.points[3] !== 0 || s.points[4] !== 0)).map((t) => t.id);
-  if (tilted.length) return fail('rules', `rx/ry khác 0 ở track: ${tilted.join(', ')} (box chỉ được xoay yaw).`);
+  // Roll / pitch được phép (box nghiêng theo mặt đường) nhưng không quá ±30° và phải là số hợp lệ.
+  const tilted = req.changed.filter((t) => t.shapes.some((s) => !s.outside && (tiltTooLarge(s.points) || s.points.some((n) => !Number.isFinite(n))))).map((t) => t.id);
+  if (tilted.length) return fail('rules', `roll/pitch (rx/ry) vượt ±30° hoặc không hợp lệ ở track: ${tilted.join(', ')}.`);
 
   const batches: CvatTrack[][] = [];
   for (let i = 0; i < req.changed.length; i += UPLOAD_BATCH) batches.push(req.changed.slice(i, i + UPLOAD_BATCH));

@@ -46,7 +46,7 @@ export function stateAt(track: CvatTrack, f: number): FrameState {
     status: 'interp',
     cuboid: {
       x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t), z: lerp(a.z, b.z, t),
-      rx: 0, ry: 0, yaw: lerp(a.yaw, b.yaw, t),
+      rx: lerp(a.rx, b.rx, t), ry: lerp(a.ry, b.ry, t), yaw: lerp(a.yaw, b.yaw, t),
       sx: lerp(a.sx, b.sx, t), sy: lerp(a.sy, b.sy, t), sz: lerp(a.sz, b.sz, t),
     },
   };

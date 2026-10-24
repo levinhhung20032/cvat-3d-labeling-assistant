@@ -49,3 +49,21 @@ export const windowFrames = (k: number, start: number, stop: number, step = 5, s
   for (let f = start + k * step; f < start + k * step + size && f <= stop; f++) out.push(f);
   return out;
 };
+
+/**
+ * Phân trang danh sách frame cần xem. Chế độ liên tục: mỗi trang `size` frame, hai trang kề nhau chung 1 frame
+ * (`overlap` = 1, như cửa sổ 6 frame bước 5). Chế độ chỉ-keyframe: không chung frame (`overlap` = 0).
+ */
+export const pageStep = (size: number, overlap: number) => Math.max(1, size - overlap);
+export const pageCount = (total: number, size: number, overlap: number) =>
+  Math.max(1, Math.ceil((overlap ? total - 1 : total) / pageStep(size, overlap)));
+export const pageFrames = (list: number[], k: number, size: number, overlap: number): number[] => {
+  const a = k * pageStep(size, overlap);
+  return list.slice(a, a + size);
+};
+/** Trang chứa frame f (frame không có trong danh sách → trang của frame gần nhất phía trước). */
+export const pageOf = (list: number[], f: number, size: number, overlap: number): number => {
+  let i = 0;
+  for (let j = 0; j < list.length; j++) if (list[j]! <= f) i = j;
+  return Math.floor(i / pageStep(size, overlap));
+};

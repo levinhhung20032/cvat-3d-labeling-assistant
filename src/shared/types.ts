@@ -56,7 +56,7 @@ export interface CvatLabel {
 }
 
 export interface Violation {
-  rule: 'id-removed' | 'outside-missing-keyframe' | 'forbidden-action' | 'id-missing';
+  rule: 'id-removed' | 'outside-missing-keyframe' | 'forbidden-action' | 'id-missing' | 'tilt-too-large';
   trackId?: number;
   frames?: number[];
   message: string;

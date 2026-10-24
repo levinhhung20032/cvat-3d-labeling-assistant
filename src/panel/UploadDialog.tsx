@@ -3,7 +3,8 @@ import type { UploadResult } from '../content/uploader';
 import { outsideFrames, type ShiftTrackRec } from '../shared/shift';
 import { buildUploadPlan } from '../shared/upload';
 import type { CvatAnnotations, CvatJob, CvatLabel } from '../shared/types';
-import { rpc } from './bridge';
+import { post, rpc } from './bridge';
+import { kv } from './storage';
 
 interface LastInfo { time: string; tracks: number; reverted: boolean; verified: boolean }
 
@@ -22,17 +23,24 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
   const [result, setResult] = useState<UploadResult | null>(null);
   const [last, setLast] = useState<LastInfo | null>(null);
   const [okRevert, setOkRevert] = useState(false);
+  const [autoReload, setAutoReloadState] = useState(() => { try { return kv.get('cvla-autoreload') !== '0'; } catch { return true; } });
+  const setAutoReload = (v: boolean) => { setAutoReloadState(v); try { kv.set('cvla-autoreload', v ? '1' : '0'); } catch { /* bỏ qua */ } };
 
   const plan = useMemo(() => buildUploadPlan(baseline, working, job.stop_frame, includeOthers, bake), [baseline, working, job, includeOthers, bake]);
   const names = useMemo(() => new Map(labels.map((l) => [l.id, l.name])), [labels]);
-  const needTilt = plan.tiltFixed > 0;
+  const needTilt = plan.tiltSet > 0;
   const nothing = plan.changed.length === 0;
   const blocked = plan.blockers.length > 0;
 
   // Ghi thành công và đã đọc lại khớp → tự đóng, nạp lại dữ liệu và quay về Batch Review.
   useEffect(() => {
     if (result?.ok && result.sent && result.stage === 'done') {
-      const t = window.setTimeout(onReload, 1200);
+      // Quay về Batch Review với dữ liệu mới; nếu bật tự tải lại thì tải lại tab CVAT ngay sau đó (tool tự mở lại).
+      // (hẹn giờ lồng nhau để không bị hủy khi hộp thoại đóng lại sau onReload)
+      const t = window.setTimeout(() => {
+        onReload();
+        if (autoReload) window.setTimeout(() => post({ type: 'reloadCvat' }), 600);
+      }, 1200);
       return () => window.clearTimeout(t);
     }
   }, [result]);
@@ -85,7 +93,7 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
         <table style={{ borderCollapse: 'collapse', margin: '6px 0' }}>
           <thead>
             <tr style={{ textAlign: 'left' }}>
-              <th>ID</th><th>Nhãn</th><th>+KF</th><th>−KF</th><th>~KF</th><th>thuộc tính</th><th>khoá thêm</th><th>outside tự điền</th><th>rx/ry→0</th>
+              <th>ID</th><th>Nhãn</th><th>+KF</th><th>−KF</th><th>~KF</th><th>thuộc tính</th><th>khoá thêm</th><th>outside tự điền</th><th>nghiêng (rx/ry)</th>
             </tr>
           </thead>
           <tbody>
@@ -93,7 +101,7 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
               <tr key={d.id} style={{ borderTop: '1px solid #ddd' }}>
                 <td><b>{d.index + 1}</b> <span style={{ color: '#999', fontSize: 10 }}>db {d.id}</span></td>
                 <td>{names.get(working.tracks[d.index]!.label_id) ?? '?'}</td>
-                <td>{d.added}</td><td>{d.removed}</td><td>{d.modified}</td><td>{d.attrs}</td><td>{d.baked}</td><td>{d.outsideFilled}</td><td>{d.tiltFixed}</td>
+                <td>{d.added}</td><td>{d.removed}</td><td>{d.modified}</td><td>{d.attrs}</td><td>{d.baked}</td><td>{d.outsideFilled}</td><td>{d.tiltSet}</td>
               </tr>
             ))}
           </tbody>
@@ -129,7 +137,7 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
         <p style={{ margin: '6px 0', background: '#fff3cd', padding: 4 }}>
           <label>
             <input type="checkbox" checked={okTilt} onChange={(e) => setOkTilt(e.target.checked)} />{' '}
-            Đồng ý đưa rx/ry về 0 ở <b>{plan.tiltFixed}</b> keyframe (box chỉ được xoay quanh trục z) — đây là thay đổi dữ liệu gốc.
+            Xác nhận ghi roll/pitch (rx/ry) ≠ 0 ở <b>{plan.tiltSet}</b> keyframe (box nghiêng theo mặt đường, tối đa ±30°). Quy ước góc là Euler XYZ như CVAT — hãy kiểm tra bằng mắt trên CVAT sau khi upload.
           </label>
         </p>
       )}
@@ -142,7 +150,8 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
         <span style={{ fontSize: 11, color: '#555' }}>Tool vẫn tự kiểm tra xung đột / ID / luật trước khi ghi và lưu nhật ký để hoàn nguyên.</span>
       </div>
       <div style={{ fontSize: 11, color: '#555' }}>
-        Thành công thì tool tự quay về Batch Review với dữ liệu mới. Hãy tải lại tab CVAT (F5) — <b>đừng bấm Save trong CVAT trước khi tải lại</b>, vì giao diện CVAT còn giữ bản cũ và có thể ghi đè.
+        <label><input type="checkbox" checked={autoReload} onChange={(e) => setAutoReload(e.target.checked)} /> Sau khi upload thành công, <b>tự tải lại tab CVAT</b> rồi mở lại tool</label>{' '}
+        (nếu CVAT đang có thay đổi chưa lưu, trình duyệt sẽ hỏi trước khi tải lại). Chưa tải lại thì <b>đừng bấm Save trong CVAT</b>, vì giao diện CVAT còn giữ bản cũ và có thể ghi đè.
       </div>
 
       {busy && <p>Đang xử lý…</p>}

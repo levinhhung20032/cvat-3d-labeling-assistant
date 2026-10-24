@@ -3,7 +3,7 @@ import { onViewport, viewport } from './bridge';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { azimuthDeg, type Cuboid } from '../shared/cuboid';
 import {
-  applyLocalBox, dragEdge, dragMove, dragRotateRel, dragYawByX, hitTest, identityBox, type Hit, type LocalBox,
+  applyLocalBox, dragEdge, dragMove, dragRotateRel, dragTilt, dragYawByX, hitTest, identityBox, localBoxOf, type Hit, type LocalBox,
 } from '../shared/edit';
 import { referenceCuboid, stateAt, type FrameState } from '../shared/interp';
 import {
@@ -11,34 +11,44 @@ import {
   type TrackChange,
 } from '../shared/keyframes';
 import type { PointCloud } from '../shared/pcd';
-import { type ObjectRow, windowCount, windowFrames } from '../shared/table';
+import { type ObjectRow, pageCount, pageFrames, pageOf } from '../shared/table';
 import type { CvatAnnotations, CvatJob, CvatLabel, CvatTrack } from '../shared/types';
 import { parseLabelSpecs } from '../shared/attributes';
 import { AttributePanel } from './AttributePanel';
 import { drawView, localize, STATUS_COLOR, type Local, type Scene, type View } from './render';
 import { Cancelled, pointClouds } from './stores';
-import { ignoreKey, ignoreStore, motionKey, shiftStore, useIgnored } from './shiftStore';
+import { ignoreKey, ignoreStore, motionKey, overlapKey, shiftStore, useIgnored } from './shiftStore';
 import { CameraPanel } from './CameraPanel';
+import { qcStore, useQcMode, useQcNotes } from './qcStore';
+import { qcKey } from '../shared/qc';
 import { onAction } from './actions';
 import { fitReport, type FitReport } from '../shared/fit';
-import { groundSnap, type GroundResult } from '../shared/ground';
+import { groundSnap, tiltFromPlane, type GroundResult } from '../shared/ground';
 import { motionJump, type MotionWarning } from '../shared/motion';
 import { isFixedSize, suggestBox, type Suggestion } from '../shared/suggest';
+import { propagateSize, sameSize } from '../shared/dynsize';
+import type { OverlapItem } from '../shared/overlap';
 
 const VIEWS: View[] = ['top', 'side', 'front'];
 const STATUS_TEXT: Record<FrameState['status'], string> = {
   key: 'keyframe', interp: 'nội suy', hold: 'giữ nguyên', 'outside-key': 'outside (KF)', outside: 'outside', none: 'chưa có',
 };
+const EMPTY_CUBS: Cuboid[] = [];
 const ZOOM_MIN = 0.5, ZOOM_MAX = 8;
 const CELL_MIN = 110, CELL_MAX = 520;
 
 // --- tùy chọn hiển thị, nhớ theo từng người dùng (chỉ là tiện ích, không quan trọng nếu mất) ---
-interface Prefs { auto: boolean; size: number }
+interface Prefs { auto: boolean; size: number; slabMargin: number; perWin: number; keyOnly: boolean; tilt: boolean }
+const PREFS_DEFAULT: Prefs = { auto: true, size: 200, slabMargin: 0.5, perWin: 6, keyOnly: false, tilt: true };
 const loadPrefs = (): Prefs => {
   try {
     const p = JSON.parse(kv.get('cvla-prefs') ?? '{}') as Partial<Prefs>;
-    return { auto: p.auto ?? true, size: Math.min(CELL_MAX, Math.max(CELL_MIN, p.size ?? 200)) };
-  } catch { return { auto: true, size: 200 }; }
+    const num = (v: unknown, d: number, lo: number, hi: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
+    return {
+      auto: p.auto ?? true, size: num(p.size, 200, CELL_MIN, CELL_MAX), slabMargin: num(p.slabMargin, 0.5, 0, 3),
+      perWin: Math.round(num(p.perWin, 6, 2, 12)), keyOnly: p.keyOnly === true, tilt: p.tilt !== false,
+    };
+  } catch { return { ...PREFS_DEFAULT }; }
 };
 const savePrefs = (p: Prefs) => { try { kv.set('cvla-prefs', JSON.stringify(p)); } catch { /* bỏ qua */ } };
 
@@ -58,8 +68,8 @@ function cursorFor(view: View, hit: Hit, alt = false): string {
 
 interface DragState { hit: NonNullable<Hit>; x0: number; y0: number; base: LocalBox; moved: boolean }
 
-function Cell({ view, size, loc, st, half, box, misfit, ghost, ground, mark, scene, autoSnap, onPreview, onCommit, onZoom }: {
-  scene: Scene;
+function Cell({ view, size, loc, st, half, box, misfit, ghost, ground, mark, scene, overlays, tiltOn, autoSnap, onPreview, onCommit, onZoom }: {
+  scene: Scene; overlays: LocalBox[]; tiltOn: boolean;
   mark: { u: number; v: number; w: number } | null;
   ground: number | null; autoSnap: boolean;
   ghost: LocalBox | null; misfit: boolean; view: View; size: number; loc: Local | null; st: FrameState; half: number; box: LocalBox | null;
@@ -73,8 +83,8 @@ function Cell({ view, size, loc, st, half, box, misfit, ghost, ground, mark, sce
     const ctx = ref.current?.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawView(ctx, size, view, loc, box, half, st.status, !!drag.current, misfit, ghost, ground, mark, scene);
-  }, [view, size, dpr, loc, st.status, half, box, misfit, ghost, ground, mark, scene]);
+    drawView(ctx, size, view, loc, box, half, st.status, !!drag.current, misfit, ghost, ground, mark, scene, overlays, st.cuboid);
+  }, [view, size, dpr, loc, st.status, st.cuboid, half, box, misfit, ghost, ground, mark, scene, overlays]);
 
   // Cuộn chuột trên ô = phóng to/thu nhỏ mọi frame (listener gốc để chặn cuộn trang).
   const zoomRef = useRef(onZoom);
@@ -116,9 +126,11 @@ function Cell({ view, size, loc, st, half, box, misfit, ghost, ground, mark, sce
     const c = size / 2;
     // Nhấn / thả Alt giữa chừng cũng đổi chế độ ngay (di chuyển ↔ xoay), tính từ trạng thái ban đầu.
     const rotating = d.hit.mode === 'rotate' || (d.hit.mode === 'move' && e.altKey);
+    // Giữ Alt: view Trên xoay yaw; view Bên / Trước xoay pitch / roll (nghiêng theo mặt đường) nếu bật, không thì xoay yaw như cũ.
     const nb =
       rotating
-        ? (view === 'top' ? dragRotateRel(d.base, d.x0 - c, d.y0 - c, px - c, py - c) : dragYawByX(d.base, dx))
+        ? (view === 'top' ? dragRotateRel(d.base, d.x0 - c, d.y0 - c, px - c, py - c)
+          : tiltOn ? dragTilt(view, d.base, d.x0 - c, d.y0 - c, px - c, py - c) : dragYawByX(d.base, dx))
         : d.hit.mode === 'move' ? dragMove(view, d.base, dx, dy, k)
         : d.hit.mode === 'edge' ? dragEdge(view, d.base, d.hit.axis, d.hit.sign, dx, dy, k)
         : d.base;
@@ -151,7 +163,10 @@ function Cell({ view, size, loc, st, half, box, misfit, ghost, ground, mark, sce
   );
 }
 
-function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene }: {
+function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn }: {
+  tiltOn: boolean;
+  qcOn: boolean; qcNote: string; onQcNote: (f: number, text: string) => void;
+  overlap: { other: number; ratio: number }[]; overlayCubs: Cuboid[]; onIgnoreOverlap: (other: number) => void; onOpenObject: (other: number) => void;
   onToggleOutside: (f: number) => void; onHover: (f: number | null) => void; scene: Scene;
   motion: MotionWarning | null; motionIgnored: boolean; onIgnoreMotion: (f: number, on: boolean) => void;
   autoSnap: boolean; onSnap: (f: number, g: GroundResult | null) => void; onGround: (f: number) => void;
@@ -200,6 +215,7 @@ function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fi
     return { u: dx * cs + dy * sn, v: -dx * sn + dy * cs, w: shownMotion.pred.z - st.cuboid.z };
   }, [shownMotion, st.cuboid]);
   const box = preview ?? (st.cuboid ? identityBox(st.cuboid) : null);
+  const overlays = useMemo(() => (refCub ? overlayCubs.map((o) => localBoxOf(refCub, o)) : []), [refCub, overlayCubs]);
   const color = STATUS_COLOR[st.status];
   return (
     <div
@@ -210,7 +226,7 @@ function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fi
       style={{ border: `3px solid ${color}`, outline: selected ? '2px solid #111' : 'none', width: size, flex: 'none' }}
     >
       <div style={{ background: color, color: '#fff', padding: '1px 4px', fontSize: Math.max(11, Math.min(14, size / 14)), whiteSpace: 'nowrap', overflow: 'hidden' }}>
-        {bad || shownMotion ? '⚠ ' : ''}frame {f} · {STATUS_TEXT[st.status]}{edited ? ' · ✎' : ''}
+        {bad || shownMotion || overlap.length ? '⚠ ' : ''}frame {f} · {STATUS_TEXT[st.status]}{edited ? ' · ✎' : ''}{qcNote ? ' · 📝' : ''}{st.cuboid && (st.cuboid.rx !== 0 || st.cuboid.ry !== 0) ? ` · ∠${(st.cuboid.rx * 57.2958).toFixed(1)}°/${(st.cuboid.ry * 57.2958).toFixed(1)}°` : ''}
         {(st.cuboid || st.status === 'outside' || st.status === 'outside-key') && (
           <button
             title={st.cuboid ? 'Gắn keyframe outside từ frame này (phím O khi trỏ chuột vào cột)' : 'Đưa object trở lại từ frame này (phím O khi trỏ chuột vào cột)'}
@@ -244,6 +260,20 @@ function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fi
           <button onClick={(e) => { e.stopPropagation(); onIgnore(f, false); }} style={{ padding: '0 4px' }}>hoàn lại</button>
         </div>
       )}
+      {(qcOn || qcNote) && (
+        <input
+          value={qcNote} maxLength={500} placeholder="note QC…" readOnly={!qcOn}
+          title={qcOn ? 'Ghi chú QC cho frame này (lưu cục bộ, xuất Excel ở tab QC)' : qcNote}
+          onClick={(e) => e.stopPropagation()} onChange={(e) => onQcNote(f, e.target.value)}
+          style={{ width: '100%', boxSizing: 'border-box', fontSize: 11, background: '#fffbe0', border: 0, borderBottom: '1px solid #e0b000' }}
+        />
+      )}
+      {overlap.map((o) => (
+        <div key={o.other} style={{ background: '#ffd9a8', color: '#5a2d00', fontSize: 11, padding: '1px 4px' }} title="Phần giao trên hình chiếu từ trên / diện tích box nhỏ hơn. Box cam nét đứt trên ô là object kia.">
+          ⚠ chồng với <button onClick={(e) => { e.stopPropagation(); onOpenObject(o.other); }} style={{ padding: '0 4px' }}>#{o.other}</button> {Math.round(o.ratio * 100)}%{' '}
+          <button onClick={(e) => { e.stopPropagation(); onIgnoreOverlap(o.other); }} style={{ padding: '0 4px' }} title="Bỏ qua cặp này ở mọi frame (ví dụ người ngồi trên xe máy)">✖ bỏ qua cặp</button>
+        </div>
+      ))}
       {shownMotion && (
         <div style={{ background: '#ffe9c7', color: '#6b3a00', fontSize: 11, padding: '1px 4px' }} title={shownMotion.message}>
           ⚠ {shownMotion.message}{' '}
@@ -258,12 +288,12 @@ function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fi
       )}
       {snap && Math.abs(snap.dz) >= 0.08 && (
         <div style={{ background: '#eaf6d8', color: '#2d5a00', fontSize: 11, padding: '1px 4px' }}>
-          ⏬ đáy {snap.dz < 0 ? 'lơ lửng' : 'chìm'} {Math.abs(snap.dz).toFixed(2)} m{snap.flat ? '' : ' (mặt đất không phẳng)'}{' '}
+          ⏬ đáy {snap.dz < 0 ? 'lơ lửng' : 'chìm'} {Math.abs(snap.dz).toFixed(2)} m{snap.method === 'plane' ? ` · dốc ${snap.slopeDeg!.toFixed(1)}°${snap.steep ? ' — dốc lớn, đáy chỉ chạm một phía' : ''}` : snap.flat ? '' : ' (mặt đất không phẳng)'}{' '}
           <button onClick={(e) => { e.stopPropagation(); onGround(f); }} style={{ padding: '0 4px' }} title="Dời box theo z để đáy chạm mặt đường (phím G)">snap</button>
         </div>
       )}
       {VIEWS.map((v) => (
-        <Cell key={v} scene={scene} mark={mark} ground={snap?.groundW ?? null} autoSnap={autoSnap} ghost={sug?.box ?? null} misfit={bad?.level === 'misfit'} view={v} size={size} loc={loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} />
+        <Cell key={v} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={snap?.groundW ?? null} autoSnap={autoSnap} ghost={sug?.box ?? null} misfit={bad?.level === 'misfit'} view={v} size={size} loc={loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} />
       ))}
       {!pc && <div style={{ fontSize: 11, padding: 2 }}>{err ? `Lỗi: ${err}` : 'đang tải…'}</div>}
     </div>
@@ -295,7 +325,8 @@ function IdBox({ value, max, onCommit }: { value: number; max: number; onCommit:
   );
 }
 
-export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initialWindow, edited, onEdit, onTrack, focus, onView, onSel, onHoverFrame, labels }: {
+export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initialFrame, edited, onEdit, onTrack, focus, onView, onSel, onHoverFrame, labels, overlaps }: {
+  overlaps: OverlapItem[]; // chồng lấn của cả job (đã bỏ cặp được bỏ qua)
   onHoverFrame: (f: number | null) => void;
   labels: CvatLabel[];
   onSel: (frame: number | null) => void;
@@ -303,15 +334,33 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
   focus: { frame: number; nonce: number } | null;
   onTrack: (trackIndex: number, track: CvatTrack, frames: number[]) => void;
   job: CvatJob; ann: CvatAnnotations; rows: ObjectRow[]; selectedNum: number | null; setSelectedNum: (n: number) => void;
-  initialWindow: number; edited: Set<string>; onEdit: (trackIndex: number, frame: number, c: Cuboid) => void;
+  initialFrame: number; edited: Set<string>; onEdit: (trackIndex: number, frame: number, c: Cuboid, sizeAll?: boolean) => void;
 }) {
   const { start_frame: start, stop_frame: stop } = job;
-  const nWin = windowCount(start, stop);
-  const [k, setK] = useState(Math.min(initialWindow, nWin - 1));
+  const [prefs, setPrefs] = useState(loadPrefs);
+  const max = ann.tracks.length;
+  const num = selectedNum ?? 1;
+  const track = ann.tracks[num - 1] ?? null;
+  // Danh sách frame cần xem: cả job hoặc khoảng [từ, đến] tự chọn; tùy chọn chỉ giữ keyframe của object đang chọn.
+  const [viewFrom, setViewFrom] = useState('');
+  const [viewTo, setViewTo] = useState('');
+  const list = useMemo(() => {
+    const a = Math.max(start, Math.min(stop, Number.isInteger(Number(viewFrom)) && viewFrom !== '' ? Number(viewFrom) : start));
+    const b = Math.max(a, Math.min(stop, Number.isInteger(Number(viewTo)) && viewTo !== '' ? Number(viewTo) : stop));
+    let l: number[] = [];
+    for (let f = a; f <= b; f++) l.push(f);
+    if (prefs.keyOnly && track) { const ks = new Set(track.shapes.map((x) => x.frame)); l = l.filter((f) => ks.has(f)); }
+    return l.length ? l : [a];
+  }, [start, stop, viewFrom, viewTo, prefs.keyOnly, track]);
+  const overlap = prefs.keyOnly ? 0 : 1;
+  const nWin = pageCount(list.length, prefs.perWin, overlap);
+  const [kRaw, setK] = useState(() => Math.min(nWin - 1, pageOf(list, initialFrame, prefs.perWin, overlap)));
+  const k = Math.min(kRaw, nWin - 1);
   const [selFrame, setSelFrame] = useState<number | null>(null);
   const hoverRef = useRef<number | null>(null); // cột frame đang trỏ chuột (không cần render lại)
   const [loaded, setLoaded] = useState<Set<number>>(new Set());
-  const [prefs, setPrefs] = useState(loadPrefs);
+  const qcOn = useQcMode();
+  const qcNotes = useQcNotes();
   const [zoom, setZoom] = useState(1);
   const [note, setNote] = useState('');
   const [warn, setWarn] = useState(true);
@@ -324,14 +373,40 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
   const [rangeFrom, setRangeFrom] = useState('');
   const [rangeTo, setRangeTo] = useState('');
   const vp = useViewport();
-  const max = ann.tracks.length;
-  const num = selectedNum ?? 1;
-  const track = ann.tracks[num - 1] ?? null;
   const row = rows.find((r) => r.num === num);
+  // Dynamic size theo từng object (nhớ cục bộ). Mặc định: bật cho nhãn co giãn, tắt cho Vehicle / Obstacle.
+  const dynKey = `cvla-dyn:${job.id}:${num}`;
+  const [, bumpDyn] = useState(0);
+  const dyn = (() => { try { const v = kv.get(dynKey); if (v === '1') return true; if (v === '0') return false; } catch { /* bỏ qua */ } return !isFixedSize(row?.label ?? ''); })();
+  const setDyn = (v: boolean) => { try { kv.set(dynKey, v ? '1' : '0'); } catch { /* bỏ qua */ } bumpDyn((x) => x + 1); };
+  /** Ghi cuboid mới vào frame f. Dynamic size tắt mà kích thước đổi → áp kích thước mới cho mọi keyframe. */
+  const commit = (f: number, cub: Cuboid) => {
+    const cur = track ? stateAt(track, f).cuboid : null;
+    onEdit(num - 1, f, cub, !dyn && !!cur && !sameSize(cur, cub));
+  };
   const specs = useMemo(() => parseLabelSpecs(labels), [labels]);
-  const frames = windowFrames(k, start, stop);
+  const frames = pageFrames(list, k, prefs.perWin, overlap);
   const framesKey = frames.join(',');
+  // Đổi cách chia trang / khoảng xem / object: giữ nguyên frame đang xem thay vì nhảy.
+  const anchorRef = useRef(frames[0] ?? start);
+  anchorRef.current = frames[0] ?? start;
+  const listKey = `${list.length}:${list[0]}:${list[list.length - 1]}`;
+  useEffect(() => { setK(pageOf(list, anchorRef.current, prefs.perWin, overlap)); }, [prefs.perWin, prefs.keyOnly, listKey, num]);
   useEffect(() => { onView(frames); }, [framesKey]);
+  // Chồng lấn của object đang chọn ở các frame đang xem, và box của object kia để vẽ lên ô.
+  const ovAt = useMemo(() => {
+    const m = new Map<number, { other: number; ratio: number }[]>();
+    for (const o of overlaps) if (o.a === num || o.b === num) m.set(o.frame, [...(m.get(o.frame) ?? []), { other: o.a === num ? o.b : o.a, ratio: o.ratio }]);
+    return m;
+  }, [overlaps, num]);
+  const ovCubs = useMemo(() => {
+    const m = new Map<number, Cuboid[]>();
+    for (const f of frames) for (const o of ovAt.get(f) ?? []) {
+      const c = ann.tracks[o.other - 1] ? stateAt(ann.tracks[o.other - 1]!, f).cuboid : null;
+      if (c) m.set(f, [...(m.get(f) ?? []), c]);
+    }
+    return m;
+  }, [ovAt, framesKey, ann]);
   useEffect(() => { onSel(selFrame); }, [selFrame]);
 
   const updatePrefs = (p: Prefs) => { setPrefs(p); savePrefs(p); };
@@ -339,7 +414,7 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
   useEffect(() => { setZoom(1); }, [num]);
 
   // Cỡ ô: tự khớp độ phân giải màn hình (đủ rộng cho 6 cột và đủ cao cho 3 hàng), hoặc chỉnh tay.
-  const cols6 = 6;
+  const cols6 = Math.min(8, Math.max(2, prefs.perWin));
   const fitW = Math.floor((vp.w - 24 - (cols6 - 1) * 6) / cols6 - 6);
   const fitH = Math.floor((vp.h - 190) / 3);
   const size = prefs.auto ? Math.min(CELL_MAX, Math.max(CELL_MIN, Math.min(fitW, fitH))) : prefs.size;
@@ -351,7 +426,16 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
     return Math.min(15, Math.max(3, m * 0.8 + 1));
   }, [track]);
   const half = baseHalf / zoom;
-  const scene = useMemo<Scene>(() => ({ zClip: baseHalf, slab: baseHalf * 0.5, colorHalf: baseHalf }), [baseHalf]);
+  const scene = useMemo<Scene>(() => {
+    // Lát cắt view Bên / Trước bám theo kích thước box (+ biên tùy chỉnh), để không lẫn tường / vật ở xa hai bên.
+    let sx = 1, sy = 1;
+    if (track) for (const s of track.shapes) if (!s.outside) { sx = Math.max(sx, s.points[6] ?? 0); sy = Math.max(sy, s.points[7] ?? 0); }
+    const cap = baseHalf * 0.5;
+    return {
+      zClip: baseHalf, colorHalf: baseHalf,
+      slab: Math.min(cap, sy / 2 + prefs.slabMargin), slabFront: Math.min(cap, sx / 2 + prefs.slabMargin),
+    };
+  }, [baseHalf, track, prefs.slabMargin]);
   const locHalf = baseHalf / ZOOM_MIN;
 
   const cols = useMemo(
@@ -404,11 +488,17 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
     const isOut = st.status === 'outside' || st.status === 'outside-key';
     const res = isOut ? restoreFrom(track, f, stop) : setOutsideFrom(track, f);
     apply(res, isOut ? `Frame ${f}: đã đưa object trở lại (có box).` : `Frame ${f}: đã gắn keyframe outside (tới keyframe kế tiếp).`,
-      'Không đổi được: cần frame có box (không phải keyframe đầu của track) hoặc frame outside có box tham chiếu.');
+      'Không đổi được: cần frame có box hoặc frame outside có box tham chiếu.');
   };
   const outsideRange = () => {
     const r = range();
     if (r && track) apply(setOutsideRange(track, r[0], r[1], stop), `Đã đặt outside ${'{n}'} frame trong ${r[0]}–${r[1]}. Hoàn tác được.`, 'Không có frame nào trong khoảng này đổi được.');
+  };
+  const unifySize = () => {
+    const cur = track && selFrame !== null ? stateAt(track, selFrame).cuboid : null;
+    if (!track || !cur) { setNote('Chọn frame có box (bấm tiêu đề cột) để lấy kích thước.'); return; }
+    const r = propagateSize(track, cur);
+    apply(r.frames.length ? { track: r.track, frames: r.frames } : null, `Đã áp kích thước frame ${selFrame} cho ${'{n}'} keyframe. Hoàn tác được.`, 'Mọi keyframe đã cùng kích thước.');
   };
   const unlockInner = () => {
     const r = range();
@@ -423,7 +513,7 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
   const accept = (f: number, s: Suggestion) => {
     const st = track ? stateAt(track, f) : null;
     if (!st?.cuboid) return;
-    onEdit(num - 1, f, applyLocalBox(st.cuboid, s.box));
+    commit(f, applyLocalBox(st.cuboid, s.box));
     shiftStore.accepted(job.id, num);
     setNote(`Frame ${f}: đã chấp nhận gợi ý (${s.message.replace('gợi ý: ', '')}).`);
   };
@@ -452,8 +542,17 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
   const groundFrame = (f: number): boolean => {
     const st = track ? stateAt(track, f) : null;
     const g = snaps.get(f);
-    if (!st?.cuboid || !g || Math.abs(g.dz) < 0.005) return false;
-    onEdit(num - 1, f, { ...st.cuboid, z: st.cuboid.z + g.dz });
+    if (!st?.cuboid || !g) return false;
+    // Mặt dốc: nghiêng box song song mặt đường (roll / pitch) nếu bật và dốc đủ rõ; không thì chỉ dời z.
+    if (prefs.tilt && g.method === 'plane' && g.plane && g.dzTilt !== undefined && (g.slopeDeg ?? 0) >= 1) {
+      const t = tiltFromPlane(g.plane.a, g.plane.b, st.cuboid.yaw);
+      const same = Math.abs(t.rx - st.cuboid.rx) < 0.002 && Math.abs(t.ry - st.cuboid.ry) < 0.002 && Math.abs(g.dzTilt) < 0.005;
+      if (same) return false;
+      commit(f, { ...st.cuboid, rx: t.rx, ry: t.ry, z: st.cuboid.z + g.dzTilt });
+      return true;
+    }
+    if (Math.abs(g.dz) < 0.005) return false;
+    commit(f, { ...st.cuboid, z: st.cuboid.z + g.dz });
     return true;
   };
   const groundSelectedOrAll = () => {
@@ -473,7 +572,7 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
   // Nhảy tới frame hiện tại của CVAT khi đồng bộ.
   useEffect(() => {
     if (!focus) return;
-    setK(Math.min(nWin - 1, Math.max(0, Math.floor((focus.frame - start) / 5))));
+    setK(Math.min(nWin - 1, pageOf(list, focus.frame, prefs.perWin, overlap)));
   }, [focus?.nonce]);
 
   // Thao tác bàn phím (đã ánh xạ theo keymap ở App).
@@ -533,8 +632,26 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
           <label><input type="checkbox" checked={prefs.auto} onChange={(e) => updatePrefs({ ...prefs, auto: e.target.checked })} /> tự khớp màn hình</label>{' '}
           <input
             type="range" min={CELL_MIN} max={CELL_MAX} step={10} value={size} disabled={prefs.auto}
-            onChange={(e) => updatePrefs({ auto: false, size: Number(e.target.value) })}
+            onChange={(e) => updatePrefs({ ...prefs, auto: false, size: Number(e.target.value) })}
           /> {size}px
+        </span>
+        <label title="Cho box nghiêng (roll / pitch): giữ Alt rồi kéo ở view Bên (pitch) / view Trước (roll), và Ground snap (G) nghiêng box song song mặt đường dốc. Tắt: Alt+kéo ở các view này chỉ xoay yaw và G chỉ dời z."><input type="checkbox" checked={prefs.tilt} onChange={(e) => updatePrefs({ ...prefs, tilt: e.target.checked })} /> nghiêng theo mặt đường</label>
+        <label title="QC mode: hiện ô ghi chú ở mỗi cột frame (xuất Excel ở tab QC)" style={{ fontWeight: 600 }}><input type="checkbox" checked={qcOn} onChange={(e) => qcStore.setMode(e.target.checked)} /> QC</label>
+        <span title="Số frame trên mỗi trang. Mặc định 6 (mỗi trang chung 1 frame với trang kề).">
+          Số frame{' '}
+          <select value={prefs.perWin} onChange={(e) => updatePrefs({ ...prefs, perWin: Number(e.target.value) })}>
+            {[2, 3, 4, 5, 6, 7, 8, 9, 10, 12].map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </span>
+        <span title="Chỉ xem các frame trong khoảng này (để trống = cả job). Bật 'chỉ keyframe' để bỏ qua frame nội suy.">
+          Xem{' '}
+          <input value={viewFrom} onChange={(e) => setViewFrom(e.target.value.replace(/D/g, ''))} placeholder={String(start)} size={3} style={{ width: 44 }} /> →{' '}
+          <input value={viewTo} onChange={(e) => setViewTo(e.target.value.replace(/D/g, ''))} placeholder={String(stop)} size={3} style={{ width: 44 }} />{' '}
+          <label><input type="checkbox" checked={prefs.keyOnly} onChange={(e) => updatePrefs({ ...prefs, keyOnly: e.target.checked })} /> chỉ keyframe</label>
+        </span>
+        <span title="Độ dày lát cắt ở view Bên / Trước = nửa bề rộng box + biên này. Giảm để bớt tường và vật ở xa hai bên.">
+          Lát cắt +{' '}
+          <input type="range" min={0} max={3} step={0.1} value={prefs.slabMargin} onChange={(e) => updatePrefs({ ...prefs, slabMargin: Number(e.target.value) })} /> {prefs.slabMargin.toFixed(1)}m
         </span>
         <label title="Cảnh báo box không bao đúng cụm điểm (điểm lọt ra ngoài box) hoặc dưới 6 điểm"><input type="checkbox" checked={warn} onChange={(e) => setWarn(e.target.checked)} /> cảnh báo lệch</label>
         {warn && (misfitFrames.length > 0 || sparseFrames.length > 0) && (
@@ -550,6 +667,10 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
         <span>cửa sổ: {loaded.size}/{frames.length} · đã tải trước: {cached}/{stop - start + 1}</span>
       </div>
       <div style={{ marginBottom: 6, display: 'flex', flexWrap: 'wrap', gap: '4px 12px', alignItems: 'center', background: '#f4f4f4', padding: '4px 6px' }}>
+        <label title="BẬT: kích thước nội suy giữa các keyframe. TẮT: đổi kích thước ở một frame thì áp cho mọi keyframe của object." style={{ fontWeight: 600 }}>
+          <input type="checkbox" checked={dyn} onChange={(e) => setDyn(e.target.checked)} /> Dynamic size
+        </label>
+        {!dyn && <button disabled={selFrame === null} onClick={unifySize} title="Lấy kích thước của frame đang chọn áp cho mọi keyframe của object (hoàn tác được)">Đồng bộ size theo frame {selFrame ?? '…'}</button>}
         <b>Keyframe</b>
         <span>
           frame{' '}
@@ -612,13 +733,13 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
         })()}
       </details>
       <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>
-        phím K / O / G / A / I tác dụng lên cột frame đang trỏ chuột (viền xanh) · xem/đổi phím ở tab "Phím tắt" · cuộn chuột trên ô để zoom mọi frame · kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo (mọi view) để xoay · sửa frame nào thì frame đó thành keyframe
+        phím K / O / G / A / I tác dụng lên cột frame đang trỏ chuột (viền xanh) · xem/đổi phím ở tab "Phím tắt" · cuộn chuột trên ô để zoom mọi frame · kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo để xoay (view Trên: yaw · view Bên: pitch · view Trước: roll, nếu bật "nghiêng theo mặt đường") · sửa frame nào thì frame đó thành keyframe
       </div>
       <div style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>
         {cols.map((c) => (
           <Column
             key={c.f} f={c.f} size={size} st={c.st} refCub={c.ref} half={half} locHalf={locHalf} selected={selFrame === c.f}
-            edited={edited.has(`${num}:${c.f}`)} warn={warn} fixed={isFixedSize(row?.label ?? '')} ignored={ign.has(ignoreKey(job.id, num, c.f))}
+            edited={edited.has(`${num}:${c.f}`)} warn={warn} fixed={!dyn} ignored={ign.has(ignoreKey(job.id, num, c.f))}
             onIgnore={(f, on) => ignoreFrames([f], on)}
             motion={c.mot} motionIgnored={ign.has(motionKey(job.id, num, c.f))}
             onIgnoreMotion={(f, on) => ignoreStore.set([motionKey(job.id, num, f)], on)}
@@ -627,7 +748,7 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
             onSuggest={(f, s) => setSugs((m) => (m.get(f) === s ? m : new Map(m).set(f, s)))} onAccept={accept}
             onFit={(f, r) => setFits((m) => (m.get(f) === r ? m : new Map(m).set(f, r)))} onSelect={() => setSelFrame(c.f)}
             onLoaded={(f) => setLoaded((s) => new Set(s).add(f))}
-            onCommit={(f, cub) => onEdit(num - 1, f, cub)} onZoom={zoomBy} onToggleKf={toggleKf} onToggleOutside={toggleOutside} onHover={(f) => { hoverRef.current = f; onHoverFrame(f); }} scene={scene}
+            onCommit={commit} onZoom={zoomBy} onToggleKf={toggleKf} overlap={ovAt.get(c.f) ?? []} overlayCubs={ovCubs.get(c.f) ?? EMPTY_CUBS} onIgnoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], true); setNote(`Đã bỏ qua cặp #${Math.min(num, o)}–#${Math.max(num, o)} (mọi frame).`); }} onOpenObject={setSelectedNum} tiltOn={prefs.tilt} qcOn={qcOn} qcNote={qcNotes[qcKey(job.id, num, c.f)] ?? ''} onQcNote={(f, t) => qcStore.set(job.id, num, f, t)} onToggleOutside={toggleOutside} onHover={(f) => { hoverRef.current = f; onHoverFrame(f); }} scene={scene}
           />
         ))}
       </div>

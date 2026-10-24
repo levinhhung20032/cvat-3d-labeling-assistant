@@ -48,8 +48,25 @@ function focusObject3d(num: number, frame: number | null): { ok: boolean; reason
   return { ok: true };
 }
 
+// Sau upload: tải lại tab CVAT để giao diện CVAT hiện đúng dữ liệu mới (nó còn giữ bản cũ trong bộ nhớ, bấm Save sẽ ghi đè),
+// rồi tự mở lại tool. Cờ chỉ có hiệu lực 60 giây và chỉ cho đúng tab đó.
+const REOPEN_KEY = 'cvla-reopen';
+api.tabs.onUpdated.addListener(async (tabId, info, tab) => {
+  if (info.status !== 'complete' || !tab.url || !JOB_URL.test(tab.url)) return;
+  const got = (await api.storage.local.get(REOPEN_KEY)) as Record<string, { tabId: number; at: number } | undefined>;
+  const flag = got[REOPEN_KEY];
+  if (!flag || flag.tabId !== tabId) return;
+  await api.storage.local.remove(REOPEN_KEY);
+  if (Date.now() - flag.at > 60_000) return;
+  try { await api.scripting.executeScript({ target: { tabId }, files: ['content.js'] }); } catch { /* quyền chưa có: người dùng bấm biểu tượng để mở lại */ }
+});
+
 api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const tabId = sender.tab?.id;
+  if (msg?.type === 'cvla-reload' && sender.id === api.runtime.id && tabId !== undefined) {
+    void api.storage.local.set({ [REOPEN_KEY]: { tabId, at: Date.now() } }).then(() => api.tabs.reload(tabId)).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+    return true;
+  }
   if (msg?.type !== 'cvla-focus3d' || sender.id !== api.runtime.id || tabId === undefined || !Number.isInteger(msg.num)) return;
   api.scripting
     .executeScript({ target: { tabId }, world: 'MAIN', func: focusObject3d, args: [msg.num as number, Number.isInteger(msg.frame) ? (msg.frame as number) : null] })

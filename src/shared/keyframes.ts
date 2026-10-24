@@ -67,13 +67,12 @@ const hasShape = (t: CvatTrack, f: number) => sortedShapes(t).some((s) => s.fram
 
 /**
  * Đặt outside TỪ frame f (kiểu CVAT: object outside cho tới keyframe kế tiếp; khi upload mỗi frame outside
- * được tự điền keyframe riêng). Chỉ làm ở frame đang có box và không phải keyframe đầu tiên của track.
+ * được tự điền keyframe riêng). Chỉ làm ở frame đang có box. Keyframe đầu của track cũng đặt outside được
+ * (track bắt đầu bằng outside; vẫn chỉ là một `update`, không đổi ID).
  */
 export function setOutsideFrom(track: CvatTrack, f: number): TrackChange | null {
   const st = stateAt(track, f);
   if (!st.cuboid) return null;
-  const first = sortedShapes(track)[0];
-  if (first && first.frame === f) return null; // không biến frame đầu của track thành outside
   return { track: upsertKeyframe(track, f, st.cuboid, true), frames: [f] };
 }
 
@@ -89,11 +88,9 @@ export function restoreFrom(track: CvatTrack, f: number, stop: number): TrackCha
 /** Outside cả khoảng [a, b] (mỗi frame một keyframe outside); frame b+1 giữ nguyên trạng thái (thêm keyframe giữ giá trị). */
 export function setOutsideRange(track: CvatTrack, a: number, b: number, stop: number): TrackChange | null {
   const lo = Math.min(a, b), hi = Math.max(a, b);
-  const first = sortedShapes(track)[0];
   let out = track;
   const frames: number[] = [];
   for (let f = lo; f <= hi; f++) {
-    if (first && f <= first.frame) continue; // không đụng tới điểm bắt đầu của track
     const st = stateAt(track, f);
     if (!st.cuboid) continue;
     out = upsertKeyframe(out, f, st.cuboid, true);

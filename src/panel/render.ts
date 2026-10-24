@@ -1,5 +1,5 @@
 import type { Cuboid } from '../shared/cuboid';
-import { handleOffset, type LocalBox, type View } from '../shared/edit';
+import { cornerOffset, handleOffset, isTilted, type LocalBox, type View } from '../shared/edit';
 import type { Status } from '../shared/interp';
 import type { PointCloud } from '../shared/pcd';
 
@@ -41,7 +41,7 @@ const project = (view: View, u: number, v: number, w: number, k: number, c: numb
   view === 'top' ? [c - v * k, c - u * k] : view === 'side' ? [c + u * k, c - w * k] : [c + v * k, c - w * k];
 
 /** Thông số cảnh KHÔNG phụ thuộc mức zoom (để phóng to / thu nhỏ chỉ đổi khung nhìn, không đổi tập điểm được vẽ). */
-export interface Scene { zClip: number; slab: number; colorHalf: number }
+export interface Scene { zClip: number; slab: number; colorHalf: number; slabFront?: number }
 
 /**
  * Điểm có được vẽ ở khung nhìn nửa-rộng `half` không. Hai trục lên màn hình chỉ bị cắt theo khung (đổi theo zoom — vùng nhìn
@@ -51,13 +51,31 @@ export interface Scene { zClip: number; slab: number; colorHalf: number }
 export function pointVisible(view: View, u: number, v: number, w: number, half: number, scene: Scene): boolean {
   if (view === 'top') return Math.abs(u) <= half && Math.abs(v) <= half && Math.abs(w) <= scene.zClip;
   if (view === 'side') return Math.abs(u) <= half && Math.abs(w) <= half && Math.abs(v) <= scene.slab;
-  return Math.abs(v) <= half && Math.abs(w) <= half && Math.abs(u) <= scene.slab;
+  return Math.abs(v) <= half && Math.abs(w) <= half && Math.abs(u) <= (scene.slabFront ?? scene.slab);
+}
+
+/** Vẽ khung 12 cạnh của một box (đã xoay dyaw quanh tâm). */
+function wire(ctx: CanvasRenderingContext2D, view: View, b: LocalBox, k: number, c: number, color: string, width: number, dash: number[]) {
+  const cs = Math.cos(b.dyaw), sn = Math.sin(b.dyaw);
+  const p = (a: number, bb: number, w: number) => project(view, b.cu + a * cs - bb * sn, b.cv + a * sn + bb * cs, b.cw + w, k, c);
+  const hu = b.sx / 2, hv = b.sy / 2, hw = b.sz / 2;
+  const corner = (i: number) => p(i & 1 ? hu : -hu, i & 2 ? hv : -hv, i & 4 ? hw : -hw);
+  ctx.save();
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash);
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) for (const bit of [1, 2, 4]) {
+    if (i & bit) continue;
+    const [x1, y1] = corner(i), [x2, y2] = corner(i | bit);
+    ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+  }
+  ctx.stroke();
+  ctx.restore();
 }
 
 export function drawView(
   ctx: CanvasRenderingContext2D, size: number, view: View, loc: Local | null,
   box: LocalBox | null, half: number, status: Status, active = false, misfit = false, ghost: LocalBox | null = null, ground: number | null = null, mark: { u: number; v: number; w: number } | null = null,
-  scene: Scene = { zClip: half, slab: half * 0.5, colorHalf: half },
+  scene: Scene = { zClip: half, slab: half * 0.5, colorHalf: half }, overlays: LocalBox[] = [], tiltBase: Pick<Cuboid, 'rx' | 'ry' | 'yaw'> | null = null,
 ) {
   ctx.fillStyle = '#0b0f14';
   ctx.fillRect(0, 0, size, size);
@@ -113,12 +131,16 @@ export function drawView(
     ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(size, gy); ctx.stroke();
     ctx.restore();
   }
+  for (const o of overlays) wire(ctx, view, o, k, c, '#ff8c00', 2, [4, 3]); // box của object khác đang chồng lấn
   if (!box) return;
 
   // 8 đỉnh của box (đã xoay dyaw quanh tâm) rồi nối 12 cạnh.
   const cos = Math.cos(box.dyaw), sin = Math.sin(box.dyaw);
-  const pt = (a: number, b: number, w: number) =>
-    project(view, box.cu + a * cos - b * sin, box.cv + a * sin + b * cos, box.cw + w, k, c);
+  const tilted = tiltBase !== null && isTilted(tiltBase, box); // box nghiêng theo mặt đường (roll / pitch ≠ 0)
+  const pt = (a: number, b: number, w: number) => {
+    const [x, y, z] = tilted ? cornerOffset(tiltBase!, box, [a, b, w]) : [a * cos - b * sin, a * sin + b * cos, w];
+    return project(view, box.cu + x, box.cv + y, box.cw + z, k, c);
+  };
   const hu = box.sx / 2, hv = box.sy / 2, hw = box.sz / 2;
   const corner = (i: number) => pt(i & 1 ? hu : -hu, i & 2 ? hv : -hv, i & 4 ? hw : -hw);
   ctx.strokeStyle = STATUS_COLOR[status];

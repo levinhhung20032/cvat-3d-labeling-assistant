@@ -77,3 +77,26 @@ export function normalizeKeymap(raw: unknown): Keymap {
   }
   return base;
 }
+
+/** Tổ hợp phím mà trình duyệt hoặc CVAT đã dùng: gán được nhưng phải cảnh báo. `window.toggle` là phím duy nhất còn chạy ngoài tool. */
+export const RESERVED_COMBOS: Record<string, string> = {
+  'ctrl+w': 'trình duyệt: đóng tab', 'ctrl+t': 'trình duyệt: mở tab', 'ctrl+n': 'trình duyệt: cửa sổ mới', 'ctrl+r': 'trình duyệt: tải lại',
+  'ctrl+l': 'trình duyệt: thanh địa chỉ', 'ctrl+f': 'trình duyệt: tìm kiếm', 'ctrl+p': 'trình duyệt: in', 'ctrl+s': 'trình duyệt / CVAT: lưu',
+  'F5': 'trình duyệt: tải lại', 'F11': 'trình duyệt: toàn màn hình', 'F12': 'trình duyệt: DevTools', 'alt+F4': 'đóng cửa sổ',
+  'n': 'CVAT: vẽ object mới', 'd': 'CVAT: frame trước', 'Space': 'CVAT: phát', 'ctrl+shift+s': 'CVAT: lưu',
+};
+
+export interface ComboConflict { action: string | null; reserved: string | null }
+
+/** Phím `combo` định gán cho `id` đang vướng thao tác nào của tool, hoặc phím có sẵn của trình duyệt / CVAT. */
+export function conflictOf(map: Keymap, id: string, combo: string): ComboConflict {
+  const owner = actionFor(map, combo);
+  return { action: owner && owner !== id ? owner : null, reserved: RESERVED_COMBOS[combo] ?? null };
+}
+
+/** Các tổ hợp đang gán cho từ 2 thao tác trở lên (dữ liệu lưu cũ hoặc sửa tay) → [combo, [action…]]. */
+export function duplicateCombos(map: Keymap): [string, string[]][] {
+  const by = new Map<string, string[]>();
+  for (const [id, combos] of Object.entries(map)) for (const c of combos) by.set(c, [...(by.get(c) ?? []), id]);
+  return [...by].filter(([, ids]) => ids.length > 1);
+}

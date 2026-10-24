@@ -1,4 +1,5 @@
-import { serializeCuboid, type Cuboid } from './cuboid';
+import { clampTilt, serializeCuboid, type Cuboid } from './cuboid';
+import { apply, fromEuler, mul, rotX, rotY, rotZ, toEuler, type Vec3 } from './rot';
 import { sortedShapes } from './interp';
 import type { CvatShape, CvatTrack } from './types';
 
@@ -10,21 +11,45 @@ export interface LocalBox {
   cu: number; cv: number; cw: number; // tâm
   dyaw: number; // xoay thêm quanh trục z
   sx: number; sy: number; sz: number;
+  // Xoay thêm quanh trục RIÊNG của box (rad): droll quanh trục dọc (u), dpitch quanh trục ngang (v). Mặc định 0.
+  droll?: number; dpitch?: number;
 }
 
 export const identityBox = (c: Cuboid): LocalBox => ({ cu: 0, cv: 0, cw: 0, dyaw: 0, sx: c.sx, sy: c.sy, sz: c.sz });
 
+/** Box `other` trong hệ tọa độ của box `base` (để vẽ box của object khác lên ô của object đang xem). */
+export function localBoxOf(base: Cuboid, other: Cuboid): LocalBox {
+  const dx = other.x - base.x, dy = other.y - base.y, cos = Math.cos(base.yaw), sin = Math.sin(base.yaw);
+  return { cu: dx * cos + dy * sin, cv: -dx * sin + dy * cos, cw: other.z - base.z, dyaw: other.yaw - base.yaw, sx: other.sx, sy: other.sy, sz: other.sz };
+}
+
+const hasTiltDelta = (b: LocalBox) => (b.droll ?? 0) !== 0 || (b.dpitch ?? 0) !== 0;
+
 export function applyLocalBox(base: Cuboid, b: LocalBox): Cuboid {
   const cos = Math.cos(base.yaw), sin = Math.sin(base.yaw);
+  let { rx, ry } = base, yaw = base.yaw + b.dyaw;
+  if (hasTiltDelta(b)) {
+    // Xoay quanh trục riêng của box rồi tách lại thành (rx, ry, yaw) theo quy ước Euler XYZ của CVAT.
+    const r = mul(mul(fromEuler(base.rx, base.ry, yaw), rotX(b.droll ?? 0)), rotY(b.dpitch ?? 0));
+    const e = toEuler(r);
+    rx = e.rx; ry = e.ry; yaw = e.rz;
+  }
   return {
     x: base.x + b.cu * cos - b.cv * sin,
     y: base.y + b.cu * sin + b.cv * cos,
     z: base.z + b.cw,
-    rx: 0, ry: 0, // 7-DoF: luôn 0
-    yaw: base.yaw + b.dyaw,
+    rx: clampTilt(rx), ry: clampTilt(ry), // roll / pitch được giữ (kẹp ±30°); yaw là góc chính
+    yaw,
     sx: b.sx, sy: b.sy, sz: b.sz,
   };
 }
+
+/** Điểm p (toạ độ riêng của box, gốc ở tâm box) trong hệ toạ độ "chỉ theo yaw ban đầu" của ô, có tính box nghiêng. */
+export function cornerOffset(base: Pick<Cuboid, 'rx' | 'ry' | 'yaw'>, b: LocalBox, p: Vec3): Vec3 {
+  const r = mul(mul(fromEuler(base.rx, base.ry, base.yaw + b.dyaw), rotX(b.droll ?? 0)), rotY(b.dpitch ?? 0));
+  return apply(rotZ(-base.yaw), apply(r, p));
+}
+export const isTilted = (base: Pick<Cuboid, 'rx' | 'ry'>, b: LocalBox) => base.rx !== 0 || base.ry !== 0 || hasTiltDelta(b);
 
 const AXES: Record<View, [Axis, Axis]> = { top: ['u', 'v'], side: ['u', 'w'], front: ['v', 'w'] };
 const CENTER = { u: 'cu', v: 'cv', w: 'cw' } as const;
@@ -55,6 +80,19 @@ export function dragEdge(view: View, b: LocalBox, axis: Axis, sign: 1 | -1, dx: 
   r[CENTER[axis]] += (sign * (size - b[SIZE[axis]])) / 2;
   r[SIZE[axis]] = size;
   return r;
+}
+
+/**
+ * Xoay quanh trục khác trên view Bên (pitch, quanh trục ngang) hoặc view Trước (roll, quanh trục dọc): góc con trỏ quanh tâm ô
+ * so với lúc bắt đầu kéo. View Trên không có phép xoay này (trả nguyên box).
+ */
+export function dragTilt(view: View, b: LocalBox, p0x: number, p0y: number, px: number, py: number): LocalBox {
+  if (view === 'top' || Math.hypot(p0x, p0y) < 4 || Math.hypot(px, py) < 4) return b;
+  let d = Math.atan2(-py, px) - Math.atan2(-p0y, p0x); // ngược chiều kim đồng hồ trên màn hình = dương
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d <= -Math.PI) d += 2 * Math.PI;
+  // Quay quanh +v (view Bên): dương = đầu xe chúi xuống nên đổi dấu; quanh +u (view Trước): dương = phía +v nâng lên.
+  return view === 'side' ? { ...b, dpitch: -d } : { ...b, droll: d };
 }
 
 /** Xoay yaw trên hình chiếu từ trên: (px, py) so với tâm ô, hướng box quay về phía con trỏ. */

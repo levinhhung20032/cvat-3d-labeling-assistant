@@ -1,6 +1,5 @@
 import type { ContentMessage, PanelMessage } from '../shared/protocol';
 import { setHost, type PanelHost } from './bridge';
-import { mountPanel } from './mount';
 import { useExtensionStorage } from './storage';
 
 export interface InPagePanel {
@@ -55,6 +54,7 @@ export async function mountInPage(
     },
   };
   setHost(host);
+  const { mountPanel } = await import('./mount'); // sau khi kho lưu trữ đã nạp (các store đọc dữ liệu lúc nạp module)
   const reactRoot = mountPanel(root);
   return {
     deliver: (m) => { listeners.forEach((cb) => cb(m)); },

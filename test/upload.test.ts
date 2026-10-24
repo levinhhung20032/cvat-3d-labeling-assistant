@@ -46,14 +46,13 @@ const reqFor = (base: CvatAnnotations, working: CvatAnnotations, real: boolean):
 };
 
 describe('chuẩn hóa & kế hoạch', () => {
-  it('điền keyframe outside thiếu và đưa rx/ry về 0', () => {
+  it('điền keyframe outside thiếu và giữ nguyên rx/ry (box nghiêng theo mặt đường)', () => {
     const t = tr(1, [sh(0), sh(3, true)]);
     t.shapes[0]!.points[3] = 0.02;
     const n = normalizeTrack(t, STOP);
     expect(missingOutsideKeyframes(n.track, STOP)).toEqual([]);
     expect(n.outsideFilled).toBe(6); // 4..9
-    expect(n.tiltFixed).toBe(1);
-    expect(n.track.shapes[0]!.points[3]).toBe(0);
+    expect(n.track.shapes[0]!.points[3]).toBe(0.02);
     expect(n.track.shapes.filter((s) => s.id === undefined).length).toBe(6);
   });
   it('không sửa gì → không có gì để gửi (track đã đủ keyframe)', () => {
@@ -128,15 +127,22 @@ describe('runUpload', () => {
     expect(r).toMatchObject({ ok: false, stage: 'conflict', conflicts: [3] });
     expect(s.calls).toHaveLength(0);
   });
-  it('chặn khi còn thiếu keyframe outside hoặc rx/ry ≠ 0 trong dữ liệu gửi', async () => {
+  it('chặn khi còn thiếu keyframe outside hoặc rx/ry vượt ±30° trong dữ liệu gửi', async () => {
     const b = base(); const s = fakeServer(b);
     const req = reqFor(b, edit(b), true);
     req.changed[0]!.shapes.push({ ...sh(6, true) }); // outside ở 6, thiếu 7..9
     expect((await runUpload(s.deps, req)).stage).toBe('rules');
     const req2 = reqFor(b, edit(b), true);
-    req2.changed[0]!.shapes[0]!.points[4] = 0.1;
+    req2.changed[0]!.shapes[0]!.points[4] = 0.7; // > 30°
     expect((await runUpload(s.deps, req2)).stage).toBe('rules');
+
     expect(s.calls).toHaveLength(0);
+  });
+  it('box nghiêng nhẹ (trong ±30°) được phép gửi', async () => {
+    const b = base(); const s = fakeServer(b);
+    const req = reqFor(b, edit(b), true);
+    req.changed[0]!.shapes[0]!.points[4] = 0.1;
+    expect((await runUpload(s.deps, req)).stage).not.toBe('rules');
   });
   it('chia lô 10 track', async () => {
     const b = ann(...Array.from({ length: 25 }, (_, i) => tr(i + 1, [sh(0), sh(5)])));

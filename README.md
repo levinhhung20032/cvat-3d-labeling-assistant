@@ -27,7 +27,7 @@ Các luật này được kiểm tra bằng code và test, không có ngoại l�
 
 1. **Không bao giờ xóa hay đổi ID.** Không có đường nào gửi `action=delete` hoặc `PUT` thay cả annotation; trước mỗi lần ghi, ID nào biến mất so với lúc đọc thì dừng.
 2. **Mọi frame outside đều có keyframe** (`outside: true`); thiếu thì được tự điền trước khi gửi.
-3. **Box 7-DoF:** chỉ xoay yaw, `rx = ry = 0`.
+3. **Góc box:** yaw là góc chính; roll/pitch (`rx`, `ry`) được phép để box nằm song song mặt đường dốc, kẹp ±30° và phải xác nhận khi upload (quy ước góc Euler XYZ của CVAT, chưa đối chiếu với dữ liệu thật — kiểm tra bằng mắt trên CVAT).
 4. **Quyền riêng tư:** không xin quyền `cookies`, không đọc / lưu token hay mật khẩu; chỉ có host của CVAT (`https://cvat-a.example.com/*`); request là `fetch` cùng origin với `credentials: 'include'`; token CSRF chỉ đọc đúng lúc gửi, không lưu.
 5. **Dữ liệu không rời tab:** không export file, không telemetry, không tải thư viện lúc chạy, không gửi gì tới host khác ngoài CVAT.
 6. Không giả header hay giả nhịp thao tác người; thay đổi ghi qua API chuẩn của CVAT dưới tài khoản người dùng.

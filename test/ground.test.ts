@@ -62,3 +62,87 @@ describe('groundSnap', () => {
     expect(b.dz).toBeGreaterThan(a.dz);
   });
 });
+
+describe('groundSnap trên mặt đường dốc', () => {
+  const big = (f: (u: number, v: number) => number): [number, number, number][] => {
+    const out: [number, number, number][] = [];
+    for (let u = -5.4; u <= 5.4; u += 0.25) for (let v = -4.4; v <= 4.4; v += 0.25) {
+      if (Math.abs(u) <= 2.1 && Math.abs(v) <= 1.1) continue;
+      out.push([u, v, f(u, v)]);
+    }
+    return out;
+  };
+  const t10 = Math.tan((10 * Math.PI) / 180);
+  it('mặt phẳng ngang: khớp mặt phẳng, kết quả như phương pháp cũ', () => {
+    const r = groundSnap(pts(big(() => -1.0)), 4, 2, 1.5)!;
+    expect(r.method).toBe('plane');
+    expect(r.dz).toBeCloseTo(-0.25, 2);
+    expect(r.flat).toBe(true);
+    expect(r.steep).toBe(false);
+  });
+  it('dốc 10° dọc theo xe: đo đúng độ dốc, đáy chạm phía cao nhưng góc nào cũng chỉ chìm ≤ 5 cm', () => {
+    const r = groundSnap(pts(big((u) => -1.0 + t10 * u)), 4, 2, 1.5)!;
+    expect(r.method).toBe('plane');
+    expect(r.slopeDeg).toBeCloseTo(10, 0);
+    expect(r.steep).toBe(true);
+    expect(r.flat).toBe(false);
+    const highCorner = -1.0 + t10 * 2;
+    expect(r.groundW).toBeCloseTo(highCorner - 0.05, 2);
+    expect(r.dz).toBeCloseTo(r.groundW + 0.75, 5);
+  });
+  it('dốc 4° sang bên: độ cao tại chân box, không bị kéo xuống bởi điểm phía thấp', () => {
+    const t4 = Math.tan((4 * Math.PI) / 180);
+    const r = groundSnap(pts(big((_u, v) => -0.9 + t4 * v)), 4, 2, 1.5)!;
+    expect(r.slopeDeg).toBeCloseTo(4, 0);
+    expect(r.groundW).toBeGreaterThan(-0.9 - 0.01); // quanh tâm mặt đường ở -0.9, góc cao hơn một chút
+    expect(r.groundW).toBeLessThan(-0.9 + t4 * 1 + 0.001);
+  });
+  it('vỉa hè cao 20 cm ở một bên và cột đứng không làm lệch mặt phẳng', () => {
+    const list = big((_u, v) => (v > 2.5 ? -0.8 : -1.0));
+    for (let w = -1.0; w < 0.4; w += 0.1) list.push([3, -2.7, w]); // cột
+    const r = groundSnap(pts(list), 4, 2, 1.5)!;
+    expect(r.method).toBe('plane');
+    expect(r.dz).toBeCloseTo(-0.25, 1);
+  });
+  it('ít ô mặt đường: quay về mặt phẳng ngang', () => {
+    const sparse: [number, number, number][] = Array.from({ length: 30 }, (_, i) => [3 + (i % 5) * 0.01, 0.1 + (i % 3) * 0.01, -1.0]);
+    const r = groundSnap(pts(sparse), 4, 2, 1.5)!;
+    expect(r.method).toBe('level');
+  });
+});
+
+import { tiltFromPlane } from '../src/shared/ground';
+import { apply, fromEuler } from '../src/shared/rot';
+
+describe('tiltFromPlane', () => {
+  it('mặt ngang → không nghiêng', () => {
+    const t = tiltFromPlane(0, 0, 1.2);
+    expect(t.rx).toBeCloseTo(0, 9);
+    expect(t.ry).toBeCloseTo(0, 9);
+  });
+  it('trục lên của box sau khi nghiêng trùng pháp tuyến mặt đường, với mọi yaw', () => {
+    for (const yaw of [0, 0.7, -2.2, Math.PI / 2]) {
+      const a = 0.15, b = -0.08;
+      const { rx, ry } = tiltFromPlane(a, b, yaw);
+      const up = apply(fromEuler(rx, ry, yaw), [0, 0, 1]);
+      // pháp tuyến mặt w = a·u + b·v + c trong hệ thế giới
+      const gx = a * Math.cos(yaw) - b * Math.sin(yaw), gy = a * Math.sin(yaw) + b * Math.cos(yaw), n = Math.hypot(gx, gy, 1);
+      expect(up[0]).toBeCloseTo(-gx / n, 9);
+      expect(up[1]).toBeCloseTo(-gy / n, 9);
+      expect(up[2]).toBeCloseTo(1 / n, 9);
+    }
+  });
+  it('dốc dọc xe 10° (đầu xe lên cao) → pitch xấp xỉ -10° khi yaw = 0 (ry âm = mũi nâng)', () => {
+    const t = tiltFromPlane(Math.tan((10 * Math.PI) / 180), 0, 0);
+    expect((t.ry * 180) / Math.PI).toBeCloseTo(-10, 3);
+    expect(t.rx).toBeCloseTo(0, 9);
+  });
+  it('groundSnap trả mặt phẳng và độ dời khi nghiêng', () => {
+    const t10 = Math.tan((10 * Math.PI) / 180);
+    const list: [number, number, number][] = [];
+    for (let u = -5.4; u <= 5.4; u += 0.25) for (let v = -4.4; v <= 4.4; v += 0.25) if (!(Math.abs(u) <= 2.1 && Math.abs(v) <= 1.1)) list.push([u, v, -1.0 + t10 * u]);
+    const r = groundSnap(pts(list), 4, 2, 1.5)!;
+    expect(r.plane!.a).toBeCloseTo(t10, 2);
+    expect(r.dzTilt!).toBeCloseTo(-1.0 + 0.75 * Math.hypot(1, t10), 2);
+  });
+});
