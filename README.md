@@ -22,7 +22,7 @@ Chạy trên **Edge / Chrome** (đã dùng thử) và **Firefox 128+** (bản th
 | **Ca làm việc / KPI** | Vào ca / ra ca (tên ca `Oct21AM`, `Oct21PM`…, lưu qua F5), KPI: object đã tác động, số frame đã thay đổi thật (sửa tay, nội suy, outside), số frame outside, keyframe thêm / gỡ / sửa, gợi ý chấp nhận / bỏ qua |
 | **Liên kết với CVAT** | Chọn object trong CVAT → tool chọn theo; chọn trong tool → CVAT kích hoạt object (đổi frame nếu cần); bấm đúp trong CVAT mở rộng tool; nút **Focus** thu nhỏ tool và zoom cận cảnh object trong khung 3D của CVAT |
 | **Giao diện** | Cửa sổ nổi kéo / đổi cỡ / thu nhỏ / phóng to; thanh đầu dính khi cuộn; cỡ ô tự khớp màn hình; phím tắt tùy chỉnh (cảnh báo trùng phím); ảnh camera căn giữa, có kính lúp |
-| **Nháp & cập nhật** | Bản nháp chưa upload được lưu cục bộ để F5 không mất; sau upload tool tự tải lại tab CVAT; nút **Kiểm tra cập nhật** đọc GitHub Releases (xem [Cập nhật](#cập-nhật)) |
+| **Nháp** | Bản nháp chưa upload được lưu cục bộ để F5 không mất; sau upload tool tự tải lại tab CVAT |
 
 ## Luật an toàn
 
@@ -32,7 +32,7 @@ Các luật này được kiểm tra bằng code và test, không có ngoại l�
 2. **Mọi frame outside đều có keyframe** (`outside: true`); thiếu thì được tự điền trước khi gửi.
 3. **Góc box:** yaw là góc chính; roll/pitch (`rx`, `ry`) được phép để box nằm song song mặt đường dốc, kẹp ±30° và phải xác nhận khi upload (quy ước góc Euler XYZ của CVAT, chưa đối chiếu với dữ liệu thật — kiểm tra bằng mắt trên CVAT).
 4. **Quyền riêng tư:** không xin quyền `cookies`, không đọc / lưu token hay mật khẩu; chỉ có host của CVAT (`https://cvat-a.example.com/*`); request là `fetch` cùng origin với `credentials: 'include'`; token CSRF chỉ đọc đúng lúc gửi, không lưu.
-5. **Dữ liệu không rời tab:** không export file dữ liệu nhãn, không telemetry, không tải thư viện lúc chạy, không gửi gì tới host khác ngoài CVAT. Hai ngoại lệ được chủ dự án duyệt: (a) QA/QC xuất Excel gồm đúng 3 cột `ID, frame, note`, tạo ngay trong trình duyệt; (b) nút *Kiểm tra cập nhật*, chỉ khi bấm, một `GET` ẩn danh tới GitHub Releases của dự án, không gửi dữ liệu nào.
+5. **Dữ liệu không rời tab:** không export file dữ liệu nhãn, không telemetry, không tải thư viện lúc chạy, không gửi gì tới host khác ngoài CVAT. Ngoại lệ duy nhất được chủ dự án duyệt: QA/QC xuất Excel gồm đúng 3 cột `ID, frame, note`, tạo ngay trong trình duyệt.
 6. Không giả header hay giả nhịp thao tác người; thay đổi ghi qua API chuẩn của CVAT dưới tài khoản người dùng.
 
 ## Cài đặt
@@ -65,9 +65,7 @@ Hoặc `about:debugging` → *This Firefox* → **Load Temporary Add-on** → ch
 
 ## Cập nhật
 
-Phiên bản hiện tại là **v1.0.0**. Bấm **⟳ Kiểm tra cập nhật** ở đầu tool: tool hỏi GitHub Releases của repo (một request ẩn danh, chỉ khi bạn bấm) và báo có bản mới hay không. Có bản mới thì tải gói `cvat-3d-labeling-assistant-<phiên bản>.zip` ở trang release, giải nén **đè vào đúng thư mục đang Load unpacked** (giữ ID extension), bấm **Reload** ở `edge://extensions`, rồi F5 tab CVAT.
-
-> Repo đang ở chế độ **private** nên API công khai của GitHub trả 404: nút sẽ báo *không đọc được release*. Muốn nút hoạt động thì repo (hoặc ít nhất kho phát hành) phải công khai; không bao giờ nhúng token vào extension.
+Phiên bản hiện tại là **v1.0.0**. Tool không tự kiểm tra bản mới. Để cập nhật: lấy gói `cvat-3d-labeling-assistant-<phiên bản>.zip` ở trang Releases (hoặc `npm run build`), giải nén **đè vào đúng thư mục đang Load unpacked** (giữ ID extension), bấm **Reload** ở `edge://extensions`, rồi F5 tab CVAT.
 
 ## Sử dụng nhanh
 

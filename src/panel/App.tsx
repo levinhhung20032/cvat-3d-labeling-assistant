@@ -17,7 +17,6 @@ import { JobInfo } from './JobInfo';
 import { KeysPanel } from './KeysPanel';
 import { UploadDialog } from './UploadDialog';
 import { QcPanel } from './QcPanel';
-import { UpdateCheck } from './UpdateCheck';
 import { DynSizePanel } from './DynSizePanel';
 import { dynClassStore } from './dynClassStore';
 import { ShiftPanel } from './ShiftPanel';
@@ -364,7 +363,7 @@ export function App() {
       <style>{STYLE}</style>
       <div className="cvla-head">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span><b>CVAT 3D Assistant · v{VERSION}</b><UpdateCheck version={VERSION} /></span>
+        <b>CVAT 3D Assistant · v{VERSION}</b>
         <span>
           <label title="Khi bạn chọn một object trong giao diện CVAT, tool tự chọn object đó và nhảy tới frame hiện tại của CVAT">
             <input type="checkbox" checked={sync} onChange={(e) => setSync(e.target.checked)} /> CVAT → tool
