@@ -70,8 +70,8 @@ function ZoomImage({ url }: { url: string }) {
   const ly = cur ? (cur.y + 24 + LENS > size[1] ? cur.y - 24 - LENS : cur.y + 24) : 0;
 
   return (
-    <div>
-      <div style={{ margin: '4px 0', fontSize: 12, display: 'flex', flexWrap: 'wrap', gap: '4px 14px', alignItems: 'center' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <div style={{ margin: '4px 0', fontSize: 12, display: 'flex', flexWrap: 'wrap', gap: '4px 14px', alignItems: 'center', justifyContent: 'center' }}>
         <label><input type="radio" checked={mode === 'lens'} onChange={() => setMode('lens')} /> Kính lúp (scope)</label>
         <label><input type="radio" checked={mode === 'pan'} onChange={() => setMode('pan')} /> Zoom &amp; kéo</label>
         {mode === 'lens' ? (
@@ -150,10 +150,10 @@ export function CameraPanel({ frame, azimuth }: { frame: number; azimuth: number
     return () => URL.revokeObjectURL(u);
   }, [images, idx]);
   return (
-    <div style={{ marginTop: 8 }}>
+    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
       <b>Ảnh camera · frame {frame}</b>
       {azimuth !== null && <> · phương vị object {azimuth.toFixed(0)}°</>}
-      <div style={{ margin: '4px 0' }}>
+      <div style={{ margin: '4px 0', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 4 }}>
         {ranked.map((c, i) => (
           <button key={c.index} onClick={() => setPick(c.index)} style={{ marginRight: 4, fontWeight: c.index === idx ? 700 : 400 }}>
             image_{c.index} {c.name}{i === 0 ? ' ★' : ''}

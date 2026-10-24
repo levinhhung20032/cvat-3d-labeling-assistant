@@ -172,7 +172,8 @@ const NO_ISSUES: FrameIssue[] = [];
 interface FileFlag { kind: IssueKind; state: FlagState }
 const NO_FLAGS: FileFlag[] = [];
 
-function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag }: {
+function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame }: {
+  onFocusFrame: (f: number) => void;
   fileFlags: FileFlag[]; onMarkFlag: (f: number, kind: IssueKind, mark: FlagMark | null) => void;
   tiltOn: boolean;
   issues: FrameIssue[]; issueIgnored: (kind: string) => boolean; onIgnoreIssue: (f: number, kind: string, on: boolean) => void;
@@ -231,6 +232,8 @@ function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fi
   return (
     <div
       onClick={onSelect}
+      // Bấm đúp vào cột: thu nhỏ tool và đưa camera 3D của CVAT tới object ở frame này (không áp dụng khi bấm vào nút / ô nhập)
+      onDoubleClick={(e) => { if ((e.target as HTMLElement).closest('button, input, textarea, select')) return; onFocusFrame(f); }}
       // Phím K / O / G / A / I tác dụng lên cột đang trỏ chuột; viền xanh cho biết cột nào sẽ nhận phím.
       onMouseEnter={(e) => { onHover(f); e.currentTarget.style.boxShadow = '0 0 0 3px #2563eb'; }}
       onMouseLeave={(e) => { onHover(null); e.currentTarget.style.boxShadow = ''; }}
@@ -360,9 +363,10 @@ function IdBox({ value, max, onCommit }: { value: number; max: number; onCommit:
   );
 }
 
-export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initialFrame, edited, onEdit, onTrack, focus, onView, onSel, onHoverFrame, labels, overlaps }: {
+export function BatchReview({ onFocusFrame, job, ann, rows, selectedNum, setSelectedNum, initialFrame, edited, onEdit, onTrack, focus, onView, onSel, onHoverFrame, labels, overlaps }: {
   overlaps: OverlapItem[]; // chồng lấn của cả job (đã bỏ cặp được bỏ qua)
   onHoverFrame: (f: number | null) => void;
+  onFocusFrame: (f: number) => void; // bấm đúp vào cột frame
   labels: CvatLabel[];
   onSel: (frame: number | null) => void;
   onView: (frames: number[]) => void;
@@ -884,7 +888,7 @@ export function BatchReview({ job, ann, rows, selectedNum, setSelectedNum, initi
             onSuggest={(f, s) => setSugs((m) => (m.get(f) === s ? m : new Map(m).set(f, s)))} onAccept={accept}
             onFit={(f, r) => setFits((m) => (m.get(f) === r ? m : new Map(m).set(f, r)))} onSelect={() => onPickSelect(c.f)}
             onLoaded={(f) => setLoaded((s) => new Set(s).add(f))}
-            onCommit={commit} onZoom={zoomBy} onToggleKf={toggleKf} overlap={ovAt.get(c.f) ?? []} overlayCubs={ovCubs.get(c.f) ?? EMPTY_CUBS} onIgnoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], true); setNote(`Đã bỏ qua cặp #${Math.min(num, o)}–#${Math.max(num, o)} (mọi frame).`); }} onOpenObject={setSelectedNum} tiltOn={prefs.tilt} fileFlags={fileFlags.get(c.f) ?? NO_FLAGS} onMarkFlag={(f, kind, mk) => qcFlagStore.mark(job.id, [{ num, frame: f, kind }], mk)} issues={issueMap.get(c.f) ?? NO_ISSUES} issueIgnored={(k) => ign.has(issueKey(job.id, num, c.f, k))} onIgnoreIssue={(f, k, on) => ignoreStore.set([issueKey(job.id, num, f, k)], on)} qcOn={qcOn} qcNote={qcNotes[qcKey(job.id, num, c.f)] ?? ''} onQcNote={(f, t) => qcStore.set(job.id, num, f, t)} onToggleOutside={toggleOutside} onHover={(f) => { hoverRef.current = f; onHoverFrame(f); }} scene={scene}
+            onCommit={commit} onZoom={zoomBy} onToggleKf={toggleKf} overlap={ovAt.get(c.f) ?? []} overlayCubs={ovCubs.get(c.f) ?? EMPTY_CUBS} onIgnoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], true); setNote(`Đã bỏ qua cặp #${Math.min(num, o)}–#${Math.max(num, o)} (mọi frame).`); }} onOpenObject={setSelectedNum} tiltOn={prefs.tilt} onFocusFrame={onFocusFrame} fileFlags={fileFlags.get(c.f) ?? NO_FLAGS} onMarkFlag={(f, kind, mk) => qcFlagStore.mark(job.id, [{ num, frame: f, kind }], mk)} issues={issueMap.get(c.f) ?? NO_ISSUES} issueIgnored={(k) => ign.has(issueKey(job.id, num, c.f, k))} onIgnoreIssue={(f, k, on) => ignoreStore.set([issueKey(job.id, num, f, k)], on)} qcOn={qcOn} qcNote={qcNotes[qcKey(job.id, num, c.f)] ?? ''} onQcNote={(f, t) => qcStore.set(job.id, num, f, t)} onToggleOutside={toggleOutside} onHover={(f) => { hoverRef.current = f; onHoverFrame(f); }} scene={scene}
           />
         ))}
       </div>

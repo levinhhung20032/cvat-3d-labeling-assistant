@@ -10,16 +10,19 @@ Chạy trên **Edge / Chrome** (đã dùng thử) và **Firefox 128+** (bản th
 
 | Nhóm | Mô tả |
 | --- | --- |
-| **Batch Review** | 6 frame mỗi lượt (cửa sổ trượt bước 5) × 3 hình chiếu (Trên / Bên / Trước) quanh một object; ID object theo đúng ID hiển thị của CVAT; tải trước các frame phía sau trong lúc bạn làm việc |
+| **Batch Review** | Cửa sổ frame tự chọn (a → b, mặc định 6 frame, mỗi trang chung 1 frame với trang kề) × 3 hình chiếu (Trên / Bên / Trước) quanh một object; bấm đúp vào cột frame để thu nhỏ tool và focus camera 3D của CVAT; ID object theo đúng ID hiển thị của CVAT; tải trước các frame phía sau trong lúc bạn làm việc |
 | **Bảng object** | Số frame được gán / outside / thiếu keyframe outside, cảnh báo đi xa, gợi ý thuộc tính; lọc và sắp xếp |
-| **Chỉnh sửa trực tiếp** | Kéo thả trên 3 hình chiếu: dời, đổi kích thước (cạnh đối diện đứng yên), xoay yaw (chấm trắng hoặc giữ Alt); zoom chung mọi frame; hoàn tác / làm lại |
-| **Keyframe** | Khoá / mở khoá từng frame, mở khoá keyframe ở giữa một khoảng, khoá tất cả thành keyframe, gắn keyframe outside (O) |
-| **Cảnh báo & gợi ý** | Box lệch khỏi cụm điểm (kèm box gợi ý nét đứt, chấp nhận bằng A), vật đi xa bất thường, ít điểm (< 6), đáy lơ lửng / chìm, **ground snap** (G) |
+| **Chỉnh sửa trực tiếp** | Kéo thả trên 3 hình chiếu: dời, đổi kích thước (cạnh đối diện đứng yên), xoay yaw (chấm trắng hoặc giữ Alt), nghiêng box theo mặt đường dốc (Alt + kéo ở view Bên / Trước); zoom chung mọi frame; hoàn tác / làm lại |
+| **Keyframe & outside** | Khoá / mở khoá từng frame, mở khoá keyframe ở giữa một khoảng, khoá tất cả thành keyframe; outside theo 3 cách: từ frame đang chọn (O), cả khoảng nhập tay, chọn khoảng bằng chuột; box được sao lưu trước khi outside để đưa trở lại đúng vị trí cũ |
+| **Dynamic size** | Bật / tắt theo class (danh sách class lấy từ job), hoặc riêng từng object; tắt thì đổi size một frame là áp cho cả object |
+| **Cảnh báo & gợi ý** | Box lệch khỏi cụm điểm (kèm box gợi ý nét đứt, chấp nhận bằng A), vật đi xa bất thường, ít điểm (< 6), đáy lơ lửng / chìm, **ground snap** (G, hỗ trợ mặt dốc); **luật QC** S K Z H D (scale không đồng bộ, kích thước ngoài ngưỡng, z ngoài ngưỡng, đổi hướng > 75°, quá xa > 100 m) và **chồng lấn giữa các object** (IoU theo class) |
+| **QC** | QC mode: ghi chú theo (ID, frame), xuất Excel `ID, frame, note`; **đối chiếu file QC (.xlsx)**: đọc sheet Matrix ngay trên máy, đánh dấu từng flag còn lỗi / đã hết / ignore / fixed |
 | **Thuộc tính (attribute)** | Hiện và sửa attribute của object; gợi ý theo kích thước box (loại xe, tuổi / tư thế người đi bộ, có người lái xe hai bánh…) |
 | **Upload** | Màn hình xem lại → ghi bằng `PATCH …/annotations?action=update` chia lô → đọc lại so khớp; tự điền keyframe outside, tự khoá hết thành keyframe cho object đã tác động; nhật ký + hoàn nguyên |
-| **Ca làm việc / KPI** | Vào ca / ra ca (tên ca `Oct21AM`, `Oct21PM`…), KPI: object đã tác động, số frame outside, keyframe thêm / gỡ / sửa, gợi ý chấp nhận / bỏ qua |
+| **Ca làm việc / KPI** | Vào ca / ra ca (tên ca `Oct21AM`, `Oct21PM`…, lưu qua F5), KPI: object đã tác động, số frame đã thay đổi thật (sửa tay, nội suy, outside), số frame outside, keyframe thêm / gỡ / sửa, gợi ý chấp nhận / bỏ qua |
 | **Liên kết với CVAT** | Chọn object trong CVAT → tool chọn theo; chọn trong tool → CVAT kích hoạt object (đổi frame nếu cần); bấm đúp trong CVAT mở rộng tool; nút **Focus** thu nhỏ tool và zoom cận cảnh object trong khung 3D của CVAT |
-| **Giao diện** | Cửa sổ nổi kéo / đổi cỡ / thu nhỏ / phóng to; cỡ ô tự khớp màn hình; phím tắt tùy chỉnh; xem ảnh camera với kính lúp |
+| **Giao diện** | Cửa sổ nổi kéo / đổi cỡ / thu nhỏ / phóng to; thanh đầu dính khi cuộn; cỡ ô tự khớp màn hình; phím tắt tùy chỉnh (cảnh báo trùng phím); ảnh camera căn giữa, có kính lúp |
+| **Nháp & cập nhật** | Bản nháp chưa upload được lưu cục bộ để F5 không mất; sau upload tool tự tải lại tab CVAT; nút **Kiểm tra cập nhật** đọc GitHub Releases (xem [Cập nhật](#cập-nhật)) |
 
 ## Luật an toàn
 
@@ -29,7 +32,7 @@ Các luật này được kiểm tra bằng code và test, không có ngoại l�
 2. **Mọi frame outside đều có keyframe** (`outside: true`); thiếu thì được tự điền trước khi gửi.
 3. **Góc box:** yaw là góc chính; roll/pitch (`rx`, `ry`) được phép để box nằm song song mặt đường dốc, kẹp ±30° và phải xác nhận khi upload (quy ước góc Euler XYZ của CVAT, chưa đối chiếu với dữ liệu thật — kiểm tra bằng mắt trên CVAT).
 4. **Quyền riêng tư:** không xin quyền `cookies`, không đọc / lưu token hay mật khẩu; chỉ có host của CVAT (`https://cvat-a.example.com/*`); request là `fetch` cùng origin với `credentials: 'include'`; token CSRF chỉ đọc đúng lúc gửi, không lưu.
-5. **Dữ liệu không rời tab:** không export file, không telemetry, không tải thư viện lúc chạy, không gửi gì tới host khác ngoài CVAT.
+5. **Dữ liệu không rời tab:** không export file dữ liệu nhãn, không telemetry, không tải thư viện lúc chạy, không gửi gì tới host khác ngoài CVAT. Hai ngoại lệ được chủ dự án duyệt: (a) QA/QC xuất Excel gồm đúng 3 cột `ID, frame, note`, tạo ngay trong trình duyệt; (b) nút *Kiểm tra cập nhật*, chỉ khi bấm, một `GET` ẩn danh tới GitHub Releases của dự án, không gửi dữ liệu nào.
 6. Không giả header hay giả nhịp thao tác người; thay đổi ghi qua API chuẩn của CVAT dưới tài khoản người dùng.
 
 ## Cài đặt
@@ -59,6 +62,12 @@ npm run start:firefox    # mở Firefox với extension tạm (cần Firefox cà
 ```
 
 Hoặc `about:debugging` → *This Firefox* → **Load Temporary Add-on** → chọn `dist-firefox/manifest.json` (mất khi tắt Firefox). Lần bấm biểu tượng đầu tiên Firefox sẽ hỏi cấp quyền truy cập host của CVAT. Cài lâu dài cần ký (`npm run package:firefox` tạo file zip để nộp ký, loại không công khai) hoặc dùng Firefox Developer Edition / ESR. Lưu ý ký qua Mozilla nghĩa là mã nguồn extension được tải lên Mozilla.
+
+## Cập nhật
+
+Phiên bản hiện tại là **v1.0.0**. Bấm **⟳ Kiểm tra cập nhật** ở đầu tool: tool hỏi GitHub Releases của repo (một request ẩn danh, chỉ khi bạn bấm) và báo có bản mới hay không. Có bản mới thì tải gói `cvat-3d-labeling-assistant-<phiên bản>.zip` ở trang release, giải nén **đè vào đúng thư mục đang Load unpacked** (giữ ID extension), bấm **Reload** ở `edge://extensions`, rồi F5 tab CVAT.
+
+> Repo đang ở chế độ **private** nên API công khai của GitHub trả 404: nút sẽ báo *không đọc được release*. Muốn nút hoạt động thì repo (hoặc ít nhất kho phát hành) phải công khai; không bao giờ nhúng token vào extension.
 
 ## Sử dụng nhanh
 
