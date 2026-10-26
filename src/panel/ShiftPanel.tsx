@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { computeKpi, fmtDuration, kpiText, type Kpi, type Shift } from '../shared/shift';
-import { shiftStore, useShifts } from './shiftStore';
+import { DEFAULT_SCHEDULE } from '../shared/schedule';
+import { setSchedule, shiftStore, useSchedule, useShifts } from './shiftStore';
 
 function KpiView({ k }: { k: Kpi }) {
   const t = k.totals;
@@ -54,7 +55,27 @@ function Copy({ text }: { text: string }) {
   );
 }
 
-/** Tab "Ca / KPI": ca đang chạy (tính trực tiếp) và lịch sử các ca đã ra. */
+/** Lịch ca tự động: giờ bắt đầu / kết thúc ca sáng, ca chiều và số phút cảnh báo trước khi hết ca. */
+function ScheduleEditor() {
+  const sch = useSchedule();
+  const time = (key: 'amStart' | 'amEnd' | 'pmStart' | 'pmEnd', label: string) => (
+    <label>{label} <input type="time" value={sch[key]} onChange={(e) => e.target.value && setSchedule({ [key]: e.target.value })} /></label>
+  );
+  return (
+    <details style={{ margin: '6px 0' }}>
+      <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Lịch ca tự động: sáng {sch.amStart}–{sch.amEnd} · chiều {sch.pmStart}–{sch.pmEnd} · cảnh báo trước {sch.warnMin} phút</summary>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', alignItems: 'center', padding: '6px 0' }}>
+        {time('amStart', 'Ca sáng từ')}{time('amEnd', 'đến')}
+        {time('pmStart', 'Ca chiều từ')}{time('pmEnd', 'đến')}
+        <label>Cảnh báo trước <input type="number" min={1} max={120} value={sch.warnMin} onChange={(e) => setSchedule({ warnMin: Number(e.target.value) })} style={{ width: 56 }} /> phút</label>
+        <button onClick={() => setSchedule(DEFAULT_SCHEDULE)}>Về mặc định</button>
+      </div>
+      <p style={{ margin: 0, color: '#555' }}>Không cần chấm công: tool tự vào / ra ca theo giờ máy. Thời gian ngoài ca sáng và ca chiều (sau 17:30, trước 8:30, nghỉ trưa) tính là <b>OT</b>; ca OT được mở khi có thao tác đầu tiên và kết thúc ở thao tác cuối.</p>
+    </details>
+  );
+}
+
+/** Tab "Ca / KPI": ca đang chạy (tính trực tiếp) và lịch sử các ca đã kết thúc. */
 export function ShiftPanel() {
   const { active, history } = useShifts();
   const [, tick] = useState(0);
@@ -93,12 +114,13 @@ export function ShiftPanel() {
       <p style={{ margin: '4px 0', color: '#555' }}>
         KPI tính từ những gì đã <b>upload</b> lên CVAT trong ca (object nào được tác động, bao nhiêu frame outside, số keyframe). Dữ liệu chỉ lưu trong trình duyệt này.
       </p>
+      <ScheduleEditor />
       {active ? (
         <>
           <h4 style={{ margin: '6px 0' }}>Ca đang chạy</h4>
           {row(active)}
         </>
-      ) : <p>Chưa vào ca. Bấm "▶ Vào ca" ở thanh trên.</p>}
+      ) : <p style={{ color: '#666' }}>Chưa có ca đang chạy (ngoài giờ ca sáng / chiều; ca OT sẽ tự mở khi bạn có thao tác đầu tiên).</p>}
       <h4 style={{ margin: '10px 0 0' }}>Lịch sử ({history.length})</h4>
       {history.length === 0 && <p style={{ color: '#666' }}>Chưa có ca nào kết thúc.</p>}
       {history.map(row)}

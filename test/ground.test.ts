@@ -42,10 +42,10 @@ describe('groundSnap', () => {
     const noise: [number, number, number][] = [[2.5, 0.2, -1.6], [2.8, 0.5, -1.7], [-2.6, 0.1, -1.55]];
     expect(groundSnap(pts([...plane(-1.0), ...noise]), 4, 2, 1.5)!.dz).toBeCloseTo(-0.25, 1);
   });
-  it('chỉ có điểm dưới chân box vẫn đo được (dự phòng)', () => {
+  it('chỉ có điểm dưới chân box (không có mặt đường xung quanh): không gợi ý, không đoán mặt phẳng ngang', () => {
     const foot: [number, number, number][] = [];
     for (let u = -1.8; u <= 1.8; u += 0.2) for (let v = -0.9; v <= 0.9; v += 0.2) foot.push([u, v, -0.95]);
-    expect(groundSnap(pts(foot), 4, 2, 1.5)!.dz).toBeCloseTo(-0.2, 2);
+    expect(groundSnap(pts(foot), 4, 2, 1.5)).toBeNull();
   });
   it('quá ít điểm hoặc phải dời quá xa: null', () => {
     expect(groundSnap(pts([[3, 0, -1], [3, 1, -1]]), 4, 2, 1.5)).toBeNull();
@@ -104,10 +104,29 @@ describe('groundSnap trên mặt đường dốc', () => {
     expect(r.method).toBe('plane');
     expect(r.dz).toBeCloseTo(-0.25, 1);
   });
-  it('ít ô mặt đường: quay về mặt phẳng ngang', () => {
+  it('ít ô mặt đường hoặc chỉ một vệt hẹp: không đủ dữ kiện → null (không quay về mặt phẳng ngang)', () => {
     const sparse: [number, number, number][] = Array.from({ length: 30 }, (_, i) => [3 + (i % 5) * 0.01, 0.1 + (i % 3) * 0.01, -1.0]);
-    const r = groundSnap(pts(sparse), 4, 2, 1.5)!;
-    expect(r.method).toBe('level');
+    expect(groundSnap(pts(sparse), 4, 2, 1.5)).toBeNull();
+    const strip = big(() => -1.0).filter(([u, v]) => Math.abs(v - 1.5) < 0.3 && u > 0); // một vệt hẹp bên cạnh box
+    expect(groundSnap(pts(strip), 4, 2, 1.5)).toBeNull();
+  });
+  it('mặt đường chỉ ở xa object (gần nhất > 4 m): không gợi ý', () => {
+    const list: [number, number, number][] = [];
+    for (let u = -9; u <= 9; u += 0.25) for (let v = -8; v <= 8; v += 0.25) if (Math.abs(u) > 6.5 || Math.abs(v) > 5.5) list.push([u, v, -1.0]);
+    expect(groundSnap(pts(list), 4, 2, 1.5)).toBeNull();
+  });
+  it('vành 3 m thưa nhưng 6 m đủ: mở rộng ra mặt đường gần nhất rồi vẫn khớp đúng mặt dốc', () => {
+    // mặt dốc 6° dọc xe; chỉ có điểm ở cách mép box 2,5–5,5 m (vành đầu thiếu ô)
+    const t6 = Math.tan((6 * Math.PI) / 180);
+    const list: [number, number, number][] = [];
+    for (let u = -7.5; u <= 7.5; u += 0.25) for (let v = -6.5; v <= 6.5; v += 0.25) {
+      const d = Math.hypot(Math.max(Math.abs(u) - 2, 0), Math.max(Math.abs(v) - 1, 0));
+      if (d >= 2.5 && d <= 5.5) list.push([u, v, -1.0 + t6 * u]);
+    }
+    const r = groundSnap(pts(list), 4, 2, 1.5)!;
+    expect(r).not.toBeNull();
+    expect(r.method).toBe('plane');
+    expect(r.slopeDeg).toBeCloseTo(6, 0);
   });
 });
 

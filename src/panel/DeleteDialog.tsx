@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { scrollIntoPanel } from './scrollTo';
 import type { UploadResult } from '../content/uploader';
 import type { CvatAnnotations, CvatJob, CvatLabel } from '../shared/types';
 import { post, rpc } from './bridge';
@@ -12,6 +13,8 @@ import { madeStore } from './madeStore';
 export function DeleteDialog({ job, baseline, labels, ids, onClose, onDone }: {
   job: CvatJob; baseline: CvatAnnotations; labels: CvatLabel[]; ids: number[]; onClose: () => void; onDone: () => void;
 }) {
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => { scrollIntoPanel(root.current); }, []);
   const [ok, setOk] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<UploadResult | null>(null);
@@ -35,7 +38,7 @@ export function DeleteDialog({ job, baseline, labels, ids, onClose, onDone }: {
   };
 
   return (
-    <div style={{ border: '2px solid #b00', background: '#fff5f5', padding: 10, margin: '8px 0' }}>
+    <div ref={root} style={{ border: '2px solid #b00', background: '#fff5f5', padding: 10, margin: '8px 0' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
         <b>Xóa object do tool tạo khỏi CVAT (job {job.id})</b>
         <button onClick={onClose} disabled={busy}>Đóng</button>

@@ -1,11 +1,12 @@
 import { kv } from './storage';
 import { useSyncExternalStore } from 'react';
-import { shiftName, uniqueShiftName, type Shift, type ShiftUpload } from '../shared/shift';
+import type { Shift, ShiftUpload } from '../shared/shift';
+import { DEFAULT_SCHEDULE, normalizeSchedule, type Schedule } from '../shared/schedule';
+import { recordActivity, syncShifts } from '../shared/shiftflow';
 
 /** Ca làm việc và danh sách "bỏ qua gợi ý", lưu cục bộ trong trình duyệt (localStorage của extension, không rời máy). */
 interface State { active: Shift | null; history: Shift[] }
 const KEY = 'cvla-shifts';
-const MAX_HISTORY = 60;
 
 const load = (): State => {
   try {
@@ -26,26 +27,27 @@ const subscribe = (cb: () => void) => { listeners.add(cb); return () => { listen
 const snapshot = () => state;
 export const useShifts = () => useSyncExternalStore(subscribe, snapshot);
 
-const withActive = (fn: (s: Shift) => Shift) => {
-  if (state.active) commit({ ...state, active: fn(state.active) });
-};
+/** Ghi một hoạt động vào ca hiện tại (tự mở ca OT nếu đang ngoài giờ), cập nhật mốc thao tác cuối. */
+const withActive = (fn: (s: Shift) => Shift) => commit(recordActivity(state, new Date(), schedule, fn));
+
+// ---------- lịch ca tự động ----------
+const SCHEDULE_KEY = 'cvla-schedule';
+let schedule: Schedule = (() => { try { return normalizeSchedule(JSON.parse(kv.get(SCHEDULE_KEY) ?? 'null') as Partial<Schedule> | null); } catch { return DEFAULT_SCHEDULE; } })();
+const schedListeners = new Set<() => void>();
+const schedSubscribe = (cb: () => void) => { schedListeners.add(cb); return () => { schedListeners.delete(cb); }; };
+export const useSchedule = () => useSyncExternalStore(schedSubscribe, () => schedule);
+export const getSchedule = () => schedule;
+export function setSchedule(next: Partial<Schedule>) {
+  schedule = normalizeSchedule({ ...schedule, ...next });
+  try { kv.set(SCHEDULE_KEY, JSON.stringify(schedule)); } catch { /* bỏ qua */ }
+  schedListeners.forEach((l) => l());
+}
 
 export const shiftStore = {
-  /** Vào ca: tên tự đặt theo ngày và buổi (sáng AM / chiều PM) lúc vào ca. */
-  start(now = new Date()): Shift | null {
-    if (state.active) return null;
-    const name = uniqueShiftName(shiftName(now), state.history.map((h) => h.name));
-    const s: Shift = { name, start: now.toISOString(), end: null, uploads: [], accepted: 0, ignored: 0, edits: 0, touched: [] };
-    commit({ ...state, active: s });
-    return s;
-  },
-  /** Ra ca: chốt ca, đưa vào lịch sử. */
-  end(now = new Date()): Shift | null {
-    const a = state.active;
-    if (!a) return null;
-    const done: Shift = { ...a, end: now.toISOString() };
-    commit({ active: null, history: [done, ...state.history].slice(0, MAX_HISTORY) });
-    return done;
+  /** Tự vào / ra ca theo lịch (gọi định kỳ và trước mỗi lần ghi nhận hoạt động). */
+  sync(now = new Date()): void {
+    const next = syncShifts(state, now, schedule);
+    if (next !== state) commit(next);
   },
   edit(jobId: number, num: number) {
     withActive((s) => ({ ...s, edits: s.edits + 1, touched: s.touched.includes(`${jobId}:${num}`) ? s.touched : [...s.touched, `${jobId}:${num}`] }));

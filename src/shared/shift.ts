@@ -64,6 +64,9 @@ export interface ShiftTrackRec {
 export interface ShiftUpload { time: string; jobId: number; tracks: ShiftTrackRec[] }
 
 export interface Shift {
+  slot?: import('./schedule').Slot; // ca sáng / chiều / OT (ca tự động theo lịch)
+  endAt?: string; // giờ hết ca theo lịch (ca sáng / chiều)
+  lastActivity?: string; // thao tác cuối (dùng chốt giờ kết thúc của OT)
   name: string;
   start: string;
   end: string | null;

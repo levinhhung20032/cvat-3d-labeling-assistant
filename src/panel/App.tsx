@@ -18,6 +18,8 @@ import { KeysPanel } from './KeysPanel';
 import { UploadDialog } from './UploadDialog';
 import { QcPanel } from './QcPanel';
 import { DynSizePanel } from './DynSizePanel';
+import { Help } from './ui';
+import { ShiftBadge, ShiftBanner } from './ShiftBar';
 import { findDrift } from '../shared/drift';
 import { DeleteDialog } from './DeleteDialog';
 import { madeStore, useMadeIds } from './madeStore';
@@ -145,8 +147,38 @@ const STYLE = `
 .cvla-root .cvla-tab { border-radius: 4px 4px 0 0; border-bottom: 2px solid transparent; background: #f1f4f8; }
 .cvla-root .cvla-tab.cvla-tab-on { background: #1f2937; color: #fff; border-color: #1f2937; font-weight: 700; }
 .cvla-root .cvla-tab.cvla-tab-on:hover:not(:disabled) { background: #1f2937; }
+/* Giao diện tối: đảo màu cả panel rồi đảo ngược lại canvas / ảnh (point cloud, ảnh camera) để chúng giữ màu gốc; hue-rotate 180° giữ nguyên sắc (xanh vẫn xanh, đỏ vẫn đỏ). */
+body { margin: 0; }
+.cvla-root { background: #fff; min-height: 100vh; box-sizing: border-box; }
+.cvla-root.cvla-dark { filter: invert(1) hue-rotate(180deg) brightness(.92); }
+/* Xám: như tối nhưng giảm tương phản rồi tăng sáng, nền ra màu xám than thay vì gần đen. */
+.cvla-root.cvla-gray { filter: invert(1) hue-rotate(180deg) contrast(.6) brightness(1.5); }
+.cvla-root.cvla-dark canvas, .cvla-root.cvla-dark img, .cvla-root.cvla-dark video, .cvla-root.cvla-gray canvas, .cvla-root.cvla-gray img, .cvla-root.cvla-gray video { filter: invert(1) hue-rotate(180deg); }
+/* Công tắc gạt: mọi ô tick trong panel hiển thị như toggle (ô chọn dòng dùng class cvla-check để giữ dạng ô tick). */
+.cvla-root input[type=checkbox]:not(.cvla-check) { appearance: none; -webkit-appearance: none; width: 30px; height: 17px; border-radius: 9px; background: #9aa4b2; position: relative; vertical-align: middle; margin: 0 4px 0 0; cursor: pointer; transition: background .15s; flex: none; }
+.cvla-root input[type=checkbox]:not(.cvla-check)::after { content: ''; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,.4); }
+.cvla-root input[type=checkbox]:not(.cvla-check):checked { background: #2b6cb0; }
+.cvla-root input[type=checkbox]:not(.cvla-check):checked::after { left: 15px; }
+.cvla-root input[type=checkbox]:not(.cvla-check):disabled { opacity: .45; cursor: default; }
+.cvla-root button.cvla-primary { background: #2563eb; color: #fff; border-color: #1d4ed8; }
+.cvla-root button.cvla-primary:hover:not(:disabled) { background: #1d4ed8; }
+.cvla-root button.cvla-shift { border-radius: 12px; padding: 1px 10px; background: #e6f4ea; border-color: #34a853; color: #14532d; font-size: 12px; }
+.cvla-root button.cvla-shift-ot { background: #ede9fe; border-color: #7c3aed; color: #4c1d95; }
+.cvla-root button.cvla-shift-warn { background: #fde68a; border-color: #d97706; color: #7a4100; font-weight: 700; }
+.cvla-badge { display: inline-block; min-width: 16px; padding: 0 5px; margin-left: 6px; border-radius: 9px; background: #fff; color: #1d4ed8; font-size: 11px; line-height: 16px; text-align: center; }
+.cvla-help { display: inline-block; width: 15px; height: 15px; border-radius: 50%; border: 1px solid #8a94a3; color: #5b6573; font-size: 10px; line-height: 14px; text-align: center; cursor: help; margin-left: 4px; font-weight: 700; user-select: none; }
+.cvla-root button.cvla-num { border: 0; background: transparent; padding: 0 2px; min-width: 40px; text-align: left; text-decoration: underline dotted; }
+.cvla-pill { display: inline-block; padding: 0 7px; border-radius: 9px; font-size: 11px; line-height: 17px; background: #e8ecf1; color: #34404f; white-space: nowrap; }
+.cvla-pill-class { background: #1f2937; color: #fff; font-weight: 600; }
+.cvla-pill-warn { background: #fde68a; color: #7a5200; }
+.cvla-pill-bad { background: #fecaca; color: #991b1b; font-weight: 700; }
 .cvla-head { position: sticky; top: 0; z-index: 20; background: #fff; padding-bottom: 4px; border-bottom: 1px solid #d5dbe3; margin: -10px -10px 8px; padding: 8px 10px 6px; }
 `;
+
+type Theme = 'auto' | 'dark' | 'gray' | 'light';
+const THEME_NEXT: Record<Theme, Theme> = { auto: 'dark', dark: 'gray', gray: 'light', light: 'auto' };
+const THEME_LABEL: Record<Theme, string> = { auto: '◐ tự động', dark: '🌙 tối', gray: '🌫 xám', light: '☀ sáng' };
+const loadTheme = (): Theme => { try { const v = kv.get('cvla-theme'); return v === 'dark' || v === 'gray' || v === 'light' ? v : 'auto'; } catch { return 'auto'; } };
 
 const loadSync = () => { try { return kv.get('cvla-sync') !== '0'; } catch { return true; } };
 
@@ -154,6 +186,18 @@ export function App() {
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [draft, dispatch] = useReducer(reducer, EMPTY);
   const [tab, setTab] = useState<Tab>('objects');
+  const [theme, setThemeState] = useState<Theme>(loadTheme);
+  const setTheme = (t: Theme) => { setThemeState(t); try { kv.set('cvla-theme', t); } catch { /* bỏ qua */ } };
+  // 'auto' theo cài đặt tối / sáng của hệ điều hành.
+  const [osDark, setOsDark] = useState(() => typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches);
+  useEffect(() => {
+    if (typeof matchMedia !== 'function') return;
+    const mq = matchMedia('(prefers-color-scheme: dark)');
+    const on = () => setOsDark(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  const skin = theme === 'auto' ? (osDark ? 'dark' : 'light') : theme; // giao diện thực tế đang dùng
   const [uploading, setUploading] = useState(false);
   const { active: shift } = useShifts();
   const [, tickShift] = useState(0);
@@ -415,11 +459,14 @@ export function App() {
   );
 
   return (
-    <div className="cvla-root" style={{ font: '13px/1.4 system-ui', padding: 10, color: '#111' }}>
+    <div className={skin === 'dark' ? 'cvla-root cvla-dark' : skin === 'gray' ? 'cvla-root cvla-gray' : 'cvla-root'} style={{ font: '13px/1.4 system-ui', padding: 10, color: '#111' }}>
       <style>{STYLE}</style>
       <div className="cvla-head">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <b>CVAT 3D Assistant · v{VERSION}</b>
+        <ShiftBadge onOpen={() => setTab('shift')} />
+        </span>
         <span>
           <label title="Khi bạn chọn một object trong giao diện CVAT, tool tự chọn object đó và nhảy tới frame hiện tại của CVAT">
             <input type="checkbox" checked={sync} onChange={(e) => setSync(e.target.checked)} /> CVAT → tool
@@ -428,30 +475,9 @@ export function App() {
             <input type="checkbox" checked={pushOut} onChange={(e) => setPushOut(e.target.checked)} /> tool → CVAT
           </label>{' '}
           <button onClick={() => focusRef.current()} disabled={selectedNum === null} title="Thu nhỏ tool và đưa camera 3D của CVAT lại gần object đang chọn (như bấm đúp vào object trong CVAT). Phím F.">🎯 Focus</button>{' '}
+          <button onClick={() => setTheme(THEME_NEXT[theme])} title="Giao diện: tự động (theo hệ điều hành) → tối → xám → sáng">{THEME_LABEL[theme]}</button>{' '}
           <button onClick={reload}>Tải lại</button>
         </span>
-      </div>
-      <div style={{ margin: '4px 0', display: 'flex', gap: 8, alignItems: 'center' }}>
-        {shift ? (
-          <>
-            <span style={{ background: '#fde2e2', border: '1px solid #c33', padding: '1px 8px', borderRadius: 3 }}>
-              ● Ca <b>{shift.name}</b> · {fmtDuration(computeKpi(shift).durationMin)} · {computeKpi(shift).totals.objects} object đã upload
-            </span>
-            <button
-              onClick={() => {
-                const pending = draft.edited.size;
-                if (pending && !confirm(`Còn ${pending} frame đã sửa CHƯA upload — sẽ không tính vào KPI của ca. Vẫn ra ca?`)) return;
-                if (!pending && !confirm(`Ra ca ${shift.name}?`)) return;
-                shiftStore.end();
-                setTab('shift');
-              }}
-            >■ Ra ca</button>
-          </>
-        ) : (
-          <button onClick={() => { shiftStore.start(); }} title={`Tên ca sẽ là ${shiftName(new Date())}`}>
-            ▶ Vào ca ({shiftName(new Date())})
-          </button>
-        )}
       </div>
       <div style={{ margin: '6px 0 0', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4 }}>
         {tabBtn('objects', 'Bảng object')}
@@ -463,18 +489,19 @@ export function App() {
         {tabBtn('job', 'Thông tin job')}
         {data && (
           <span style={{ marginLeft: 12, padding: '2px 6px', background: draft.edited.size ? '#fff3cd' : '#eee' }}>
-            Nháp: <b>{draft.edited.size}</b> frame đã sửa (chỉ trong bộ nhớ, <b>chưa upload</b>){' '}
+            Nháp: <b>{draft.edited.size}</b> frame chưa upload <Help text="Các chỉnh sửa chỉ nằm trong bộ nhớ (và bản lưu cục bộ để F5 không mất) cho tới khi bạn bấm Upload lên CVAT." />{' '}
             <button disabled={!draft.undo.length} onClick={() => dispatch({ t: 'undo' })}>Hoàn tác</button>{' '}
             <button disabled={!draft.redo.length} onClick={() => dispatch({ t: 'redo' })}>Làm lại</button>{' '}
             <button
               disabled={!draft.edited.size}
               onClick={() => { if (confirm('Bỏ toàn bộ chỉnh sửa trong nháp?')) dispatch({ t: 'reset', baseline: data.ann }); }}
             >Bỏ nháp</button>{' '}
-            <button onClick={() => setUploading(true)} style={{ fontWeight: 700, background: draft.edited.size ? '#d7f7d7' : undefined }}>⬆ Upload lên CVAT…</button>
+            <button className={draft.edited.size ? 'cvla-primary' : undefined} onClick={() => setUploading(true)} style={{ fontWeight: 700 }}>⬆ Upload lên CVAT…{draft.edited.size ? <span className="cvla-badge">{draft.edited.size}</span> : null}</button>
           </span>
         )}
       </div>
       </div>
+      <ShiftBanner pending={draft.edited.size} onUpload={() => setUploading(true)} />
       {restorable && data && (
         <div style={{ background: '#e0f2fe', border: '1px solid #38bdf8', padding: '4px 8px', margin: '6px 0' }}>
           Có <b>bản nháp chưa upload</b> từ lần trước ({new Date(restorable.savedAt).toLocaleString()}): {restorable.edited.length} frame đã sửa, {Object.keys(restorable.tracks).length} object.{' '}

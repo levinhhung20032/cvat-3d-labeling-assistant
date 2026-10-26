@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { scrollIntoPanel } from './scrollTo';
 import type { UploadResult } from '../content/uploader';
 import { changedFrames, outsideFrames, type ShiftTrackRec } from '../shared/shift';
 import { buildUploadPlan } from '../shared/upload';
@@ -17,6 +18,10 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
   baseline: CvatAnnotations; working: CvatAnnotations; job: CvatJob; labels: CvatLabel[];
   onClose: () => void; onReload: () => void; onUploaded: (tracks: ShiftTrackRec[]) => void;
 }) {
+  const root = useRef<HTMLDivElement>(null);
+  const resultBox = useRef<HTMLDivElement>(null);
+  // Hộp thoại mở ở đầu panel: tự cuộn lên để thấy ngay (người dùng thường đang cuộn xuống ở các view); kết quả mới hiện ra cũng được cuộn tới.
+  useEffect(() => { scrollIntoPanel(root.current); }, []);
   const [bake, setBake] = useState(true);
   const [includeOthers, setIncludeOthers] = useState(false);
   const [okTilt, setOkTilt] = useState(false);
@@ -45,6 +50,8 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
       return () => window.clearTimeout(t);
     }
   }, [result]);
+
+  useEffect(() => { if (result) scrollIntoPanel(resultBox.current, 'nearest'); }, [result]);
 
   useEffect(() => {
     void rpc<{ last: LastInfo | null }>((reqId) => ({ type: 'revertInfo', reqId })).then((r) => setLast(r.last));
@@ -84,7 +91,7 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
   const box: React.CSSProperties = { border: '2px solid #1f2937', background: '#fffef6', padding: 10, margin: '8px 0' };
 
   return (
-    <div style={box}>
+    <div ref={root} style={box}>
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
         <b>Xem lại trước khi upload (job {job.id})</b>
         <button onClick={onClose} disabled={busy}>Đóng</button>
@@ -165,7 +172,7 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
 
       {busy && <p>Đang xử lý…</p>}
       {result && (
-        <div style={{ margin: '8px 0', padding: 6, border: `1px solid ${result.ok ? '#0a0' : '#b00'}`, background: result.ok ? '#e8ffe8' : '#fdd' }}>
+        <div ref={resultBox} style={{ margin: '8px 0', padding: 6, border: `1px solid ${result.ok ? '#0a0' : '#b00'}`, background: result.ok ? '#e8ffe8' : '#fdd' }}>
           <b>{result.ok ? (result.sent ? 'Thành công' : 'Chạy thử đạt') : 'Không thành công'}</b> · bước: {result.stage}
           <div>{result.message}</div>
           {result.ok && result.sent && <button onClick={onReload}>Về Batch Review ngay</button>}

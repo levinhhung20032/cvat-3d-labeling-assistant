@@ -19,9 +19,9 @@ Chạy trên **Edge / Chrome** (đã dùng thử) và **Firefox 128+** (bản th
 | **QC** | QC mode: ghi chú theo (ID, frame), xuất Excel `ID, frame, note`; **đối chiếu file QC (.xlsx)**: đọc sheet Matrix ngay trên máy, đánh dấu từng flag còn lỗi / đã hết / ignore / fixed |
 | **Thuộc tính (attribute)** | Hiện và sửa attribute của object; gợi ý theo kích thước box (loại xe, tuổi / tư thế người đi bộ, có người lái xe hai bánh…) |
 | **Upload** | Màn hình xem lại → ghi bằng `PATCH …/annotations?action=update` chia lô → đọc lại so khớp; tự điền keyframe outside, tự khoá hết thành keyframe cho object đã tác động; nhật ký + hoàn nguyên |
-| **Ca làm việc / KPI** | Vào ca / ra ca (tên ca `Oct21AM`, `Oct21PM`…, lưu qua F5), KPI: object đã tác động, số frame đã thay đổi thật (sửa tay, nội suy, outside), số frame outside, keyframe thêm / gỡ / sửa, gợi ý chấp nhận / bỏ qua |
+| **Ca làm việc / KPI** | Ca tự động theo lịch, không cần chấm công (sáng 8:30–12:30, chiều 13:30–17:30, ngoài giờ là OT; cảnh báo 15 phút trước khi hết ca; tên ca `Oct21AM`, `Oct21PM`, `Oct21OT`…, lưu qua F5), KPI: object đã tác động, số frame đã thay đổi thật (sửa tay, nội suy, outside), số frame outside, keyframe thêm / gỡ / sửa, gợi ý chấp nhận / bỏ qua |
 | **Liên kết với CVAT** | Chọn object trong CVAT → tool chọn theo; chọn trong tool → CVAT kích hoạt object (đổi frame nếu cần); bấm đúp trong CVAT mở rộng tool; nút **Focus** thu nhỏ tool và zoom cận cảnh object trong khung 3D của CVAT |
-| **Giao diện** | Cửa sổ nổi kéo / đổi cỡ / thu nhỏ / phóng to; thanh đầu dính khi cuộn; cỡ ô tự khớp màn hình; phím tắt tùy chỉnh (cảnh báo trùng phím); ảnh camera căn giữa, có kính lúp |
+| **Giao diện** | Cửa sổ nổi kéo / đổi cỡ / thu nhỏ / phóng to; thanh đầu dính khi cuộn; **giao diện tối và xám** (nút ◐ / 🌙 / 🌫 / ☀ ở đầu panel: tự động theo hệ điều hành, tối, xám, sáng); cỡ ô tự khớp màn hình; phím tắt tùy chỉnh (cảnh báo trùng phím); ảnh camera căn giữa, có kính lúp |
 | **Nháp** | Bản nháp chưa upload được lưu cục bộ để F5 không mất; sau upload tool tự tải lại tab CVAT |
 
 ## Luật an toàn
