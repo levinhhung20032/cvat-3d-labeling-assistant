@@ -11,21 +11,26 @@ export interface SavedDraft {
   savedAt: string; // ISO
   edited: string[]; // khóa "<số thứ tự>:<frame>" các frame đã sửa
   tracks: Record<string, CvatTrack>; // theo chỉ số track (0-based dạng chuỗi)
+  added?: CvatTrack[]; // object MỚI do tool tạo (chưa có id), nằm sau các track của CVAT
+  baseCount?: number; // số track của CVAT lúc tạo nháp (để biết `added` bắt đầu từ đâu)
 }
 
 export const draftKey = (jobId: number) => `cvla-draft:${jobId}`;
 
 /** Dựng bản nháp từ trạng thái hiện tại; null nếu chưa sửa gì. */
 export function buildDraft(jobId: number, baseline: CvatAnnotations, work: CvatAnnotations, edited: ReadonlySet<string>, now = new Date()): SavedDraft | null {
-  if (!edited.size) return null;
+  const n = baseline.tracks.length;
+  const added = work.tracks.slice(n).filter((t) => typeof t.id !== 'number');
+  if (!edited.size && !added.length) return null;
   const idx = new Set([...edited].map((k) => Number(k.split(':')[0]) - 1));
   const tracks: Record<string, CvatTrack> = {};
   for (const i of idx) {
+    if (i >= n) continue;
     const t = work.tracks[i];
     if (t && t !== baseline.tracks[i]) tracks[String(i)] = t;
   }
-  if (!Object.keys(tracks).length) return null;
-  return { v: 1, jobId, version: baseline.version, savedAt: now.toISOString(), edited: [...edited], tracks };
+  if (!Object.keys(tracks).length && !added.length) return null;
+  return { v: 1, jobId, version: baseline.version, savedAt: now.toISOString(), edited: [...edited], tracks, ...(added.length ? { added, baseCount: n } : {}) };
 }
 
 export type DraftCheck =
@@ -50,10 +55,12 @@ export function checkDraft(raw: string | null, jobId: number, baseline: CvatAnno
     const base = baseline.tracks[Number(k)];
     if (!base || JSON.stringify(base.shapes) !== JSON.stringify(t.shapes)) left[k] = t;
   }
-  if (!Object.keys(left).length) return { ok: false, reason: 'none', message: '' };
+  if (!Object.keys(left).length && !d.added?.length) return { ok: false, reason: 'none', message: '' };
+  if (d.added?.length && d.baseCount !== baseline.tracks.length) return { ok: false, reason: 'server-changed', message: 'Số object trên CVAT đã đổi kể từ lúc tạo nháp; không khôi phục các object mới trong nháp để tránh lệch ID.' };
   const keep = new Set(Object.keys(left).map((k) => Number(k) + 1));
+  for (let i = 0; i < (d.added?.length ?? 0); i++) keep.add(baseline.tracks.length + i + 1);
   const edited = d.edited.filter((key) => keep.has(Number(key.split(':')[0])));
-  return { ok: true, draft: { ...d, tracks: left, edited }, trackCount: Object.keys(left).length };
+  return { ok: true, draft: { ...d, tracks: left, edited }, trackCount: Object.keys(left).length + (d.added?.length ?? 0) };
 }
 
 /** Áp bản nháp lên baseline. Track nào không khớp ID với baseline thì bỏ qua (và bỏ khóa edited của nó). */
@@ -67,6 +74,7 @@ export function applyDraft(d: SavedDraft, baseline: CvatAnnotations): { work: Cv
     tracks[i] = t;
     ok.add(i + 1);
   }
+  for (let i = 0; i < (d.added?.length ?? 0); i++) { tracks.push(d.added![i]!); ok.add(baseline.tracks.length + i + 1); }
   const edited = new Set(d.edited.filter((key) => ok.has(Number(key.split(':')[0]))));
   return { work: { ...baseline, tracks }, edited, skipped };
 }

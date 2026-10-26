@@ -1,6 +1,6 @@
 import type { WriteAction } from '../shared/plan';
 import type { UploadPayload } from '../shared/plan';
-import type { CvatAnnotations, CvatJob, CvatLabel } from '../shared/types';
+import type { CvatAnnotations, CvatJob, CvatLabel, CvatTrack } from '../shared/types';
 
 export interface WriteLogEntry {
   time: string;
@@ -20,11 +20,12 @@ export interface ClientOptions {
   log?: (e: WriteLogEntry) => void;
 }
 
+export const MAX_DELETE = 20;
 const WRITE_PATH = /^\/api\/jobs\/\d+\/annotations$/;
 
 /**
- * Điểm duy nhất gọi API CVAT. Lớp ghi chỉ có `create` và `update` (PATCH);
- * không tồn tại đường nào gửi `action=delete` hoặc PUT.
+ * Điểm duy nhất gọi API CVAT. Ghi chỉ có `create` và `update` (PATCH); `action=delete` chỉ qua `deleteOwn` (track do tool tạo, theo sổ ID);
+ * không tồn tại đường nào gửi PUT.
  */
 export class CvatClient {
   private readonly origin: string;
@@ -69,21 +70,43 @@ export class CvatClient {
     return this.get(`/api/jobs/${jobId}/annotations`);
   }
 
-  private async getBinary(jobId: number, query: string): Promise<ArrayBuffer> {
+  private async getBinary(jobId: number, query: string, cache?: RequestCache): Promise<ArrayBuffer> {
     const url = new URL(`/api/jobs/${jobId}/data?${query}`, this.origin);
-    const res = await this.fetchImpl(url.toString(), { method: 'GET', credentials: 'include' });
+    const res = await this.fetchImpl(url.toString(), { method: 'GET', credentials: 'include', ...(cache ? { cache } : {}) });
     if (!res.ok) throw new Error(`GET ${url.pathname} → ${res.status}`);
     return res.arrayBuffer();
   }
 
-  /** Point cloud của frame: PCD nhị phân (x y z rgb), ~5 MB. */
+  /** Point cloud của frame: PCD nhị phân (x y z rgb), ~5 MB. Dùng bộ nhớ đệm HTTP của trình duyệt (như chính giao diện CVAT): nạp lại tab thì frame đã tải không phải sinh lại ở server. */
   getFrame(jobId: number, n: number): Promise<ArrayBuffer> {
-    return this.getBinary(jobId, `type=frame&number=${n}&quality=original`);
+    return this.getBinary(jobId, `type=frame&number=${n}&quality=original`, 'force-cache');
   }
 
   /** Ảnh camera của frame: file zip chứa image_0.jpg … image_7.jpg, ~5 MB. */
   getContextImages(jobId: number, n: number): Promise<ArrayBuffer> {
     return this.getBinary(jobId, `type=context_image&quality=original&number=${n}`);
+  }
+
+  /**
+   * Xóa track do CHÍNH TOOL tạo ra (chủ dự án duyệt 2026-10-26). Đây là đường DUY NHẤT gửi `action=delete`: chỉ nhận các track có id
+   * nằm trong `allowedIds` (sổ các ID tool đã tạo), tối đa `MAX_DELETE` track mỗi lần; object có sẵn trên server không bao giờ qua được.
+   */
+  async deleteOwn(jobId: number, tracks: CvatTrack[], allowedIds: ReadonlySet<number>): Promise<{ sent: boolean }> {
+    if (!tracks.length || tracks.length > MAX_DELETE) throw new Error(`Chỉ được xóa 1–${MAX_DELETE} object mỗi lần`);
+    for (const t of tracks) {
+      if (typeof t.id !== 'number' || !allowedIds.has(t.id)) throw new Error(`Từ chối xóa track ${String(t.id)}: không phải object do tool tạo`);
+    }
+    const payload: UploadPayload = { version: 0, tags: [], shapes: [], tracks };
+    this.log({ time: new Date().toISOString(), action: 'delete', jobId, dryRun: this.dryRun, payload });
+    if (this.dryRun) return { sent: false };
+    const url = new URL(`/api/jobs/${jobId}/annotations`, this.origin);
+    url.searchParams.set('action', 'delete');
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const csrf = this.getCsrf();
+    if (csrf) headers['X-CSRFToken'] = csrf;
+    const res = await this.fetchImpl(url.toString(), { method: 'PATCH', credentials: 'include', headers, body: JSON.stringify(payload) });
+    if (!res.ok) throw new Error(`PATCH ${url.pathname} (delete) → ${res.status}`);
+    return { sent: true };
   }
 
   /** Chỉ `create` / `update`. Dry-run mặc định: trả payload, không gửi. */

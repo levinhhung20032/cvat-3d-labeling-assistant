@@ -25,9 +25,17 @@ export function parsePcd(buf: ArrayBuffer, keepRgb = true): PointCloud {
   const ic = keepRgb ? fields.indexOf('rgb') : -1;
   const start = m.index + m[0].length;
   if (bytes.length < start + count * stride) throw new Error('PCD bị cắt cụt');
-  const dv = new DataView(buf, start);
   const xyz = new Float32Array(count * 3);
   const rgb = ic >= 0 ? new Uint32Array(count) : null;
+  // Đường nhanh: dữ liệu little-endian căn hàng 4 byte (máy x86/ARM) ⇒ đọc thẳng bằng Float32Array, không qua DataView từng điểm.
+  const littleEndian = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
+  if (littleEndian && !rgb && start % 4 === 0 && stride % 4 === 0 && sizes[ix] === 4 && sizes[iy] === 4 && sizes[iz] === 4) {
+    const f32 = new Float32Array(buf, start, (count * stride) / 4);
+    const w = stride / 4, ox = offsets[ix]! / 4, oy = offsets[iy]! / 4, oz = offsets[iz]! / 4;
+    for (let i = 0, j = 0; i < count; i++, j += w) { xyz[i * 3] = f32[j + ox]!; xyz[i * 3 + 1] = f32[j + oy]!; xyz[i * 3 + 2] = f32[j + oz]!; }
+    return { count, xyz, rgb };
+  }
+  const dv = new DataView(buf, start);
   for (let i = 0; i < count; i++) {
     const o = i * stride;
     xyz[i * 3] = dv.getFloat32(o + offsets[ix]!, true);

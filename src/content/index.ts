@@ -4,18 +4,22 @@ import { comboOf } from '../shared/keymap';
 import { checkIdsNotRemoved, trackIds } from '../shared/rules';
 import { CvatClient } from './cvatClient';
 import { activateObject, blurFrameInput, gotoFrame, readCvatState } from './cvatDom';
-import { runRevert, runUpload, type LogEntry, type UploadDeps } from './uploader';
+import { runDelete, runRevert, runUpload, type LogEntry, type UploadDeps } from './uploader';
 import type { InPagePanel } from '../panel/inpage';
 
 declare global {
   interface Window {
-    __cvla?: { toggle: () => void };
+    __cvla?: { toggle: () => void; dispose: () => void };
   }
 }
 
 const JOB_URL = /\/tasks\/\d+\/jobs\/(\d+)/;
 const log = (...a: unknown[]) => console.info('[CVLA]', ...a); // vết chẩn đoán: mở Console và lọc "[CVLA]"
 const TITLE_H = 28;
+/** Thuộc tính đánh dấu cửa sổ tool trong DOM (DOM dùng chung giữa các phiên / bản extension, còn biến JS thì không). */
+const HOST_ATTR = 'data-cvla-host';
+/** Sự kiện DOM báo cho phiên tool đang chạy (kể cả của bản extension cũ trước khi Reload) tự đóng và dọn dẹp. */
+const TAKEOVER = 'cvla-takeover';
 
 type Out = ContentMessage extends infer M ? (M extends unknown ? Omit<M, 'source' | 'session'> : never) : never;
 
@@ -29,10 +33,11 @@ function defaultGeo(): Geo {
 }
 
 function main() {
-  if (window.__cvla) {
-    window.__cvla.toggle();
-    return;
-  }
+  // Bấm biểu tượng extension: nếu đã có phiên tool đang chạy (cùng bản, hoặc bản trước khi Reload extension) thì ĐÓNG phiên đó
+  // và mở phiên mới, để không bao giờ có hai cửa sổ tool cùng lúc.
+  document.dispatchEvent(new CustomEvent(TAKEOVER));
+  window.__cvla?.dispose();
+  document.querySelectorAll(`[${HOST_ATTR}]`).forEach((el) => el.remove()); // cửa sổ mồ côi của phiên không còn phản hồi
   const jobId = Number(JOB_URL.exec(location.pathname)?.[1]);
   if (!jobId) return;
 
@@ -56,12 +61,19 @@ function main() {
   const uploadDeps: UploadDeps = {
     jobId,
     read: () => client.getAnnotations(jobId),
-    write: (payload) => {
+    write: (payload, action = 'update') => {
       writer ??= new CvatClient({
         origin: location.origin, dryRun: false,
         getCsrf: () => /(?:^|;\s*)csrftoken=([^;]+)/.exec(document.cookie)?.[1] ?? null,
       });
-      return writer.write(jobId, 'update', payload);
+      return writer.write(jobId, action, payload);
+    },
+    deleteOwn: (tracks, allowed) => {
+      writer ??= new CvatClient({
+        origin: location.origin, dryRun: false,
+        getCsrf: () => /(?:^|;\s*)csrftoken=([^;]+)/.exec(document.cookie)?.[1] ?? null,
+      });
+      return writer.deleteOwn(jobId, tracks, allowed);
     },
     loadLog: async () => ((await api.storage.local.get(logKey))[logKey] as LogEntry[] | undefined) ?? [],
     saveLog: (list) => api.storage.local.set({ [logKey]: list }),
@@ -138,6 +150,7 @@ function main() {
 
   function show() {
     host = document.createElement('div');
+    host.setAttribute(HOST_ATTR, session);
     host.style.cssText =
       'position:fixed;z-index:2147483647;display:flex;flex-direction:column;overflow:hidden;min-width:320px;' +
       'background:#fff;box-shadow:0 4px 18px rgba(0,0,0,.45);border:1px solid #1f2937;border-radius:4px;';
@@ -353,6 +366,7 @@ function main() {
     else if (m.type === 'hotkeys') toggleCombos = m.toggle;
     else if (m.type === 'cvatFocus') void focusInCvat(m.num, m.frame, !!m.zoom, !!m.minimize);
     else if (m.type === 'upload') void rpcUpload(m.reqId, () => runUpload(uploadDeps, m.req));
+    else if (m.type === 'deleteOwn') void rpcUpload(m.reqId, () => runDelete(uploadDeps, m.req));
     else if (m.type === 'revert') void rpcUpload(m.reqId, () => runRevert(uploadDeps, m.real));
     else if (m.type === 'revertInfo') {
       void uploadDeps.loadLog().then((log) => {
@@ -365,9 +379,7 @@ function main() {
   // Bấm đúp vào object trong CVAT (khung 3D hoặc danh sách object) → mở rộng tool và hiện object đó.
   // Chọn đơn (một cú bấm) không tự mở rộng.
   const FOCUS_TARGETS = '.cvat-canvas3d-perspective, .cvat-canvas3d-orthographic-view, .cvat-objects-sidebar-state-item';
-  document.addEventListener(
-    'dblclick',
-    (e) => {
+  const onDblClick = (e: MouseEvent) => {
       if (!host || !(e.target instanceof Element) || host.contains(e.target) || !e.target.closest(FOCUS_TARGETS)) return;
       // CVAT kích hoạt object ở cú bấm đầu; chờ giao diện cập nhật rồi đọc object đang kích hoạt.
       window.setTimeout(() => {
@@ -377,14 +389,11 @@ function main() {
         ensureWide();
         send({ type: 'cvatDbl', num: s.num, frame: s.frame });
       }, 250);
-    },
-    true,
-  );
+  };
+  document.addEventListener('dblclick', onDblClick, true);
 
   // Phím bật tắt cửa sổ (mặc định `) hoạt động ngay trên trang CVAT; bỏ qua khi đang gõ vào ô nhập của trang.
-  document.addEventListener(
-    'keydown',
-    (e) => {
+  const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
@@ -393,13 +402,23 @@ function main() {
       e.preventDefault();
       e.stopPropagation();
       toggleWindow();
-    },
-    true,
-  );
+  };
+  document.addEventListener('keydown', onKeyDown, true);
 
   window.addEventListener('message', onMessage);
   window.addEventListener('resize', applyGeo);
-  window.__cvla = { toggle: () => (host ? hide() : show()) };
+  /** Đóng cửa sổ và gỡ mọi thứ phiên này đã gắn vào trang (để phiên mới thay thế, không để trùng). */
+  const dispose = () => {
+    hide();
+    document.removeEventListener('dblclick', onDblClick, true);
+    document.removeEventListener('keydown', onKeyDown, true);
+    document.removeEventListener(TAKEOVER, dispose);
+    window.removeEventListener('message', onMessage);
+    window.removeEventListener('resize', applyGeo);
+    if (window.__cvla?.dispose === dispose) delete window.__cvla;
+  };
+  document.addEventListener(TAKEOVER, dispose);
+  window.__cvla = { toggle: () => (host ? hide() : show()), dispose };
 
   void (async () => {
     try {

@@ -18,6 +18,9 @@ import { KeysPanel } from './KeysPanel';
 import { UploadDialog } from './UploadDialog';
 import { QcPanel } from './QcPanel';
 import { DynSizePanel } from './DynSizePanel';
+import { findDrift } from '../shared/drift';
+import { DeleteDialog } from './DeleteDialog';
+import { madeStore, useMadeIds } from './madeStore';
 import { dynClassStore } from './dynClassStore';
 import { ShiftPanel } from './ShiftPanel';
 import { attrKey, issueKey, motionKey, overlapKey, shiftStore, useIgnored, useShifts } from './shiftStore';
@@ -43,6 +46,8 @@ type Action =
   | { t: 'edit'; idx: number; frame: number; cub: Cuboid; sizeAll?: boolean } // sizeAll: dynamic size tắt → kích thước mới áp cho mọi keyframe
   | { t: 'track'; idx: number; track: CvatTrack; frames: number[] } // đổi keyframe hàng loạt
   | { t: 'restore'; work: CvatAnnotations; edited: Set<string> } // khôi phục bản nháp đã lưu
+  | { t: 'addTrack'; track: CvatTrack } // object MỚI do tool tạo (chưa có id), thêm vào cuối
+  | { t: 'removeTrack'; idx: number } // xóa object do tool tạo trong nháp (chỉ track chưa có id)
   | { t: 'undo' | 'redo' | 'reset'; baseline?: CvatAnnotations };
 
 const replaceTrack = (a: CvatAnnotations, idx: number, tr: CvatTrack): CvatAnnotations => {
@@ -70,6 +75,25 @@ function reducer(s: Draft, a: Action): Draft {
       return { work: a.ann, edited: new Set(), undo: [], redo: [] };
     case 'restore':
       return { work: a.work, edited: a.edited, undo: [], redo: [] };
+    case 'addTrack': {
+      if (!s.work || typeof a.track.id === 'number') return s;
+      const idx = s.work.tracks.length;
+      const keys = a.track.shapes.map((x) => `${idx + 1}:${x.frame}`);
+      // thêm / xóa object làm đổi chỉ số track nên lịch sử hoàn tác cũ không còn dùng được
+      return { work: { ...s.work, tracks: [...s.work.tracks, a.track] }, edited: new Set([...s.edited, ...keys]), undo: [], redo: [] };
+    }
+    case 'removeTrack': {
+      const t = s.work?.tracks[a.idx];
+      if (!s.work || !t || typeof t.id === 'number') return s; // object có sẵn trên server không bao giờ xóa được ở đây
+      const edited = new Set<string>();
+      for (const k of s.edited) {
+        const [n, f] = k.split(':');
+        const num = Number(n);
+        if (num === a.idx + 1) continue;
+        edited.add(num > a.idx + 1 ? `${num - 1}:${f}` : k);
+      }
+      return { work: { ...s.work, tracks: s.work.tracks.filter((_, i) => i !== a.idx) }, edited, undo: [], redo: [] };
+    }
     case 'reset':
       return { work: a.baseline ?? s.work, edited: new Set(), undo: [], redo: [] };
     case 'edit':
@@ -337,12 +361,44 @@ export function App() {
     return m;
   }, [overlaps]);
   const overlapPairs = useMemo(() => groupPairs(overlaps), [overlaps]);
+  const madeIds = useMadeIds(data?.job.id ?? 0);
+  const [deleting, setDeleting] = useState<number[] | null>(null);
+  // Trôi box: vật đứng yên mà box nhích (đã bù chuyển động của xe), tính trên cả job, bỏ các frame đã bỏ qua.
+  const driftAll = useMemo(() => {
+    if (!data || !work) return new Map<number, { f: number; dist: number }[]>();
+    const frames: number[] = [];
+    for (let f = data.job.start_frame; f <= data.job.stop_frame; f++) frames.push(f);
+    return new Map([...findDrift(work.tracks, frames)].map(([num, d]) => [num, d.frames]));
+  }, [data, work]);
+  const drift = useMemo(() => {
+    const m = new Map<number, { f: number; dist: number }[]>();
+    if (!data) return m;
+    for (const [num, fr] of driftAll) {
+      const open = fr.filter((x) => !ignAll.has(issueKey(data.job.id, num, x.f, 'T')));
+      if (open.length) m.set(num, open);
+    }
+    return m;
+  }, [driftAll, data, ignAll]);
   const rows = useMemo(
     () => (data && work
-      ? buildRows(work, data.labels, data.job.start_frame, data.job.stop_frame, (num, f) => ignAll.has(motionKey(data.job.id, num, f)), (num, f, k) => ignAll.has(issueKey(data.job.id, num, f, k)))
+      ? buildRows(work, data.labels, data.job.start_frame, data.job.stop_frame, (num, f) => ignAll.has(motionKey(data.job.id, num, f)), (num, f, k) => ignAll.has(issueKey(data.job.id, num, f, k)), new Set(madeIds)).map((r) => ({ ...r, issues: r.issues + (drift.get(r.num)?.length ?? 0) }))
       : []),
-    [data, work, ignAll],
+    [data, work, ignAll, madeIds, drift],
   );
+
+  /** Xóa object do tool tạo: trong nháp thì bỏ khỏi nháp; đã upload thì mở hộp thoại xóa trên CVAT (chỉ ID trong sổ của tool). */
+  const deleteMade = (r: { num: number; id: number; made: 'draft' | 'server' | null }) => {
+    if (!data || r.made === null) return;
+    if (r.made === 'draft') {
+      if (!confirm(`Xóa object #${r.num} (do tool tạo, đang trong nháp)? Chưa có gì trên CVAT nên không ảnh hưởng server.`)) return;
+      dispatch({ t: 'removeTrack', idx: r.num - 1 });
+      if (selectedNum !== null && selectedNum >= r.num) setSelectedNum(selectedNum > r.num ? selectedNum - 1 : null);
+      setToast(`Đã xóa object #${r.num} khỏi nháp. (Hoàn tác / làm lại bị làm mới.)`);
+      return;
+    }
+    if (draft.edited.size) { setToast('Hãy upload hoặc bỏ nháp trước khi xóa object trên CVAT (ID hiển thị sẽ đổi nên nháp không còn đúng).'); return; }
+    setDeleting([r.id]);
+  };
 
   const reload = () => {
     if (draft.edited.size && !confirm(`Có ${draft.edited.size} frame đã sửa chưa upload. Tải lại sẽ bỏ nháp. Tiếp tục?`)) return;
@@ -432,6 +488,12 @@ export function App() {
         </div>
       )}
       {draftNote && <div style={{ background: '#fff3cd', border: '1px solid #e0b000', padding: '4px 8px', margin: '6px 0' }}>{draftNote} <button onClick={() => setDraftNote('')}>×</button></div>}
+      {deleting && data && (
+        <DeleteDialog
+          job={data.job} baseline={data.ann} labels={data.labels} ids={deleting}
+          onClose={() => setDeleting(null)} onDone={() => { setDeleting(null); post({ type: 'load' }); }}
+        />
+      )}
       {uploading && data && work && (
         <UploadDialog
           baseline={data.ann} working={work} job={data.job} labels={data.labels}
@@ -476,7 +538,7 @@ export function App() {
       )}
       {data && work && tab === 'objects' && (
         <ObjectTable
-          rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs}
+          onDelete={deleteMade} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs}
           onOpen={(num, first) => {
             selectFromTool(num);
             setStartFrame(first ?? data.job.start_frame);
@@ -493,7 +555,7 @@ export function App() {
       )}
       {data && work && tab === 'review' && (
         <BatchReview
-          overlaps={overlaps}
+          overlaps={overlaps} drift={driftAll}
           labels={data.labels} job={data.job} ann={work} rows={rows} selectedNum={selectedNum} setSelectedNum={selectFromTool}
           onSel={(f) => { selFrameRef.current = f; }}
           onHoverFrame={(f) => { hoverFrameRef.current = f; }}

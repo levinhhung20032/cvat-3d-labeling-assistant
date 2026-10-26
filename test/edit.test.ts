@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseCuboid } from '../src/shared/cuboid';
 import {
+  dragCorner,
   applyLocalBox, dragEdge, dragMove, dragRotate, dragRotateRel, dragYawByX, handleOffset, hitTest, identityBox, upsertKeyframe,
 } from '../src/shared/edit';
 import { stateAt } from '../src/shared/interp';
@@ -121,5 +122,23 @@ describe('tay nắm xoay ngắn + xoay bằng Alt', () => {
     expect(dragYawByX(identityBox(cub()), -20).dyaw).toBeGreaterThan(0);
     expect(dragYawByX(identityBox(cub()), 20).dyaw).toBeLessThan(0);
     expect(dragYawByX(identityBox(cub()), -180).dyaw).toBeCloseTo(Math.PI / 2);
+  });
+});
+
+describe('kéo góc: đổi cả hai cạnh cùng lúc', () => {
+  it('trúng góc thì mode corner, trúng giữa cạnh thì vẫn là edge', () => {
+    const b = identityBox(cub()); // 4 × 2 m
+    const size = 400, half = 10, k = size / (2 * half), c = size / 2;
+    const left = c - 1 * k, top = c - 2 * k; // view top: cạnh trái (v) và cạnh trên (u)
+    expect(hitTest('top', b, left + 1, top + 1, size, half)).toMatchObject({ mode: 'corner' });
+    expect(hitTest('top', b, c, top + 1, size, half)).toEqual({ mode: 'edge', axis: 'u', sign: 1 });
+  });
+  it('dragCorner đổi hai kích thước, hai cạnh đối diện đứng yên', () => {
+    const b = identityBox(cub());
+    const k = 20;
+    const r = dragCorner('top', b, ['v', 1], ['u', 1], -k, -k, k); // kéo góc trên-trái ra ngoài 1 m mỗi trục
+    expect(r.sy).toBeCloseTo(b.sy + 1); expect(r.sx).toBeCloseTo(b.sx + 1);
+    expect(r.cv - r.sy / 2).toBeCloseTo(b.cv - b.sy / 2); // cạnh đối diện (phía -v) đứng yên
+    expect(r.cu - r.sx / 2).toBeCloseTo(b.cu - b.sx / 2); // cạnh đối diện (phía -u) đứng yên
   });
 });

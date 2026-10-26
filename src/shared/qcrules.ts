@@ -37,7 +37,7 @@ export const DEFAULT_QC_RULES: QcRuleConfig = {
   scaleSyncTol: 0.01,
   zMin: -3,
   zMax: 3,
-  maxRotationJumpDeg: 75,
+  maxRotationJumpDeg: 40,
   maxDistance: 100,
 };
 
@@ -50,7 +50,9 @@ export function classKey(label: string): ClassKey | null {
   return null;
 }
 
-export interface FrameIssue { kind: IssueKind; message: string }
+/** 'T' = trôi box (vật đứng yên mà box nhích; tính chéo giữa các frame ở drift.ts, không nằm trong file QC). */
+export type ExtraKind = 'T';
+export interface FrameIssue { kind: IssueKind | ExtraKind; message: string }
 
 const wrapDeg = (r: number) => {
   let d = (r * 180) / Math.PI;

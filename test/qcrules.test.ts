@@ -29,10 +29,10 @@ describe('luật QC (S K Z H D)', () => {
     expect(kinds(m, 1)).toEqual(['D']);
     expect(kinds(trackIssues(tr([cub({ x: 99 })]), 'animal', [0]), 0)).toEqual([]);
   });
-  it('H: đổi hướng quá 75° giữa hai frame liền nhau, tính cả khi vượt mốc ±180°', () => {
+  it('H: đổi hướng quá 40° giữa hai frame liền nhau, tính cả khi vượt mốc ±180°', () => {
     const d = (deg: number) => (deg * Math.PI) / 180;
     expect(kinds(trackIssues(tr([cub({ yaw: 0 }), cub({ yaw: d(80) })]), 'vehicles', [0, 1]), 1)).toEqual(['H']);
-    expect(kinds(trackIssues(tr([cub({ yaw: 0 }), cub({ yaw: d(70) })]), 'vehicles', [0, 1]), 1)).toEqual([]);
+    expect(kinds(trackIssues(tr([cub({ yaw: 0 }), cub({ yaw: d(35) })]), 'vehicles', [0, 1]), 1)).toEqual([]);
     expect(kinds(trackIssues(tr([cub({ yaw: d(170) }), cub({ yaw: d(-170) })]), 'vehicles', [0, 1]), 1)).toEqual([]); // chỉ lệch 20°
   });
 });

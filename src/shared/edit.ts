@@ -1,5 +1,5 @@
 import { clampTilt, serializeCuboid, type Cuboid } from './cuboid';
-import { apply, fromEuler, mul, rotX, rotY, rotZ, toEuler, type Vec3 } from './rot';
+import { apply, fromEuler, mul, rotX, rotY, rotZ, toEuler, transpose, type Mat3, type Vec3 } from './rot';
 import { sortedShapes } from './interp';
 import type { CvatShape, CvatTrack } from './types';
 
@@ -13,6 +13,7 @@ export interface LocalBox {
   sx: number; sy: number; sz: number;
   // Xoay thêm quanh trục RIÊNG của box (rad): droll quanh trục dọc (u), dpitch quanh trục ngang (v). Mặc định 0.
   droll?: number; dpitch?: number;
+  color?: string; // chỉ để vẽ box phụ (gợi ý vật chưa gán nhãn…) bằng màu riêng
 }
 
 export const identityBox = (c: Cuboid): LocalBox => ({ cu: 0, cv: 0, cw: 0, dyaw: 0, sx: c.sx, sy: c.sy, sz: c.sz });
@@ -49,6 +50,20 @@ export function cornerOffset(base: Pick<Cuboid, 'rx' | 'ry' | 'yaw'>, b: LocalBo
   const r = mul(mul(fromEuler(base.rx, base.ry, base.yaw + b.dyaw), rotX(b.droll ?? 0)), rotY(b.dpitch ?? 0));
   return apply(rotZ(-base.yaw), apply(r, p));
 }
+/**
+ * Khung nhìn căn theo box: ma trận đổi toạ độ từ hệ "chỉ theo yaw" (hệ của localize) sang hệ trục riêng của box lúc bắt đầu,
+ * để cả 3 view nhìn vuông góc với các mặt box và box không bao giờ bị thấy nghiêng (mặt đường mới là thứ nghiêng).
+ * null nếu box không nghiêng (hai hệ trùng nhau).
+ */
+export function viewFrame(c: Pick<Cuboid, 'rx' | 'ry' | 'yaw'>): Mat3 | null {
+  if (!c.rx && !c.ry) return null;
+  return mul(transpose(fromEuler(c.rx, c.ry, c.yaw)), rotZ(c.yaw));
+}
+/** Điểm p (toạ độ riêng của box đang kéo) trong KHUNG NHÌN căn theo box ban đầu (gốc ở tâm box, chưa cộng tâm). */
+export function cornerInView(base: Pick<Cuboid, 'rx' | 'ry' | 'yaw'>, b: LocalBox, p: Vec3): Vec3 {
+  const r = mul(mul(fromEuler(base.rx, base.ry, base.yaw + b.dyaw), rotX(b.droll ?? 0)), rotY(b.dpitch ?? 0));
+  return apply(transpose(fromEuler(base.rx, base.ry, base.yaw)), apply(r, p));
+}
 export const isTilted = (base: Pick<Cuboid, 'rx' | 'ry'>, b: LocalBox) => base.rx !== 0 || base.ry !== 0 || hasTiltDelta(b);
 
 const AXES: Record<View, [Axis, Axis]> = { top: ['u', 'v'], side: ['u', 'w'], front: ['v', 'w'] };
@@ -65,6 +80,11 @@ export function axisDelta(view: View, axis: Axis, dx: number, dy: number, k: num
   if (view === 'top') return axis === 'u' ? -dy / k : axis === 'v' ? -dx / k : 0;
   if (view === 'side') return axis === 'u' ? dx / k : axis === 'w' ? -dy / k : 0;
   return axis === 'v' ? dx / k : axis === 'w' ? -dy / k : 0;
+}
+
+/** Kéo một GÓC: đổi cả hai cạnh cùng lúc (hai cạnh đối diện đứng yên). */
+export function dragCorner(view: View, b: LocalBox, h: [Axis, 1 | -1], v: [Axis, 1 | -1], dx: number, dy: number, k: number): LocalBox {
+  return dragEdge(view, dragEdge(view, b, h[0], h[1], dx, dy, k), v[0], v[1], dx, dy, k);
 }
 
 export function dragMove(view: View, b: LocalBox, dx: number, dy: number, k: number): LocalBox {
@@ -118,7 +138,12 @@ export function dragYawByX(b: LocalBox, dx: number): LocalBox {
   return { ...b, dyaw: -dx * YAW_PER_PX };
 }
 
-export type Hit = { mode: 'rotate' } | { mode: 'edge'; axis: Axis; sign: 1 | -1 } | { mode: 'move' } | null;
+export type Hit =
+  | { mode: 'rotate' }
+  | { mode: 'edge'; axis: Axis; sign: 1 | -1 }
+  | { mode: 'corner'; h: [Axis, 1 | -1]; v: [Axis, 1 | -1]; diag: 'nwse' | 'nesw' } // góc: kéo cùng lúc cạnh dọc và cạnh ngang
+  | { mode: 'move' }
+  | null;
 
 const EDGES: Record<View, { left: [Axis, 1 | -1]; right: [Axis, 1 | -1]; top: [Axis, 1 | -1]; bottom: [Axis, 1 | -1] }> = {
   top: { left: ['v', 1], right: ['v', -1], top: ['u', 1], bottom: ['u', -1] },
@@ -145,6 +170,16 @@ export function hitTest(view: View, b: LocalBox, px: number, py: number, size: n
   const inX = px >= r.left - tol && px <= r.right + tol;
   const inY = py >= r.top - tol && py <= r.bottom + tol;
   if (!inX || !inY) return null;
+  // Gần một GÓC (cả hai cạnh dọc và ngang cùng trong tầm) → kéo cùng lúc hai cạnh.
+  const ct = Math.min(tol * 2, Math.min(r.right - r.left, r.bottom - r.top) / 4); // vùng góc nhỏ lại khi box bé trên màn hình
+  const nearL = Math.abs(px - r.left) <= ct, nearR = Math.abs(px - r.right) <= ct;
+  const nearT = Math.abs(py - r.top) <= ct, nearB = Math.abs(py - r.bottom) <= ct;
+  if ((nearL || nearR) && (nearT || nearB)) {
+    const h = nearL && (!nearR || Math.abs(px - r.left) <= Math.abs(px - r.right)) ? EDGES[view].left : EDGES[view].right;
+    const v = nearT && (!nearB || Math.abs(py - r.top) <= Math.abs(py - r.bottom)) ? EDGES[view].top : EDGES[view].bottom;
+    const left = h === EDGES[view].left, top = v === EDGES[view].top;
+    return { mode: 'corner', h, v, diag: left === top ? 'nwse' : 'nesw' };
+  }
   const cand: { d: number; e: [Axis, 1 | -1] }[] = [
     { d: Math.abs(px - r.left), e: EDGES[view].left },
     { d: Math.abs(px - r.right), e: EDGES[view].right },

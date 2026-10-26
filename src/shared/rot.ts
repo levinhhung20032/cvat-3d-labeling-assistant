@@ -19,6 +19,8 @@ export const apply = (m: Mat3, v: Vec3): Vec3 => [
   m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[3] * v[0] + m[4] * v[1] + m[5] * v[2], m[6] * v[0] + m[7] * v[1] + m[8] * v[2],
 ];
 
+export const transpose = (m: Mat3): Mat3 => [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]];
+
 /** R = Rx · Ry · Rz (thứ tự Euler XYZ của three.js). */
 export const fromEuler = (rx: number, ry: number, rz: number): Mat3 => mul(rotX(rx), mul(rotY(ry), rotZ(rz)));
 

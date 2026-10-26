@@ -93,7 +93,11 @@ export interface TrackDiff {
   attrs: number; // attribute cấp track đổi giá trị (attribute đổi theo frame nằm trong ~KF)
 }
 
+export interface CreatedInfo { index: number; label_id: number; shapes: number; outsideFilled: number; tiltSet: number }
+
 export interface UploadPlan {
+  created: CvatTrack[]; // object MỚI do tool tạo (chưa có id), gửi bằng action=create
+  createdInfo: CreatedInfo[];
   changed: CvatTrack[]; // dữ liệu sẽ gửi
   expected: CvatTrack[]; // phiên bản baseline của đúng các track đó (để phát hiện xung đột)
   diffs: TrackDiff[];
@@ -136,11 +140,19 @@ export function buildUploadPlan(
     if (!trackIds(working).includes(id)) blockers.push({ rule: 'id-removed', trackId: id, message: `Track ${id} biến mất so với baseline` });
   }
   const changed: CvatTrack[] = [], expected: CvatTrack[] = [], diffs: TrackDiff[] = [];
+  const created: CvatTrack[] = [], createdInfo: CreatedInfo[] = [];
   let outsideFilled = 0, tiltSet = 0, othersTracks = 0, othersFrames = 0;
   working.tracks.forEach((w, index) => {
     const b = baseline.tracks[index];
+    if (typeof w.id !== 'number' && !b && index >= baseline.tracks.length) {
+      // Object MỚI do tool tạo: chỉ được nằm sau mọi track của CVAT (ID hiển thị của object cũ không đổi), không có id.
+      const n = normalizeTrack(w, stopFrame);
+      created.push(n.track);
+      createdInfo.push({ index, label_id: w.label_id, shapes: n.track.shapes.length, outsideFilled: n.outsideFilled, tiltSet: countTiltSet({ ...w, shapes: [] }, n.track) });
+      return;
+    }
     if (typeof w.id !== 'number' || !b || b.id !== w.id) {
-      blockers.push({ rule: 'id-missing', trackId: w.id, message: `Track thứ ${index + 1} không khớp baseline (chưa hỗ trợ tạo track mới)` });
+      blockers.push({ rule: 'id-missing', trackId: w.id, message: `Track thứ ${index + 1} không khớp baseline` });
       return;
     }
     const edited = !sameTrack(w, b);
@@ -168,12 +180,13 @@ export function buildUploadPlan(
     tiltSet += ts;
     diffs.push({ index, id: w.id, ...diffTrack(b, finalTrack, n.outsideFilled + baked), outsideFilled: n.outsideFilled, tiltSet: ts, baked, attrs: trackAttrChanges(b, finalTrack) });
   });
-  blockers.push(...checkOutsideKeyframes({ ...working, tracks: changed }, stopFrame));
-  for (const t of changed) {
+  blockers.push(...checkOutsideKeyframes({ ...working, tracks: [...changed, ...created] }, stopFrame));
+  for (const t of [...changed, ...created]) {
     const bad = t.shapes.filter((x) => !x.outside && tiltTooLarge(x.points)).map((x) => x.frame);
     if (bad.length) blockers.push({ rule: 'tilt-too-large', trackId: t.id, frames: bad, message: `Track ${t.id}: roll/pitch vượt ±30° ở frame ${bad.join(', ')}` });
   }
-  return { changed, expected, diffs, outsideFilled, tiltSet, others: { tracks: othersTracks, frames: othersFrames }, blockers };
+  tiltSet += createdInfo.reduce((n, c) => n + c.tiltSet, 0);
+  return { created, createdInfo, changed, expected, diffs, outsideFilled, tiltSet, others: { tracks: othersTracks, frames: othersFrames }, blockers };
 }
 
 export const UPLOAD_BATCH = 10;

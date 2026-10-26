@@ -1,4 +1,4 @@
-import type { UploadReq } from '../content/uploader';
+import type { DeleteReq, UploadReq } from '../content/uploader';
 import type { CvatAnnotations, CvatJob, CvatLabel } from './types';
 
 export const PANEL_SOURCE = 'cvla-panel';
@@ -17,6 +17,7 @@ export type PanelMessage = Envelope<typeof PANEL_SOURCE> &
     | { type: 'hotkeys'; toggle: string[] } // phím bật tắt cửa sổ để content script nghe ngay trên trang CVAT
     | { type: 'cvatFocus'; num: number; frame: number | null; zoom?: boolean; minimize?: boolean }
     | { type: 'upload'; reqId: number; req: UploadReq }
+    | { type: 'deleteOwn'; reqId: number; req: DeleteReq } // xóa object do tool tạo
     | { type: 'revert'; reqId: number; real: boolean }
     | { type: 'revertInfo'; reqId: number }
   );

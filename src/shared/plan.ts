@@ -1,7 +1,7 @@
 import { validateUpload } from './rules';
 import type { CvatAnnotations, CvatTrack, Violation } from './types';
 
-export type WriteAction = 'create' | 'update';
+export type WriteAction = 'create' | 'update' | 'delete';
 
 export interface UploadPayload {
   version: number;

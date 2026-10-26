@@ -1,9 +1,10 @@
+import { apply, transpose, type Mat3 } from '../shared/rot';
 import { kv } from './storage';
 import { onViewport, viewport } from './bridge';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { azimuthDeg, type Cuboid } from '../shared/cuboid';
 import {
-  applyLocalBox, dragEdge, dragMove, dragRotateRel, dragTilt, dragYawByX, hitTest, identityBox, localBoxOf, type Hit, type LocalBox,
+  applyLocalBox, viewFrame, dragCorner, dragEdge, dragMove, dragRotateRel, dragTilt, dragYawByX, hitTest, identityBox, localBoxOf, type Hit, type LocalBox,
 } from '../shared/edit';
 import { referenceCuboid, stateAt, type FrameState } from '../shared/interp';
 import { upsertKeyframe as upsertKf } from '../shared/edit';
@@ -16,7 +17,8 @@ import { type ObjectRow, pageCount, pageFrames, pageOf } from '../shared/table';
 import type { CvatAnnotations, CvatJob, CvatLabel, CvatTrack } from '../shared/types';
 import { parseLabelSpecs } from '../shared/attributes';
 import { AttributePanel } from './AttributePanel';
-import { drawView, localize, STATUS_COLOR, type Local, type Scene, type View } from './render';
+import { gpuActive } from './gpu';
+import { drawView, localize, rotateLocal, STATUS_COLOR, type Local, type Scene, type View } from './render';
 import { Cancelled, pointClouds } from './stores';
 import { issueKey, ignoreKey, ignoreStore, motionKey, overlapKey, shiftStore, useIgnored } from './shiftStore';
 import { CameraPanel } from './CameraPanel';
@@ -67,14 +69,15 @@ function cursorFor(view: View, hit: Hit, alt = false): string {
   if (!hit) return alt ? 'grab' : 'default';
   if (hit.mode === 'move') return alt ? 'grab' : 'move'; // giữ Alt: kéo = xoay
   if (hit.mode === 'rotate') return 'grab';
+  if (hit.mode === 'corner') return hit.diag === 'nwse' ? 'nwse-resize' : 'nesw-resize';
   const horizontal = (view === 'top' && hit.axis === 'v') || (view === 'side' && hit.axis === 'u') || (view === 'front' && hit.axis === 'v');
   return horizontal ? 'ew-resize' : 'ns-resize';
 }
 
 interface DragState { hit: NonNullable<Hit>; x0: number; y0: number; base: LocalBox; moved: boolean }
 
-function Cell({ view, size, loc, st, half, box, misfit, ghost, ground, mark, scene, overlays, tiltOn, autoSnap, onPreview, onCommit, onZoom }: {
-  scene: Scene; overlays: LocalBox[]; tiltOn: boolean;
+function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, mark, scene, overlays, tiltOn, autoSnap, onPreview, onCommit, onZoom }: {
+  scene: Scene; overlays: LocalBox[]; tiltOn: boolean; frame: Mat3 | null; // frame: khung nhìn căn theo box nghiêng (null nếu box không nghiêng)
   mark: { u: number; v: number; w: number } | null;
   ground: number | null; autoSnap: boolean;
   ghost: LocalBox | null; misfit: boolean; view: View; size: number; loc: Local | null; st: FrameState; half: number; box: LocalBox | null;
@@ -138,6 +141,7 @@ function Cell({ view, size, loc, st, half, box, misfit, ghost, ground, mark, sce
           : tiltOn ? dragTilt(view, d.base, d.x0 - c, d.y0 - c, px - c, py - c) : dragYawByX(d.base, dx))
         : d.hit.mode === 'move' ? dragMove(view, d.base, dx, dy, k)
         : d.hit.mode === 'edge' ? dragEdge(view, d.base, d.hit.axis, d.hit.sign, dx, dy, k)
+        : d.hit.mode === 'corner' ? dragCorner(view, d.base, d.hit.h, d.hit.v, dx, dy, k)
         : d.base;
     onPreview(nb);
   };
@@ -150,10 +154,11 @@ function Cell({ view, size, loc, st, half, box, misfit, ghost, ground, mark, sce
       let b = box;
       // Tự bám mặt đất: sau khi dời / đổi cỡ, đặt lại độ cao để đáy chạm mặt đường tại vị trí mới.
       const geometryChanged = b.cu !== 0 || b.cv !== 0 || b.cw !== 0 || b.sx !== st.cuboid.sx || b.sy !== st.cuboid.sy || b.sz !== st.cuboid.sz;
-      if (autoSnap && loc && geometryChanged) {
+      if (autoSnap && loc && geometryChanged && !frame) {
         const g = groundSnap(loc, b.sx, b.sy, b.sz, { cu: b.cu, cv: b.cv, cw: b.cw });
         if (g) b = { ...b, cw: b.cw + g.dz };
       }
+      if (frame) { const [cu, cv, cw] = apply(transpose(frame), [b.cu, b.cv, b.cw]); b = { ...b, cu, cv, cw }; } // về hệ yaw
       onCommit(applyLocalBox(st.cuboid, b));
     }
     onPreview(null);
@@ -169,6 +174,8 @@ function Cell({ view, size, loc, st, half, box, misfit, ghost, ground, mark, sce
 }
 
 const NO_ISSUES: FrameIssue[] = [];
+const CHIP: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 11, lineHeight: '16px', padding: '0 4px', borderRadius: 8, whiteSpace: 'nowrap', height: 16 };
+const CHIP_BTN: React.CSSProperties = { padding: '0 3px', lineHeight: 1, height: 14, fontSize: 10 };
 interface FileFlag { kind: IssueKind; state: FlagState }
 const NO_FLAGS: FileFlag[] = [];
 
@@ -202,6 +209,14 @@ function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fi
   }, [f]);
   // Lọc điểm một lần ở phạm vi lớn nhất (thu nhỏ tối đa) để phóng to/thu nhỏ không phải lọc lại.
   const loc = useMemo(() => (pc && refCub ? localize(pc, refCub, locHalf) : null), [pc, refCub, locHalf]);
+  // Khung nhìn căn theo box: box nghiêng thì điểm, box gợi ý, vật khác... đều quay sang khung riêng của box để mọi view thấy box thẳng.
+  const M = useMemo(() => (st.cuboid ? viewFrame(st.cuboid) : null), [st.cuboid]);
+  const locView = useMemo(() => (loc && M ? rotateLocal(loc, M) : loc), [loc, M]);
+  const boxV = <T extends LocalBox | null>(b: T): T => {
+    if (!b || !M) return b;
+    const [cu, cv, cw] = apply(M, [b.cu, b.cv, b.cw]);
+    return { ...b, cu, cv, cw };
+  };
   const fit = useMemo(
     () => (warn && loc && st.cuboid ? fitReport(loc, st.cuboid.sx, st.cuboid.sy, st.cuboid.sz) : null),
     [warn, loc, st.cuboid],
@@ -224,10 +239,13 @@ function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fi
     if (!shownMotion || !st.cuboid) return null;
     const dx = shownMotion.pred.x - st.cuboid.x, dy = shownMotion.pred.y - st.cuboid.y;
     const cs = Math.cos(st.cuboid.yaw), sn = Math.sin(st.cuboid.yaw);
-    return { u: dx * cs + dy * sn, v: -dx * sn + dy * cs, w: shownMotion.pred.z - st.cuboid.z };
-  }, [shownMotion, st.cuboid]);
+    const m = { u: dx * cs + dy * sn, v: -dx * sn + dy * cs, w: shownMotion.pred.z - st.cuboid.z };
+    if (!M) return m;
+    const [u, v, w] = apply(M, [m.u, m.v, m.w]);
+    return { u, v, w };
+  }, [shownMotion, st.cuboid, M]);
   const box = preview ?? (st.cuboid ? identityBox(st.cuboid) : null);
-  const overlays = useMemo(() => (refCub ? overlayCubs.map((o) => localBoxOf(refCub, o)) : []), [refCub, overlayCubs]);
+  const overlays = useMemo(() => (refCub ? overlayCubs.map((o) => boxV(localBoxOf(refCub, o))) : []), [refCub, overlayCubs, M]);
   const color = STATUS_COLOR[st.status];
   return (
     <div
@@ -239,25 +257,46 @@ function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fi
       onMouseLeave={(e) => { onHover(null); e.currentTarget.style.boxShadow = ''; }}
       style={{ border: `3px solid ${color}`, outline: selected ? '2px solid #111' : 'none', width: size, flex: 'none' }}
     >
-      <div style={{ background: color, color: '#fff', padding: '1px 4px', fontSize: Math.max(11, Math.min(14, size / 14)), whiteSpace: 'nowrap', overflow: 'hidden' }}>
+      <div style={{ background: color, color: '#fff', padding: '1px 4px', fontSize: Math.max(11, Math.min(14, size / 14)), display: 'flex', alignItems: 'center', gap: 4 }}>
+        <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={`frame ${f} · ${STATUS_TEXT[st.status]}`}>
         {bad || shownMotion || overlap.length ? '⚠ ' : ''}frame {f} · {STATUS_TEXT[st.status]}{edited ? ' · ✎' : ''}{qcNote ? ' · 📝' : ''}{st.cuboid && (st.cuboid.rx !== 0 || st.cuboid.ry !== 0) ? ` · ∠${(st.cuboid.rx * 57.2958).toFixed(1)}°/${(st.cuboid.ry * 57.2958).toFixed(1)}°` : ''}
-        {(st.cuboid || st.status === 'outside' || st.status === 'outside-key') && (
-          <button
-            title={st.cuboid ? 'Gắn keyframe outside từ frame này (phím O khi trỏ chuột vào cột)' : 'Đưa object trở lại từ frame này (phím O khi trỏ chuột vào cột)'}
-            onClick={(e) => { e.stopPropagation(); onToggleOutside(f); }}
-            style={{ float: 'right', padding: '0 3px', lineHeight: 1.1, marginRight: 2 }}
-          >{st.cuboid ? '⛔' : '↩'}</button>
+        </span>
+        <span style={{ flex: 'none', display: 'flex', gap: 2 }}>
+          {st.cuboid && (
+            <button
+              title={st.status === 'key' ? 'Keyframe (khoá). Bấm để mở khoá (về nội suy) — phím K' : 'Chưa là keyframe. Bấm để khoá thành keyframe — phím K'}
+              onClick={(e) => { e.stopPropagation(); onToggleKf(f); }}
+              style={{ padding: '0 3px', lineHeight: 1.1 }}
+            >{st.status === 'key' ? '🔒' : '🔓'}</button>
+          )}
+          {(st.cuboid || st.status === 'outside' || st.status === 'outside-key') && (
+            <button
+              title={st.cuboid ? 'Gắn keyframe outside từ frame này (phím O khi trỏ chuột vào cột)' : 'Đưa object trở lại từ frame này (phím O khi trỏ chuột vào cột)'}
+              onClick={(e) => { e.stopPropagation(); onToggleOutside(f); }}
+              style={{ padding: '0 3px', lineHeight: 1.1 }}
+            >{st.cuboid ? '⛔' : '↩'}</button>
+          )}
+        </span>
+      </div>
+      {/* Lỗi & gợi ý ở ĐẦU cột, dạng chip một dòng, vùng cao cố định nên các cột không bao giờ lệch hàng; chi tiết ở dưới các view. */}
+      <div style={{ height: 40, overflow: 'hidden', display: 'flex', flexWrap: 'wrap', alignContent: 'flex-start', gap: 2, padding: '2px 2px 0', background: '#fafafa' }}>
+        {sug && (
+          <span style={{ ...CHIP, background: '#c9f3ff', color: '#00505c' }} title={sug.message}>
+            💡 gợi ý
+            <button onClick={(e) => { e.stopPropagation(); onAccept(f, sug); }} style={CHIP_BTN} title="Chấp nhận box gợi ý">✔</button>
+            <button onClick={(e) => { e.stopPropagation(); onIgnore(f, true); }} style={CHIP_BTN} title="Bỏ qua gợi ý (phím I)">✖</button>
+          </span>
         )}
-        {st.cuboid && (
-          <button
-            title={st.status === 'key' ? 'Keyframe (khoá). Bấm để mở khoá (về nội suy) — phím K' : 'Chưa là keyframe. Bấm để khoá thành keyframe — phím K'}
-            onClick={(e) => { e.stopPropagation(); onToggleKf(f); }}
-            style={{ float: 'right', padding: '0 3px', lineHeight: 1.1 }}
-          >{st.status === 'key' ? '🔒' : '🔓'}</button>
-        )}
+        {bad && !sug && <span style={{ ...CHIP, background: '#ffe0f7', color: '#5a0040' }} title={bad.message}>⚠ {bad.level === 'misfit' ? 'lệch' : 'ít điểm'}</span>}
+        {bad && sug && <span style={{ ...CHIP, background: '#ffe0f7', color: '#5a0040' }} title={bad.message}>⚠ lệch</span>}
+        {issues.filter((i) => !issueIgnored(i.kind)).map((i) => <span key={i.kind} style={{ ...CHIP, background: '#f9d4ee', color: '#5a0040' }} title={i.message}>⚠ {i.kind}</span>)}
+        {overlap.map((o) => <span key={o.other} style={{ ...CHIP, background: '#ffd9a8', color: '#5a2d00' }} title={`Chồng với #${o.other} (IoU ${Math.round(o.ratio * 100)}%)`}>⚠ O #{o.other}</span>)}
+        {fileFlags.filter((ff) => ff.state === 'open').map((ff) => <span key={ff.kind} style={{ ...CHIP, background: '#ffd6d6', color: '#600' }} title="Flag từ file QC, tool vẫn thấy lỗi">QC {ff.kind}</span>)}
+        {shownMotion && <span style={{ ...CHIP, background: '#ffe9c7', color: '#6b3a00' }} title={shownMotion.message}>⚠ đi xa</span>}
+        {snap && Math.abs(snap.dz) >= 0.08 && <span style={{ ...CHIP, background: '#eaf6d8', color: '#2d5a00' }} title="Đáy box lơ lửng / chìm so với mặt đường (phím G để snap)">⏬ {snap.dz < 0 ? '↑' : '↓'}{Math.abs(snap.dz).toFixed(2)}m</span>}
       </div>
       {VIEWS.map((v) => (
-        <Cell key={v} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={snap?.groundW ?? null} autoSnap={autoSnap} ghost={sug?.box ?? null} misfit={bad?.level === 'misfit'} view={v} size={size} loc={loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} />
+        <Cell key={v} frame={M} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} autoSnap={autoSnap} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} />
       ))}
       {!pc && <div style={{ fontSize: 11, padding: 2 }}>{err ? `Lỗi: ${err}` : 'đang tải…'}</div>}
       {/* cảnh báo / ghi chú đặt DƯỚI các view để các cột luôn thẳng hàng dù số cảnh báo khác nhau */}
@@ -363,10 +402,11 @@ function IdBox({ value, max, onCommit }: { value: number; max: number; onCommit:
   );
 }
 
-export function BatchReview({ onFocusFrame, job, ann, rows, selectedNum, setSelectedNum, initialFrame, edited, onEdit, onTrack, focus, onView, onSel, onHoverFrame, labels, overlaps }: {
+export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, setSelectedNum, initialFrame, edited, onEdit, onTrack, focus, onView, onSel, onHoverFrame, labels, overlaps }: {
   overlaps: OverlapItem[]; // chồng lấn của cả job (đã bỏ cặp được bỏ qua)
   onHoverFrame: (f: number | null) => void;
   onFocusFrame: (f: number) => void; // bấm đúp vào cột frame
+  drift: Map<number, { f: number; dist: number }[]>; // trôi box theo số thứ tự object
   labels: CvatLabel[];
   onSel: (frame: number | null) => void;
   onView: (frames: number[]) => void;
@@ -501,10 +541,14 @@ export function BatchReview({ onFocusFrame, job, ann, rows, selectedNum, setSele
   const locHalf = baseHalf / ZOOM_MIN;
 
   // Luật QC (S K Z H D) tính trên cả job để so mốc kích thước và frame liền trước đúng.
-  const issueMap = useMemo(
-    () => (track ? trackIssues(track, row?.label ?? '', Array.from({ length: stop - start + 1 }, (_, i) => start + i)) : new Map<number, FrameIssue[]>()),
-    [track, row?.label, start, stop],
-  );
+  const issueMap = useMemo(() => {
+    const m = track ? trackIssues(track, row?.label ?? '', Array.from({ length: stop - start + 1 }, (_, i) => start + i)) : new Map<number, FrameIssue[]>();
+    // Trôi box (đứng yên mà box nhích): tính chéo giữa các frame ở App, gộp vào cùng danh sách cảnh báo của frame.
+    for (const d of drift.get(num) ?? []) {
+      m.set(d.f, [...(m.get(d.f) ?? []), { kind: 'T', message: `trôi box: lệch ${d.dist.toFixed(2)} m so với vị trí đứng yên của object (đã bù chuyển động của xe); vật đứng yên mà box nhích` }]);
+    }
+    return m;
+  }, [track, row?.label, start, stop, drift, num]);
   // Flag từ file QC đã nạp cho object này, theo frame; "đã hết" = tool không còn thấy lỗi (ở dữ liệu hiện tại, kể cả nháp).
   const qcImports = useQcImports();
   const flagMarks = useFlagMarks();
@@ -714,6 +758,7 @@ export function BatchReview({ onFocusFrame, job, ann, rows, selectedNum, setSele
         case 'zoom.in': zoomBy(1.25); break;
         case 'zoom.out': zoomBy(1 / 1.25); break;
         case 'zoom.reset': setZoom(1); break;
+        case 'kf.unlockInner': unlockInner(); break;
         case 'kf.toggle': {
           const tgt = hoverRef.current ?? selFrame;
           if (tgt === null) setNote('Rê chuột lên một cột frame (hoặc chọn cột) rồi nhấn phím.');
@@ -722,7 +767,7 @@ export function BatchReview({ onFocusFrame, job, ann, rows, selectedNum, setSele
         }
       }
     }),
-    [num, max, nWin, selFrame, track, k, cols, sugs, ign, snaps],
+    [num, max, nWin, selFrame, track, k, cols, sugs, ign, snaps, rangeFrom, rangeTo],
   );
 
   if (!track) return <p>Job chưa có object.</p>;
@@ -782,7 +827,7 @@ export function BatchReview({ onFocusFrame, job, ann, rows, selectedNum, setSele
           <input value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} size={3} style={{ width: 44 }} /> →{' '}
           <input value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} size={3} style={{ width: 44 }} />
         </span>
-        <button onClick={unlockInner} title="Gỡ mọi keyframe nằm hẳn bên trong khoảng, giữ hai đầu mút; frame về nội suy">🔓 Mở khoá KF giữa</button>
+        <button onClick={unlockInner} title="Gỡ mọi keyframe nằm hẳn bên trong khoảng, giữ hai đầu mút; frame về nội suy">🔓 Mở khoá KF giữa (Alt+K)</button>
         <button onClick={() => lockAll(false)} title="Biến mọi frame có box trong khoảng thành keyframe (giá trị giữ nguyên)">🔒 Khoá tất cả thành KF</button>
         <button onClick={() => lockAll(true)} title="Như trên nhưng cho cả track">🔒 Cả track</button>
         <span style={{ color: '#555' }}>· 🔒/🔓 trên tiêu đề cột hoặc phím K: khoá/mở khoá frame đang chọn</span>
@@ -834,7 +879,7 @@ export function BatchReview({ onFocusFrame, job, ann, rows, selectedNum, setSele
           </span>
         )}
         {cols.some((c) => openIssues(c.f).length > 0) && (
-          <span style={{ color: '#a0006e', fontWeight: 600 }} title="Luật QC: S scale không đồng bộ, K kích thước ngoài ngưỡng, Z z ngoài ngưỡng, H đổi hướng đột ngột, D quá xa">
+          <span style={{ color: '#a0006e', fontWeight: 600 }} title="Luật QC: S scale không đồng bộ, K kích thước ngoài ngưỡng, Z z ngoài ngưỡng, H đổi hướng đột ngột, D quá xa; T trôi box (vật đứng yên mà box nhích)">
             ⚠ QC: {cols.filter((c) => openIssues(c.f).length).map((c) => `${c.f}(${openIssues(c.f).map((i) => i.kind).join('')})`).join(', ')}
           </span>
         )}
@@ -846,7 +891,7 @@ export function BatchReview({ onFocusFrame, job, ann, rows, selectedNum, setSele
         </fieldset>
       </div>
       <div style={{ marginBottom: 6, display: 'flex', flexWrap: 'wrap', gap: '4px 12px', alignItems: 'center' }}>
-        <span>cửa sổ: {loaded.size}/{frames.length} · đã tải trước: {cached}/{stop - start + 1}</span>
+        <span>cửa sổ: {loaded.size}/{frames.length} · {gpuActive() ? 'GPU ✓ · ' : ''}đã tải trước: {cached}/{stop - start + 1}{pointClouds.secondsPerFrame() !== null && cached < stop - start + 1 ? ` · ~${pointClouds.secondsPerFrame()!.toFixed(1)} s/frame` : ''}</span>
         {note && <span style={{ color: '#7a4b00' }}>{note}</span>}
       </div>
       <details open style={{ margin: '0 0 6px', background: '#f8fbff', border: '1px solid #cfe0f5', padding: '2px 6px' }}>
@@ -875,7 +920,7 @@ export function BatchReview({ onFocusFrame, job, ann, rows, selectedNum, setSele
       <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>
         phím K / O / G / A / I tác dụng lên cột frame đang trỏ chuột (viền xanh) · xem/đổi phím ở tab "Phím tắt" · cuộn chuột trên ô để zoom mọi frame · kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo để xoay (view Trên: yaw · view Bên: pitch · view Trước: roll, nếu bật "nghiêng theo mặt đường") · sửa frame nào thì frame đó thành keyframe
       </div>
-      <div style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>
+      <div style={{ display: 'flex', gap: 12, overflowX: 'auto', justifyContent: 'safe center', padding: '2px 4px 6px' }}>
         {cols.map((c) => (
           <Column
             key={c.f} f={c.f} size={size} st={c.st} refCub={c.ref} half={half} locHalf={locHalf} selected={selFrame === c.f}

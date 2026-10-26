@@ -9,6 +9,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'sel.prev', label: 'Chọn cột frame bên trái', defaults: [','] },
   { id: 'sel.next', label: 'Chọn cột frame bên phải', defaults: ['.'] },
   { id: 'kf.toggle', label: 'Khoá / mở khoá keyframe (frame đang trỏ chuột)', defaults: ['k'] },
+  { id: 'kf.unlockInner', label: 'Mở khoá keyframe ở giữa khoảng frame → (giữ hai đầu mút, hoàn tác được)', defaults: ['alt+k'] },
   { id: 'outside.from', label: 'Gắn keyframe outside / đưa trở lại (frame đang trỏ chuột)', defaults: ['o'] },
   { id: 'suggest.accept', label: 'Chấp nhận gợi ý sửa box (frame đang trỏ chuột; không trỏ vào frame nào thì cả cửa sổ)', defaults: ['a'] },
   { id: 'suggest.ignore', label: 'Bỏ qua gợi ý (frame đang trỏ chuột; không trỏ vào frame nào thì cả cửa sổ)', defaults: ['i'] },

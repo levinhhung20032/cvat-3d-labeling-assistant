@@ -54,3 +54,15 @@ describe('keymap', () => {
     expect(prettyCombo('ctrl++')).toBe('Ctrl++');
   });
 });
+
+describe('Alt+K mở khoá keyframe ở giữa', () => {
+  it('có mặc định alt+k và comboOf nhận đúng', () => {
+    expect(defaultKeymap()['kf.unlockInner']).toEqual(['alt+k']);
+    expect(comboOf({ key: 'k', ctrlKey: false, altKey: true, shiftKey: false, metaKey: false })).toBe('alt+k');
+    expect(actionFor(defaultKeymap(), 'alt+k')).toBe('kf.unlockInner');
+    expect(actionFor(defaultKeymap(), 'k')).toBe('kf.toggle'); // K đơn vẫn là khoá / mở khoá một frame
+  });
+  it('bản lưu cũ chưa có action này vẫn nhận mặc định', () => {
+    expect(normalizeKeymap({ 'kf.toggle': ['k'] })['kf.unlockInner']).toEqual(['alt+k']);
+  });
+});

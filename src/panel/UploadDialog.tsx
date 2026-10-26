@@ -5,6 +5,7 @@ import { buildUploadPlan } from '../shared/upload';
 import type { CvatAnnotations, CvatJob, CvatLabel } from '../shared/types';
 import { post, rpc } from './bridge';
 import { kv } from './storage';
+import { madeStore } from './madeStore';
 
 interface LastInfo { time: string; tracks: number; reverted: boolean; verified: boolean }
 
@@ -29,7 +30,7 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
   const plan = useMemo(() => buildUploadPlan(baseline, working, job.stop_frame, includeOthers, bake), [baseline, working, job, includeOthers, bake]);
   const names = useMemo(() => new Map(labels.map((l) => [l.id, l.name])), [labels]);
   const needTilt = plan.tiltSet > 0;
-  const nothing = plan.changed.length === 0;
+  const nothing = plan.changed.length === 0 && plan.created.length === 0;
   const blocked = plan.blockers.length > 0;
 
   // Ghi thành công và đã đọc lại khớp → tự đóng, nạp lại dữ liệu và quay về Batch Review.
@@ -54,10 +55,11 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
     setResult(null);
     const r = await rpc<UploadResult>((reqId) => ({
       type: 'upload', reqId,
-      req: { real, changed: plan.changed, expected: plan.expected, baselineIds: baseline.tracks.map((t) => t.id!), stopFrame: job.stop_frame },
+      req: { real, changed: plan.changed, created: plan.created, expected: plan.expected, baselineIds: baseline.tracks.map((t) => t.id!), stopFrame: job.stop_frame },
     }));
     setBusy(false);
     setResult(r);
+    if (r.sent && r.createdIds?.length) madeStore.add(job.id, r.createdIds); // ghi vào sổ object do tool tạo (chỉ những ID này xóa được bằng tool)
     if (real && r.ok && r.sent && r.stage === 'done') {
       // ghi nhận vào KPI của ca (nếu đang trong ca)
       onUploaded(plan.diffs.map((d, i) => ({
@@ -90,7 +92,13 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
 
       {nothing && !blocked && <p>Không có thay đổi nào cần gửi (mọi track đã giống CVAT{plan.others.tracks ? ', trừ các track chưa sửa còn thiếu keyframe outside' : ''}).</p>}
 
-      {!nothing && (
+      {plan.created.length > 0 && (
+        <p style={{ margin: '6px 0', background: '#dff5df', padding: 4 }}>
+          🛠 Sẽ <b>tạo {plan.created.length} object mới</b> do tool tạo (PATCH <code>action=create</code>, nằm cuối danh sách nên ID của object cũ không đổi): {plan.createdInfo.map((c) => `#${c.index + 1} ${names.get(c.label_id) ?? '?'} (${c.shapes} keyframe)`).join(', ')}.
+          Sau khi tạo, các object này được ghi vào sổ của tool và là loại DUY NHẤT tool cho phép xóa.
+        </p>
+      )}
+      {!nothing && plan.changed.length > 0 && (
         <table style={{ borderCollapse: 'collapse', margin: '6px 0' }}>
           <thead>
             <tr style={{ textAlign: 'left' }}>
@@ -109,8 +117,8 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
         </table>
       )}
       <div>
-        Sẽ gửi <b>{plan.changed.length}</b> track bằng <code>PATCH …/annotations?action=update</code>, mỗi lần tối đa 10 track.
-        Không tạo / xóa track, ID giữ nguyên. Keyframe bị gỡ chỉ là bớt shape trong track đó.
+        Sẽ cập nhật <b>{plan.changed.length}</b> track bằng <code>PATCH …/annotations?action=update</code>{plan.created.length > 0 && <> và tạo <b>{plan.created.length}</b> object mới bằng <code>action=create</code></>}, mỗi lần tối đa 10 track.
+        Không xóa track nào, ID cũ giữ nguyên. Keyframe bị gỡ chỉ là bớt shape trong track đó.
       </div>
 
       {blocked && (

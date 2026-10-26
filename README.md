@@ -15,7 +15,7 @@ Chạy trên **Edge / Chrome** (đã dùng thử) và **Firefox 128+** (bản th
 | **Chỉnh sửa trực tiếp** | Kéo thả trên 3 hình chiếu: dời, đổi kích thước (cạnh đối diện đứng yên), xoay yaw (chấm trắng hoặc giữ Alt), nghiêng box theo mặt đường dốc (Alt + kéo ở view Bên / Trước); zoom chung mọi frame; hoàn tác / làm lại |
 | **Keyframe & outside** | Khoá / mở khoá từng frame, mở khoá keyframe ở giữa một khoảng, khoá tất cả thành keyframe; outside theo 3 cách: từ frame đang chọn (O), cả khoảng nhập tay, chọn khoảng bằng chuột; box được sao lưu trước khi outside để đưa trở lại đúng vị trí cũ |
 | **Dynamic size** | Bật / tắt theo class (danh sách class lấy từ job), hoặc riêng từng object; tắt thì đổi size một frame là áp cho cả object |
-| **Cảnh báo & gợi ý** | Box lệch khỏi cụm điểm (kèm box gợi ý nét đứt, chấp nhận bằng A), vật đi xa bất thường, ít điểm (< 6), đáy lơ lửng / chìm, **ground snap** (G, hỗ trợ mặt dốc); **luật QC** S K Z H D (scale không đồng bộ, kích thước ngoài ngưỡng, z ngoài ngưỡng, đổi hướng > 75°, quá xa > 100 m) và **chồng lấn giữa các object** (IoU theo class) |
+| **Cảnh báo & gợi ý** | Box lệch khỏi cụm điểm (kèm box gợi ý nét đứt, chấp nhận bằng A), vật đi xa bất thường, **trôi box** (vật đứng yên mà box nhích, đã bù chuyển động của xe), ít điểm (< 6), đáy lơ lửng / chìm, **ground snap** (G, hỗ trợ mặt dốc); **luật QC** S K Z H D (scale không đồng bộ, kích thước ngoài ngưỡng, z ngoài ngưỡng, đổi hướng > 40°, quá xa > 100 m) và **chồng lấn giữa các object** (IoU theo class) |
 | **QC** | QC mode: ghi chú theo (ID, frame), xuất Excel `ID, frame, note`; **đối chiếu file QC (.xlsx)**: đọc sheet Matrix ngay trên máy, đánh dấu từng flag còn lỗi / đã hết / ignore / fixed |
 | **Thuộc tính (attribute)** | Hiện và sửa attribute của object; gợi ý theo kích thước box (loại xe, tuổi / tư thế người đi bộ, có người lái xe hai bánh…) |
 | **Upload** | Màn hình xem lại → ghi bằng `PATCH …/annotations?action=update` chia lô → đọc lại so khớp; tự điền keyframe outside, tự khoá hết thành keyframe cho object đã tác động; nhật ký + hoàn nguyên |
@@ -28,7 +28,7 @@ Chạy trên **Edge / Chrome** (đã dùng thử) và **Firefox 128+** (bản th
 
 Các luật này được kiểm tra bằng code và test, không có ngoại lệ (chi tiết ở tài liệu nội bộ của dự án):
 
-1. **Không bao giờ xóa hay đổi ID.** Không có đường nào gửi `action=delete` hoặc `PUT` thay cả annotation; trước mỗi lần ghi, ID nào biến mất so với lúc đọc thì dừng.
+1. **Không bao giờ xóa hay đổi ID của object có sẵn.** Không có đường nào gửi `PUT` thay cả annotation; trước mỗi lần ghi, ID nào biến mất so với lúc đọc thì dừng. Ngoại lệ duy nhất (chủ dự án duyệt 2026-10-26): tool có thể tạo object mới từ gợi ý và chỉ xóa được những object do chính nó tạo (theo sổ ID, có xác nhận và đọc lại kiểm tra).
 2. **Mọi frame outside đều có keyframe** (`outside: true`); thiếu thì được tự điền trước khi gửi.
 3. **Góc box:** yaw là góc chính; roll/pitch (`rx`, `ry`) được phép để box nằm song song mặt đường dốc, kẹp ±30° và phải xác nhận khi upload (quy ước góc Euler XYZ của CVAT, chưa đối chiếu với dữ liệu thật — kiểm tra bằng mắt trên CVAT).
 4. **Quyền riêng tư:** không xin quyền `cookies`, không đọc / lưu token hay mật khẩu; chỉ có host của CVAT (`https://cvat-a.example.com/*`); request là `fetch` cùng origin với `credentials: 'include'`; token CSRF chỉ đọc đúng lúc gửi, không lưu.
@@ -82,6 +82,7 @@ Phiên bản hiện tại là **v1.0.0**. Tool không tự kiểm tra bản mớ
 | `↑` `↓` | Object trước / sau (ID ∓ 1) |
 | `,` `.` | Chọn cột frame bên trái / phải |
 | `K` | Khoá / mở khoá keyframe |
+| `Alt+K` | Mở khoá keyframe ở giữa khoảng frame (giữ hai đầu mút) |
 | `O` | Gắn keyframe outside / đưa object trở lại |
 | `G` | Ground snap (đáy box chạm mặt đường) |
 | `A` / `I` | Chấp nhận / bỏ qua gợi ý sửa box |

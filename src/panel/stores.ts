@@ -12,20 +12,34 @@ interface Task {
 }
 
 /**
- * Tải point cloud theo hàng đợi ưu tiên. Máy chủ sinh mỗi frame mất ~3 giây nên: yêu cầu khẩn
- * (cửa sổ đang xem) được dùng tới `maxTotal` kết nối, còn tải trước chỉ dùng `maxBackground`,
- * để luôn còn chỗ cho frame người dùng vừa chuyển tới. Chỉ giữ trong bộ nhớ (không lưu ra đĩa).
+ * Tải point cloud theo hàng đợi ưu tiên. Máy chủ sinh mỗi frame mất ~3 giây (6 frame song song ~7 giây ⇒ nhiều kết nối song song
+ * nhanh hơn hẳn) nên: yêu cầu khẩn (cửa sổ đang xem) được dùng tới `maxTotal` kết nối; tải trước dùng `maxBackground` khi đang có
+ * yêu cầu khẩn, và tới `maxIdle` (vẫn chừa chỗ cho yêu cầu khẩn) khi không có, để tải nền nhanh lúc người dùng đang xem/sửa.
+ * Chỉ giữ trong bộ nhớ (không lưu ra đĩa).
  */
-class CloudLoader {
+export class CloudLoader {
   private cache = new Map<number, PointCloud>(); // LRU
   private pending = new Map<number, Promise<PointCloud>>();
   private queue: Task[] = [];
   private running = 0;
   private listeners = new Set<() => void>();
 
-  constructor(private cap: number, private maxTotal: number, private maxBackground: number) {}
+  private runningUrgent = 0;
+  private finished: number[] = []; // thời điểm (ms) hoàn thành của các frame gần đây, để đo tốc độ
+
+  constructor(
+    private cap: number, private maxTotal: number, private maxBackground: number, private maxIdle = maxBackground,
+    private load: (n: number) => Promise<ArrayBuffer> = (n) => fetchBinary('frame', n),
+    private parse: (b: ArrayBuffer) => PointCloud = (b) => parsePcd(b, false),
+    private now: () => number = () => performance.now(),
+  ) {}
 
   cachedCount() { return this.cache.size; }
+  /** Tốc độ tải thực tế (giây/frame, tính trên ~12 frame hoàn thành gần nhất); null nếu chưa đủ số liệu. */
+  secondsPerFrame(): number | null {
+    const f = this.finished;
+    return f.length >= 3 ? (f[f.length - 1]! - f[0]!) / 1000 / (f.length - 1) : null;
+  }
   subscribe(cb: () => void) {
     this.listeners.add(cb);
     return () => { this.listeners.delete(cb); };
@@ -71,12 +85,18 @@ class CloudLoader {
     while (this.queue.length) {
       this.queue.sort((a, b) => a.prio - b.prio || a.n - b.n);
       const t = this.queue[0]!;
-      if (this.running >= (t.prio === 0 ? this.maxTotal : this.maxBackground)) break;
+      const urgentActive = this.runningUrgent > 0 || this.queue.some((q) => q.prio === 0);
+      const limit = t.prio === 0 ? this.maxTotal : urgentActive ? this.maxBackground : this.maxIdle;
+      if (this.running >= limit) break;
       this.queue.shift();
       this.running++;
-      fetchBinary('frame', t.n)
-        .then((buf) => parsePcd(buf, false))
+      const urgent = t.prio === 0;
+      if (urgent) this.runningUrgent++;
+      this.load(t.n)
+        .then((buf) => this.parse(buf))
         .then((pc) => {
+          this.finished.push(this.now());
+          if (this.finished.length > 12) this.finished.shift();
           this.cache.set(t.n, pc);
           while (this.cache.size > this.cap) this.cache.delete(this.cache.keys().next().value as number);
           t.ok(pc);
@@ -86,13 +106,14 @@ class CloudLoader {
         .finally(() => {
           this.pending.delete(t.n);
           this.running--;
+          if (urgent) this.runningUrgent--;
           this.pump();
         });
     }
   }
 }
 
-export const pointClouds = new CloudLoader(64, 4, 2);
+export const pointClouds = new CloudLoader(64, 6, 2, 5);
 
 class Lru<V> {
   private m = new Map<number, Promise<V>>();

@@ -1,5 +1,7 @@
 import type { Cuboid } from '../shared/cuboid';
-import { cornerOffset, handleOffset, isTilted, type LocalBox, type View } from '../shared/edit';
+import type { Mat3 } from '../shared/rot';
+import { drawPointsGpu } from './gpu';
+import { cornerInView, handleOffset, isTilted, type LocalBox, type View } from '../shared/edit';
 import type { Status } from '../shared/interp';
 import type { PointCloud } from '../shared/pcd';
 
@@ -26,6 +28,16 @@ export function localize(pc: PointCloud, c: Cuboid, half: number): Local {
     u[n] = a; v[n] = b; w[n] = dz; n++;
   }
   return { u, v, w, n };
+}
+
+/** Quay điểm đã lọc (hệ yaw) sang khung nhìn căn theo box nghiêng. */
+export function rotateLocal(l: Local, m: Mat3): Local {
+  const u = new Float32Array(l.n), v = new Float32Array(l.n), w = new Float32Array(l.n);
+  for (let i = 0; i < l.n; i++) {
+    const a = l.u[i]!, b = l.v[i]!, c = l.w[i]!;
+    u[i] = m[0] * a + m[1] * b + m[2] * c; v[i] = m[3] * a + m[4] * b + m[5] * c; w[i] = m[6] * a + m[7] * b + m[8] * c;
+  }
+  return { u, v, w, n: l.n };
 }
 
 export const STATUS_COLOR: Record<Status, string> = {
@@ -81,7 +93,12 @@ export function drawView(
   ctx.fillRect(0, 0, size, size);
   const k = size / (2 * half), c = size / 2;
   const dot = Math.max(1.5, size / 110);
-  if (loc) {
+  // GPU (WebGL) nếu có: chiếu, cắt lát, tô màu và tô hồng điểm lọt ngoài box đều làm trong shader; không thì vẽ bằng canvas 2D như cũ.
+  const gpuDone = !!loc && drawPointsGpu(ctx, loc, {
+    view: view === 'top' ? 0 : view === 'side' ? 1 : 2, size, half, zClip: scene.zClip, slab: scene.slab, slabFront: scene.slabFront ?? scene.slab,
+    colorHalf: scene.colorHalf, dot, misfit: misfit && box && box.dyaw === 0 ? { cu: box.cu, cv: box.cv, cw: box.cw, sx: box.sx, sy: box.sy, sz: box.sz } : null,
+  });
+  if (loc && !gpuDone) {
     const buckets: number[][] = Array.from({ length: BUCKETS }, () => []);
     const shell: number[] = [];
     for (let i = 0; i < loc.n; i++) {
@@ -131,14 +148,14 @@ export function drawView(
     ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(size, gy); ctx.stroke();
     ctx.restore();
   }
-  for (const o of overlays) wire(ctx, view, o, k, c, '#ff8c00', 2, [4, 3]); // box của object khác đang chồng lấn
+  for (const o of overlays) wire(ctx, view, o, k, c, o.color ?? '#ff8c00', 2, [4, 3]); // box của object khác đang chồng lấn
   if (!box) return;
 
   // 8 đỉnh của box (đã xoay dyaw quanh tâm) rồi nối 12 cạnh.
   const cos = Math.cos(box.dyaw), sin = Math.sin(box.dyaw);
   const tilted = tiltBase !== null && isTilted(tiltBase, box); // box nghiêng theo mặt đường (roll / pitch ≠ 0)
   const pt = (a: number, b: number, w: number) => {
-    const [x, y, z] = tilted ? cornerOffset(tiltBase!, box, [a, b, w]) : [a * cos - b * sin, a * sin + b * cos, w];
+    const [x, y, z] = tilted ? cornerInView(tiltBase!, box, [a, b, w]) : [a * cos - b * sin, a * sin + b * cos, w];
     return project(view, box.cu + x, box.cv + y, box.cw + z, k, c);
   };
   const hu = box.sx / 2, hv = box.sy / 2, hw = box.sz / 2;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyLocalBox, cornerOffset, dragTilt, identityBox, isTilted } from '../src/shared/edit';
-import { apply, fromEuler, mul, rotX, rotY, toEuler } from '../src/shared/rot';
+import { applyLocalBox, cornerInView, cornerOffset, dragTilt, identityBox, isTilted, viewFrame } from '../src/shared/edit';
+import { apply, fromEuler, mul, rotX, rotY, rotZ, toEuler } from '../src/shared/rot';
 import { MAX_TILT, type Cuboid } from '../src/shared/cuboid';
 import { stateAt } from '../src/shared/interp';
 import { serializeCuboid } from '../src/shared/cuboid';
@@ -69,5 +69,23 @@ describe('box nghiêng', () => {
     const mk = (f: number, ry: number) => ({ ...shape(f), points: serializeCuboid(cub({ ry }), Array(16).fill(0)) });
     const t = track(1, [mk(0, 0), mk(4, 0.2)]);
     expect(stateAt(t, 2).cuboid!.ry).toBeCloseTo(0.1, 9);
+  });
+});
+
+describe('khung nhìn căn theo box (box nghiêng không bao giờ bị thấy nghiêng)', () => {
+  const base = { rx: 0.2, ry: -0.15, yaw: 0.7 };
+  const p: [number, number, number] = [2, 1, 0.5];
+  it('box thẳng → không cần khung riêng', () => {
+    expect(viewFrame({ rx: 0, ry: 0, yaw: 1 })).toBeNull();
+  });
+  it('chưa kéo gì: góc box trong khung nhìn đúng bằng toạ độ riêng của box', () => {
+    const c = cornerInView(base, { cu: 0, cv: 0, cw: 0, dyaw: 0, sx: 4, sy: 2, sz: 1.5 }, p);
+    p.forEach((v, i) => expect(c[i]).toBeCloseTo(v, 9));
+  });
+  it('điểm ở hệ yaw quay bằng viewFrame trùng toạ độ riêng của box', () => {
+    const m = viewFrame(base)!;
+    const inYaw = apply(rotZ(-base.yaw), apply(fromEuler(base.rx, base.ry, base.yaw), p)); // điểm của box trong hệ yaw
+    const back = apply(m, inYaw);
+    p.forEach((v, i) => expect(back[i]).toBeCloseTo(v, 9));
   });
 });
