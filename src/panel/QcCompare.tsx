@@ -115,6 +115,8 @@ export function QcCompare({ jobId, tracks, labels, start, stop, onOpen }: {
             {ISSUE_KINDS.map((k) => (
               <label key={k} title={ISSUE_NAMES[k]}><input type="checkbox" checked={fKinds.has(k)} onChange={() => { toggleKind(k); setLimit(PAGE); }} /> {k}</label>
             ))}
+            <button onClick={() => { setFKinds(new Set(ISSUE_KINDS)); setLimit(PAGE); }} disabled={fKinds.size === ISSUE_KINDS.length} title="Hiện mọi loại lỗi">Bật tất cả</button>
+            <button onClick={() => { setFKinds(new Set()); setLimit(PAGE); }} disabled={fKinds.size === 0} title="Ẩn mọi loại lỗi">Tắt tất cả</button>
             <span>ID <input value={fId} onChange={(e) => { setFId(e.target.value.replace(/\D/g, '')); setLimit(PAGE); }} size={4} style={{ width: 48 }} /></span>
             <span style={{ color: '#555' }}>{groups.length} ID · {shown.length} flag</span>
           </p>
@@ -145,7 +147,7 @@ export function QcCompare({ jobId, tracks, labels, start, stop, onOpen }: {
                     <tr style={{ borderTop: '1px solid #ddd', background: isOpen ? '#f8fbff' : undefined }}>
                       <td><input type="checkbox" className="cvla-check" checked={picked.has(num)} onChange={() => setPicked(toggleIn(picked, num))} title="Chọn để ignore / fixed theo lô" /></td>
                       <td><button onClick={() => setOpen(toggleIn(open, num))} style={{ padding: '0 5px' }} title="Xem từng loại lỗi và các đoạn frame">{isOpen ? '▾' : '▸'}</button></td>
-                      <td><b>{num}</b></td>
+                      <td><button onClick={() => onOpen(num, start)} style={{ padding: '0 5px', fontWeight: 700 }} title="Mở object này trong Batch Review từ frame đầu">{num}</button>{" "}<span style={{ color: '#567', fontWeight: 400 }}>{labels[num - 1] ?? ''}</span></td>
                       <td>{[...byKind].map(([k, rs]) => <span key={k} style={{ marginRight: 8 }} title={ISSUE_NAMES[k]}><b>{k}</b> {rs.length}</span>)}</td>
                       <td>{counts(all).map(([s, n]) => <span key={s} style={{ color: STATE_COLOR[s], marginRight: 8, fontWeight: 600 }}>{STATE_LABEL[s]} {n}</span>)}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>{actions(all)}</td>

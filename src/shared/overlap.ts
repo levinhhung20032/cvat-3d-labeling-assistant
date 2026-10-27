@@ -8,11 +8,11 @@ export interface OverlapConfig {
   allowed: Record<string, number>;
   defaultAllowed: number;
   minArea: number; // m²: phần giao nhỏ hơn mức này thì bỏ qua
-  minZ: number; // m: hai box phải chồng nhau theo chiều cao ít nhất mức này (hai vật xếp chồng trên-dưới thì không tính)
+  minZ: number; // m: hai box phải chồng nhau theo chiều cao ít nhất mức này; -Infinity = không xét chiều cao (như tool QC)
 }
 export const DEFAULT_OVERLAP: OverlapConfig = {
   allowed: { vehicle: 0, two_wheel: 0.5, pedestrian: 0.5, animal: 0.5, obstacle: 0 },
-  defaultAllowed: 0.5, minArea: 0.001, minZ: 0.01,
+  defaultAllowed: 0.5, minArea: 0.001, minZ: -Infinity,
 };
 
 /** Mức IoU cho phép của một nhãn (tên nhãn CVAT). */
@@ -106,3 +106,6 @@ export function groupPairs(items: OverlapItem[]): OverlapPair[] {
   }
   return [...m.values()].sort((x, y) => x.a - y.a || x.b - y.b);
 }
+
+/** IoU dạng phần trăm để hiển thị: chồng lấn rất nhỏ (như 0,07%) không bị làm tròn thành "0%". */
+export const fmtIou = (r: number) => (r >= 0.1 ? `${Math.round(r * 100)}%` : `${(r * 100).toFixed(2)}%`);

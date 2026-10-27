@@ -21,7 +21,8 @@ const scene = (extra: CvatTrack[]) => [...statics.map((p) => mk(() => p)), ...ex
 const frames = Array.from({ length: N }, (_, f) => f);
 
 describe('chuyển động ego', () => {
-  it('khôi phục phép biến đổi cứng từ các vật đứng yên, bỏ qua vật chuyển động', () => {
+  it("khôi phục phép biến đổi cứng từ các vật đứng yên, bỏ qua vật chuyển động · quá ít vật thì không ước lượng", () => {
+    {
     const a = [...statics.map((p) => toEgo(p, 4)), toEgo([30, 30], 4)];
     const b = [...statics.map((p) => toEgo(p, 5)), toEgo([34, 35], 5)]; // vật cuối chuyển động
     const t = estimateEgo(a, b)!;
@@ -29,18 +30,20 @@ describe('chuyển động ego', () => {
     expect(t.th).toBeCloseTo(-0.01, 4);
     const [x, y] = [a[0]![0] * Math.cos(t.th) - a[0]![1] * Math.sin(t.th) + t.tx, a[0]![0] * Math.sin(t.th) + a[0]![1] * Math.cos(t.th) + t.ty];
     expect(x).toBeCloseTo(b[0]![0], 3); expect(y).toBeCloseTo(b[0]![1], 3);
-  });
-  it('quá ít vật thì không ước lượng', () => {
+  }
+    {
     expect(estimateEgo([[1, 2], [10, 5]], [[0, 2], [9, 5]])).toBeNull();
+  }
   });
 });
 
 describe('cảnh báo trôi box', () => {
-  it('vật đứng yên đúng chỗ (có xe chạy) không bị báo; vật đang chạy cũng không', () => {
+  it("vật đứng yên đúng chỗ (có xe chạy) không bị báo; vật đang chạy cũng không · vật đứng yên mà box nhích dần thì bị báo ở các frame lệch quá ngưỡng, kèm đúng số thứ tự object", () => {
+    {
     const moving = mk((f) => [20 + f * 0.8, -3]);
     expect(findDrift(scene([moving]), frames).size).toBe(0);
-  });
-  it('vật đứng yên mà box nhích dần thì bị báo ở các frame lệch quá ngưỡng, kèm đúng số thứ tự object', () => {
+  }
+    {
     const drifting = mk((f) => [22 + f * 0.05, 4]); // nhích 5 cm/frame ≈ 1,45 m sau 29 frame
     const r = findDrift(scene([drifting]), frames);
     const info = r.get(statics.length + 1)!;
@@ -49,14 +52,17 @@ describe('cảnh báo trôi box', () => {
     expect(fs).toContain(0); expect(fs).toContain(29); // hai đầu lệch xa vị trí đứng yên
     expect(fs).not.toContain(15); // giữa chừng gần vị trí trung vị
     expect(r.size).toBe(1);
+  }
   });
-  it('box đứng yên nhưng nhảy một nhịp 0,6 m thì bị báo từ lúc nhảy', () => {
+  it("box đứng yên nhưng nhảy một nhịp 0,6 m thì bị báo từ lúc nhảy · object quá ngắn (dưới minSteps) không xét", () => {
+    {
     const jump = mk((f) => [22 + (f >= 20 ? 0.6 : 0), 4]);
     const info = findDrift(scene([jump]), frames).get(statics.length + 1)!;
     expect(info.frames.map((x) => x.f)).toEqual(Array.from({ length: 10 }, (_, i) => 20 + i));
-  });
-  it('object quá ngắn (dưới minSteps) không xét', () => {
+  }
+    {
     const short = mk((f) => [22 + f * 0.05, 4], [0, 1, 2, 3]);
     expect(findDrift(scene([short]), frames).size).toBe(0);
+  }
   });
 });

@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { kv } from './storage';
 import { isFixedSize } from '../shared/suggest';
+import type { DynRule } from '../shared/dynrule';
 
 /**
  * Dynamic size theo CLASS của job: lấy danh sách class từ chính job (lần đầu mở job), mặc định tắt cho Vehicle / Obstacle,
@@ -48,3 +49,33 @@ export const dynClassStore = {
 };
 
 export const useDynClasses = (jobId: number) => useSyncExternalStore(subscribe, () => read(jobId) ?? EMPTY);
+
+/** Luật theo giá trị attribute (vd Two-wheels: rider state = false → static), lưu cục bộ theo job. */
+const ruleKeyOf = (jobId: number) => `cvla-dynattr:${jobId}`;
+const ruleCache = new Map<number, Record<string, DynRule>>();
+function readRules(jobId: number): Record<string, DynRule> {
+  const hit = ruleCache.get(jobId);
+  if (hit) return hit;
+  let m: Record<string, DynRule> = {};
+  try {
+    const v = JSON.parse(kv.get(ruleKeyOf(jobId)) ?? 'null') as unknown;
+    if (v && typeof v === 'object' && !Array.isArray(v)) m = Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([, x]) => x === 'dyn' || x === 'static')) as Record<string, DynRule>;
+  } catch { /* bỏ qua */ }
+  ruleCache.set(jobId, m);
+  return m;
+}
+const writeRules = (jobId: number, m: Record<string, DynRule>) => {
+  ruleCache.set(jobId, m);
+  try { kv.set(ruleKeyOf(jobId), JSON.stringify(m)); } catch { /* bỏ qua */ }
+  emit();
+};
+export const dynRuleStore = {
+  /** rule = null: về "theo class". */
+  set(jobId: number, key: string, rule: DynRule | null) {
+    const next = { ...readRules(jobId) };
+    if (rule) next[key] = rule; else delete next[key];
+    writeRules(jobId, next);
+  },
+  clear(jobId: number) { writeRules(jobId, {}); },
+};
+export const useDynRules = (jobId: number) => useSyncExternalStore(subscribe, () => readRules(jobId));

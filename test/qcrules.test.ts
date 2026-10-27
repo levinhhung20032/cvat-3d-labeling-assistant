@@ -8,26 +8,36 @@ const tr = (frames: Cuboid[]) => track(1, frames.map((c, f) => ({ ...shape(f, fa
 const kinds = (m: Map<number, { kind: string }[]>, f: number) => (m.get(f) ?? []).map((i) => i.kind);
 
 describe('luật QC (S K Z H D)', () => {
-  it('nhận nhóm nhãn', () => {
+  it("nhận nhóm nhãn · K: kích thước ngoài ngưỡng, kèm gợi ý bus/truck khi xe quá dài", () => {
+    {
     expect(classKey('vehicles')).toBe('vehicle'); expect(classKey('Two-wheels')).toBe('two_wheel'); expect(classKey('pedestrian')).toBe('pedestrian');
     expect(classKey('animal')).toBeNull();
-  });
-  it('K: kích thước ngoài ngưỡng, kèm gợi ý bus/truck khi xe quá dài', () => {
-    const m = trackIssues(tr([cub(), cub({ sx: 6.5 })]), 'vehicles', [0, 1]);
+  }
+    {
+    const m = trackIssues(tr([cub(), cub(), cub({ sx: 6.5 })]), 'vehicles', [0, 1, 2]);
     expect(kinds(m, 0)).toEqual([]);
-    expect(kinds(m, 1)).toContain('K');
-    expect(m.get(1)![0]!.message).toContain('bus/truck');
+    expect(kinds(m, 2)).toContain('K');
+    expect(m.get(2)![0]!.message).toContain('bus/truck');
+  }
+    {
+    // như tool QC: mốc S là trung vị (chẵn → phần tử trên); D tính 3D; nhãn đồng nghĩa (car, motorbike, person)
+    expect(kinds(trackIssues(tr([cub(), cub({ sx: 4.6 })]), 'vehicle', [0, 1]), 0)).toEqual(['S']);
+    expect(kinds(trackIssues(tr([cub({ x: 70, z: 2 }), cub({ x: 79.98, z: 2.9 })]), 'vehicle', [0, 1]), 1)).toEqual(['D']);
+    expect(classKey('car')).toBe('vehicle'); expect(classKey('Motorbike')).toBe('two_wheel'); expect(classKey('persons')).toBe('pedestrian');
+  }
   });
-  it('S: xe có kích thước lệch so với kích thước hay gặp nhất; người thì không xét', () => {
+  it("S: xe có kích thước lệch so với kích thước hay gặp nhất; người thì không xét · Z và D: z ngoài [-3, 3], quá xa > 80 m", () => {
+    {
     const t = tr([cub(), cub(), cub({ sx: 4.6 })]);
     expect(kinds(trackIssues(t, 'vehicles', [0, 1, 2]), 2)).toEqual(['S']);
     expect(kinds(trackIssues(tr([cub({ sx: 0.8, sy: 0.8, sz: 1.7 }), cub({ sx: 0.9, sy: 0.8, sz: 1.7 })]), 'pedestrian', [0, 1]), 1)).toEqual([]);
-  });
-  it('Z và D: z ngoài [-3, 3], quá xa > 100 m', () => {
-    const m = trackIssues(tr([cub({ z: 3.5 }), cub({ x: 101 })]), 'vehicles', [0, 1]);
+  }
+    {
+    const m = trackIssues(tr([cub({ z: 3.5 }), cub({ x: 81 })]), 'vehicles', [0, 1]);
     expect(kinds(m, 0)).toEqual(['Z']);
     expect(kinds(m, 1)).toEqual(['D']);
-    expect(kinds(trackIssues(tr([cub({ x: 99 })]), 'animal', [0]), 0)).toEqual([]);
+    expect(kinds(trackIssues(tr([cub({ x: 79 })]), 'animal', [0]), 0)).toEqual([]);
+  }
   });
   it('H: đổi hướng quá 40° giữa hai frame liền nhau, tính cả khi vượt mốc ±180°', () => {
     const d = (deg: number) => (deg * Math.PI) / 180;

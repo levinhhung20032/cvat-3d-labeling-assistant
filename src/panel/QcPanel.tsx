@@ -88,7 +88,7 @@ export function QcPanel({ jobId, count, tracks, labels, start, stop, onOpen }: {
               <summary style={{ cursor: 'pointer' }}>Xem {p.conflicts.length} ghi chú trùng</summary>
               <table style={{ borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead><tr style={{ textAlign: 'left' }}><th>ID</th><th>frame</th><th>hiện có</th><th>trong file</th></tr></thead>
-                <tbody>{p.conflicts.slice(0, 50).map((c) => <tr key={`${c.num}:${c.frame}`} style={{ borderTop: '1px solid #ddd' }}><td>{c.num}</td><td>{c.frame}</td><td>{c.current}</td><td>{c.incoming}</td></tr>)}</tbody>
+                <tbody>{p.conflicts.slice(0, 50).map((c) => <tr key={`${c.num}:${c.frame}`} style={{ borderTop: '1px solid #ddd' }}><td><button onClick={() => onOpen(c.num, start)} style={{ padding: '0 5px', fontWeight: 700 }} title="Mở object này trong Batch Review từ frame đầu">{c.num}</button>{" "}<span style={{ color: '#567', fontWeight: 400 }}>{labels[c.num - 1] ?? ''}</span></td><td>{c.frame}</td><td>{c.current}</td><td>{c.incoming}</td></tr>)}</tbody>
               </table>
               {p.conflicts.length > 50 && <div style={{ color: '#666' }}>…và {p.conflicts.length - 50} ghi chú nữa</div>}
             </details>
@@ -107,7 +107,7 @@ export function QcPanel({ jobId, count, tracks, labels, start, stop, onOpen }: {
           <tbody>
             {list.map((n) => (
               <tr key={`${n.num}:${n.frame}`} style={{ borderTop: '1px solid #ddd' }}>
-                <td><b>{n.num}</b></td>
+                <td><button onClick={() => onOpen(n.num, start)} style={{ padding: '0 5px', fontWeight: 700 }} title="Mở object này trong Batch Review từ frame đầu">{n.num}</button>{" "}<span style={{ color: '#567', fontWeight: 400 }}>{labels[n.num - 1] ?? ''}</span></td>
                 <td><button onClick={() => onOpen(n.num, n.frame)} title="Mở object này ở frame đó">{n.frame}</button></td>
                 <td>
                   <input

@@ -23,7 +23,7 @@ export interface QcRuleConfig {
   zMin: number;
   zMax: number;
   maxRotationJumpDeg: number;
-  maxDistance: number; // m, tính theo khoảng cách ngang tâm box tới gốc ego
+  maxDistance: number; // m, khoảng cách 3D từ tâm box tới gốc toạ độ (như tool QC)
 }
 
 export const DEFAULT_QC_RULES: QcRuleConfig = {
@@ -38,15 +38,17 @@ export const DEFAULT_QC_RULES: QcRuleConfig = {
   zMin: -3,
   zMax: 3,
   maxRotationJumpDeg: 40,
-  maxDistance: 100,
+  maxDistance: 80,
 };
 
 /** Tên nhãn CVAT → nhóm luật (null: Animal, Obstacle… chưa có ngưỡng nên không cảnh báo kích thước / hướng). */
 export function classKey(label: string): ClassKey | null {
   const l = label.trim().toLowerCase();
-  if (l === 'vehicle' || l === 'vehicles') return 'vehicle';
-  if (l === 'two-wheels' || l === 'two-wheel' || l === 'two_wheel' || l === 'two_wheels') return 'two_wheel';
-  if (l === 'pedestrian' || l === 'pedestrians') return 'pedestrian';
+  const n = l.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  const has = (names: string[]) => names.includes(n) || (n.endsWith('s') && names.includes(n.slice(0, -1)));
+  if (has(['vehicle', 'car', 'truck', 'bus', 'van', 'suv', 'sedan', 'pickup', 'minibus'])) return 'vehicle';
+  if (has(['two_wheel', 'two_wheeler', 'twowheel', 'motorbike', 'motorcycle', 'bicycle', 'bike'])) return 'two_wheel';
+  if (has(['pedestrian', 'person', 'human', 'people'])) return 'pedestrian';
   return null;
 }
 
@@ -60,17 +62,11 @@ const wrapDeg = (r: number) => {
   return d;
 };
 
-/** Kích thước hay gặp nhất của track (làm mốc cho luật S). */
-function modeSize(boxes: Cuboid[], tol: number): { sx: number; sy: number; sz: number } | null {
-  const first = boxes[0];
-  if (!first) return null;
-  const groups: { ref: Cuboid; n: number }[] = [];
-  for (const b of boxes) {
-    const g = groups.find((x) => Math.abs(x.ref.sx - b.sx) <= tol && Math.abs(x.ref.sy - b.sy) <= tol && Math.abs(x.ref.sz - b.sz) <= tol);
-    if (g) g.n++; else groups.push({ ref: b, n: 1 });
-  }
-  groups.sort((a, b) => b.n - a.n);
-  return groups[0]!.ref;
+/** Kích thước chuẩn của track (làm mốc cho luật S): trung vị (phần tử giữa, lấy bên trên khi chẵn) theo từng trục, như tool QC. */
+function medianSize(boxes: Cuboid[]): { sx: number; sy: number; sz: number } | null {
+  if (boxes.length < 2) return null;
+  const med = (k: 'sx' | 'sy' | 'sz') => boxes.map((b) => b[k]).sort((a, b) => a - b)[Math.floor(boxes.length / 2)]!;
+  return { sx: med('sx'), sy: med('sy'), sz: med('sz') };
 }
 
 /** Issue của từng frame của một track (trừ O, tính chéo giữa các object ở overlap.ts). */
@@ -81,7 +77,8 @@ export function trackIssues(track: CvatTrack, label: string, frames: number[], c
   const boxes = new Map<number, Cuboid>();
   for (const f of frames) { const c = stateAt(track, f).cuboid; if (c) boxes.set(f, c); }
 
-  const ref = ck && cfg.scaleSyncGroups.includes(ck) ? modeSize([...boxes.values()], cfg.scaleSyncTol) : null;
+  const ref = ck && cfg.scaleSyncGroups.includes(ck) ? medianSize([...boxes.values()]) : null;
+  const tol = cfg.scaleSyncTol + 1e-9; // tránh sai số số thực (4.24 − 4.23 > 0.01)
   for (const [f, c] of boxes) {
     if (ck) {
       const lim = cfg.size[ck], e = cfg.sizeEps;
@@ -90,11 +87,11 @@ export function trackIssues(track: CvatTrack, label: string, frames: number[], c
       chk('dài', c.sx, lim.length); chk('rộng', c.sy, lim.width); chk('cao', c.sz, lim.height);
       if (bad.length) add(f, 'K', `kích thước ngoài ngưỡng: ${bad.join(', ')}${ck === 'vehicle' && c.sx > lim.length[1] + e ? ' — có thể là xe bus/truck' : ''}`);
     }
-    if (ref && (Math.abs(c.sx - ref.sx) > cfg.scaleSyncTol || Math.abs(c.sy - ref.sy) > cfg.scaleSyncTol || Math.abs(c.sz - ref.sz) > cfg.scaleSyncTol)) {
-      add(f, 'S', `scale không đồng bộ: ${c.sx.toFixed(2)}×${c.sy.toFixed(2)}×${c.sz.toFixed(2)} so với ${ref.sx.toFixed(2)}×${ref.sy.toFixed(2)}×${ref.sz.toFixed(2)} (kích thước hay gặp nhất của object)`);
+    if (ref && (Math.abs(c.sx - ref.sx) > tol || Math.abs(c.sy - ref.sy) > tol || Math.abs(c.sz - ref.sz) > tol)) {
+      add(f, 'S', `scale không đồng bộ: ${c.sx.toFixed(2)}×${c.sy.toFixed(2)}×${c.sz.toFixed(2)} so với ${ref.sx.toFixed(2)}×${ref.sy.toFixed(2)}×${ref.sz.toFixed(2)} (kích thước chuẩn = trung vị của object)`);
     }
     if (c.z < cfg.zMin || c.z > cfg.zMax) add(f, 'Z', `z = ${c.z.toFixed(2)} m ngoài [${cfg.zMin}, ${cfg.zMax}]`);
-    const dist = Math.hypot(c.x, c.y);
+    const dist = Math.hypot(c.x, c.y, c.z);
     if (dist > cfg.maxDistance) add(f, 'D', `quá xa: ${dist.toFixed(0)} m (> ${cfg.maxDistance} m)`);
     if (ck) {
       const p = boxes.get(f - 1);

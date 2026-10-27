@@ -17,6 +17,7 @@ export interface ObjectRow {
   keyframes: number;
   jumps: number; // số frame bị cảnh báo "đi xa bất thường" (không tính frame đã bỏ qua)
   made: 'draft' | 'server' | null; // do tool tạo: 'draft' = mới tạo trong nháp (chưa upload), 'server' = đã upload, có trong sổ của tool
+  issuesByKind: Record<string, number>; // số frame vi phạm theo mã (S K Z H D, cộng T trôi box ở App)
   issues: number; // số (frame, loại) vi phạm luật QC S/K/Z/H/D (không tính cái đã bỏ qua)
 }
 
@@ -38,13 +39,14 @@ export function buildRows(
       else if (s.status === 'outside' || s.status === 'outside-key') outside++;
     }
     let issues = 0;
+    const issuesByKind: Record<string, number> = {};
     for (const [f, list] of trackIssues(t, labelName, Array.from({ length: stop - start + 1 }, (_, i) => start + i))) {
-      issues += list.filter((i) => !isIssueIgnored(index + 1, f, i.kind)).length;
+      for (const i of list) if (!isIssueIgnored(index + 1, f, i.kind)) { issues++; issuesByKind[i.kind] = (issuesByKind[i.kind] ?? 0) + 1; }
     }
     rows.push({
       num: index + 1, id: t.id ?? 0, made: typeof t.id !== 'number' ? 'draft' : madeIds.has(t.id) ? 'server' : null, labelId: t.label_id, label: names.get(t.label_id) ?? `#${t.label_id}`,
       assigned, outside, missing: missingOutsideKeyframes(t, stop).length, first, last,
-      keyframes: t.shapes.length, jumps, issues,
+      keyframes: t.shapes.length, jumps, issues, issuesByKind,
     });
   }
   return rows.sort((a, b) => a.num - b.num);

@@ -440,7 +440,7 @@ export function App() {
   }, [driftAll, data, ignAll]);
   const rows = useMemo(
     () => (data && work
-      ? buildRows(work, data.labels, data.job.start_frame, data.job.stop_frame, (num, f) => ignAll.has(motionKey(data.job.id, num, f)), (num, f, k) => ignAll.has(issueKey(data.job.id, num, f, k)), new Set(madeIds)).map((r) => ({ ...r, issues: r.issues + (drift.get(r.num)?.length ?? 0) }))
+      ? buildRows(work, data.labels, data.job.start_frame, data.job.stop_frame, (num, f) => ignAll.has(motionKey(data.job.id, num, f)), (num, f, k) => ignAll.has(issueKey(data.job.id, num, f, k)), new Set(madeIds)).map((r) => { const dn = drift.get(r.num)?.length ?? 0; return { ...r, issues: r.issues + dn, issuesByKind: dn ? { ...r.issuesByKind, T: dn } : r.issuesByKind }; })
       : []),
     [data, work, ignAll, madeIds, drift],
   );

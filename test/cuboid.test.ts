@@ -5,21 +5,25 @@ import { parsePcd } from '../src/shared/pcd';
 const pts = [-27.4, 20.7, 0.73, 0, 0, -1.22, 4.82, 1.97, 1.56, 0, 0, 0, 0, 0, 0, 0];
 
 describe('cuboid points', () => {
-  it('đọc rồi ghi lại không đổi', () => {
+  it("đọc rồi ghi lại không đổi · giữ rx, ry khi ghi (kẹp ±30°)", () => {
+    {
     expect(serializeCuboid(parseCuboid(pts), pts)).toEqual(pts);
-  });
-  it('giữ rx, ry khi ghi (kẹp ±30°)', () => {
+  }
+    {
     const tilted = [...pts]; tilted[3] = 0.01; tilted[4] = -0.02;
     expect(hasTilt(tilted)).toBe(true);
     expect(serializeCuboid(parseCuboid(tilted), tilted).slice(3, 5)).toEqual([0.01, -0.02]);
     expect(serializeCuboid({ ...parseCuboid(tilted), rx: 2, ry: -2 }, tilted).slice(3, 5)).toEqual([MAX_TILT, -MAX_TILT]);
+  }
   });
-  it('từ chối độ dài sai', () => {
+  it("từ chối độ dài sai · azimuth: trước 0°, trái +90°", () => {
+    {
     expect(() => parseCuboid([1, 2, 3])).toThrow();
-  });
-  it('azimuth: trước 0°, trái +90°', () => {
+  }
+    {
     expect(azimuthDeg({ x: 5, y: 0 })).toBeCloseTo(0);
     expect(azimuthDeg({ x: 0, y: 5 })).toBeCloseTo(90);
+  }
   });
 });
 

@@ -4,17 +4,19 @@ import { shape, track } from './fixtures';
 import { serializeCuboid } from '../src/shared/cuboid';
 
 describe('tên ca', () => {
-  it('sáng 21/10 → Oct21AM; chiều → PM; không đệm số 0', () => {
+  it("sáng 21/10 → Oct21AM; chiều → PM; không đệm số 0 · trùng tên thì thêm hậu tố", () => {
+    {
     expect(shiftName(new Date(2026, 9, 21, 8, 30))).toBe('Oct21AM');
     expect(shiftName(new Date(2026, 9, 21, 12, 0))).toBe('Oct21PM');
     expect(shiftName(new Date(2026, 9, 21, 23, 59))).toBe('Oct21PM');
     expect(shiftName(new Date(2026, 0, 5, 0, 5))).toBe('Jan5AM');
     expect(shiftName(new Date(2026, 11, 31, 11, 59))).toBe('Dec31AM');
-  });
-  it('trùng tên thì thêm hậu tố', () => {
+  }
+    {
     expect(uniqueShiftName('Oct21AM', [])).toBe('Oct21AM');
     expect(uniqueShiftName('Oct21AM', ['Oct21AM'])).toBe('Oct21AM#2');
     expect(uniqueShiftName('Oct21AM', ['Oct21AM', 'Oct21AM#2'])).toBe('Oct21AM#3');
+  }
   });
 });
 
@@ -56,7 +58,8 @@ describe('KPI ca', () => {
     expect(k.totals.baked).toBe(10);
     expect(k.totals.modified).toBe(3);
   });
-  it('nhiều lần upload cùng object: cộng dồn đếm, outside lấy đầu → cuối', () => {
+  it("nhiều lần upload cùng object: cộng dồn đếm, outside lấy đầu → cuối · object sửa mà chưa upload nằm ở mục chưa upload", () => {
+    {
     const s = base();
     s.uploads.push(
       { time: 't1', jobId: 1, tracks: [rec(5, { added: 1, outsideBefore: [], outsideAfter: [3] })] },
@@ -66,14 +69,15 @@ describe('KPI ca', () => {
     expect(k.objects).toHaveLength(1);
     expect(k.objects[0]).toMatchObject({ uploads: 2, added: 3, outsideNow: 2, outsideNew: 2 });
     expect(k.uploads).toBe(2);
-  });
-  it('object sửa mà chưa upload nằm ở mục chưa upload', () => {
+  }
+    {
     const s = base();
     s.touched = ['9999:5', '9999:7'];
     s.uploads.push({ time: 't', jobId: 9999, tracks: [rec(5)] });
     const k = computeKpi(s);
     expect(k.pending).toEqual(['9999:7']);
     expect(kpiText(k)).toContain('CHƯA upload: 7');
+  }
   });
   it('ca đang chạy: thời lượng tính tới hiện tại', () => {
     const s = { ...base(), end: null };
@@ -85,15 +89,17 @@ describe('changedFrames (KPI: mọi frame đã thay đổi)', () => {
   const c = (x: number) => ({ x, y: 0, z: 0, rx: 0, ry: 0, yaw: 0, sx: 4, sy: 2, sz: 1.5 });
   const mk = (frames: [number, number, boolean?][]) =>
     track(1, frames.map(([f, x, out]) => ({ ...shape(f, !!out), points: serializeCuboid(c(x), Array(16).fill(0)) })));
-  it('sửa 1 keyframe làm các frame nội suy kề đổi theo, không tính frame ngoài khoảng', () => {
+  it("sửa 1 keyframe làm các frame nội suy kề đổi theo, không tính frame ngoài khoảng · khoá thêm keyframe giữ nguyên giá trị thì không tính", () => {
+    {
     const before = mk([[0, 0], [4, 4], [8, 8]]);
     const after = mk([[0, 0], [4, 5], [8, 8]]);
     expect(changedFrames(before, after, 0, 8)).toEqual([1, 2, 3, 4, 5, 6, 7]);
-  });
-  it('khoá thêm keyframe giữ nguyên giá trị thì không tính', () => {
+  }
+    {
     const before = mk([[0, 0], [4, 4]]);
     const after = mk([[0, 0], [2, 2], [4, 4]]);
     expect(changedFrames(before, after, 0, 4)).toEqual([]);
+  }
   });
   it('đặt outside và lưu outside thành keyframe riêng đều tính', () => {
     const before = mk([[0, 0], [2, 2, true]]);

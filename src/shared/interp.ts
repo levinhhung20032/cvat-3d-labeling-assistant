@@ -19,10 +19,12 @@ export function sortedShapes(t: CvatTrack): CvatShape[] {
 }
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+/** Nội suy góc theo đường NGẮN nhất (yaw 3,1 → −3,1 rad đi qua ±π, không quay vòng ngược qua 0). */
+const lerpAngle = (a: number, b: number, t: number) => a + (((b - a + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI) * t;
 
 /**
  * Trạng thái track tại frame f, theo cách CVAT hiển thị: nội suy tuyến tính giữa hai keyframe
- * không-outside; nếu keyframe kế tiếp là outside thì giữ nguyên giá trị; shape outside kéo dài tới shape kế.
+ * không-outside (yaw đi theo cung ngắn nhất); nếu keyframe kế tiếp là outside thì giữ nguyên giá trị; shape outside kéo dài tới shape kế.
  */
 export function stateAt(track: CvatTrack, f: number): FrameState {
   const shapes = sortedShapes(track);
@@ -46,7 +48,7 @@ export function stateAt(track: CvatTrack, f: number): FrameState {
     status: 'interp',
     cuboid: {
       x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t), z: lerp(a.z, b.z, t),
-      rx: lerp(a.rx, b.rx, t), ry: lerp(a.ry, b.ry, t), yaw: lerp(a.yaw, b.yaw, t),
+      rx: lerp(a.rx, b.rx, t), ry: lerp(a.ry, b.ry, t), yaw: lerpAngle(a.yaw, b.yaw, t),
       sx: lerp(a.sx, b.sx, t), sy: lerp(a.sy, b.sy, t), sz: lerp(a.sz, b.sz, t),
     },
   };

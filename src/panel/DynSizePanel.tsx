@@ -1,11 +1,15 @@
-import { useMemo } from 'react';
+import { Fragment, useMemo } from 'react';
 import type { CvatLabel, CvatTrack } from '../shared/types';
-import { defaultDyn, dynClassStore, useDynClasses } from './dynClassStore';
+import { defaultDyn, dynClassStore, dynRuleStore, useDynClasses, useDynRules } from './dynClassStore';
+import { parseLabelSpecs } from '../shared/attributes';
+import { attrRuleKey, ruleValues, type DynRule } from '../shared/dynrule';
 import { kv } from './storage';
 
-/** Tab "Dynamic size": bật / tắt theo class (danh sách class lấy từ job). Object có công tắc riêng trong Batch Review sẽ ưu tiên công tắc riêng. */
+/** Tab "Dynamic size": bật / tắt theo class (danh sách class lấy từ job). Mỗi class có thể đặt thêm theo GIÁ TRỊ attribute (vd Two-wheels: rider state = false → static, true → dynamic). Công tắc riêng của từng object trong Batch Review luôn được ưu tiên hơn cả hai. */
 export function DynSizePanel({ jobId, labels, tracks }: { jobId: number; labels: CvatLabel[]; tracks: CvatTrack[] }) {
   const map = useDynClasses(jobId);
+  const rules = useDynRules(jobId);
+  const specs = useMemo(() => parseLabelSpecs(labels), [labels]);
   const names = useMemo(() => labels.map((l) => l.name), [labels]);
   const counts = useMemo(() => {
     const m = new Map<number, number>();
@@ -30,8 +34,11 @@ export function DynSizePanel({ jobId, labels, tracks }: { jobId: number; labels:
         <tbody>
           {labels.map((l) => {
             const on = map[l.name] ?? defaultDyn(l.name);
+            const attrs = (specs.get(l.id)?.attrs ?? []).filter((a) => ruleValues(a).length > 0);
+            const nRules = attrs.reduce((n, a) => n + ruleValues(a).filter((v) => rules[attrRuleKey(l.name, a.name, v)]).length, 0);
             return (
-              <tr key={l.id} style={{ borderTop: '1px solid #ddd' }}>
+              <Fragment key={l.id}>
+              <tr style={{ borderTop: '1px solid #ddd' }}>
                 <td><b>{l.name}</b></td>
                 <td>{counts.get(l.id) ?? 0}</td>
                 <td>
@@ -40,12 +47,46 @@ export function DynSizePanel({ jobId, labels, tracks }: { jobId: number; labels:
                   </label>
                 </td>
               </tr>
+              {attrs.length > 0 && (
+                <tr>
+                  <td colSpan={3} style={{ paddingLeft: 14, paddingBottom: 4 }}>
+                    <details open={nRules > 0}>
+                      <summary style={{ cursor: 'pointer', color: '#345' }}>Theo attribute{nRules > 0 ? ` (${nRules} luật)` : ''}</summary>
+                      <table style={{ borderCollapse: 'collapse', margin: '2px 0' }}>
+                        <tbody>
+                          {attrs.map((a) => (
+                            <tr key={a.id}>
+                              <td style={{ paddingRight: 8, verticalAlign: 'top' }}><b>{a.name}</b></td>
+                              <td>
+                                {ruleValues(a).map((v) => {
+                                  const key = attrRuleKey(l.name, a.name, v);
+                                  return (
+                                    <label key={v} style={{ marginRight: 12, whiteSpace: 'nowrap' }}>
+                                      {v}{' '}
+                                      <select value={rules[key] ?? ''} onChange={(e) => dynRuleStore.set(jobId, key, (e.target.value || null) as DynRule | null)}>
+                                        <option value="">theo class</option>
+                                        <option value="dyn">Dynamic</option>
+                                        <option value="static">Static</option>
+                                      </select>
+                                    </label>
+                                  );
+                                })}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </details>
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             );
           })}
         </tbody>
       </table>
       <p style={{ margin: '6px 0' }}>
-        <button onClick={() => { dynClassStore.reset(jobId, names); tracks.forEach((_, i) => { try { kv.remove(`cvla-dyn:${jobId}:${i + 1}`); } catch { /* bỏ qua */ } }); }}>Đặt lại mặc định</button>{' '}
+        <button onClick={() => { dynClassStore.reset(jobId, names); dynRuleStore.clear(jobId); tracks.forEach((_, i) => { try { kv.remove(`cvla-dyn:${jobId}:${i + 1}`); } catch { /* bỏ qua */ } }); }}>Đặt lại mặc định</button>{' '}
         <span style={{ color: '#555' }}>Đổi công tắc class sẽ xóa công tắc riêng của các object thuộc class đó. Tắt dynamic size chỉ áp dụng cho lần sửa size tiếp theo (hoặc bấm "Đồng bộ size" trong Batch Review).</span>
       </p>
     </>

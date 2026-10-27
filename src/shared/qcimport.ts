@@ -1,5 +1,5 @@
 import { strFromU8, unzipSync } from 'fflate';
-import { findOverlaps } from './overlap';
+import { findOverlaps, fmtIou } from './overlap';
 import { ISSUE_KINDS, trackIssues, type IssueKind } from './qcrules';
 import type { CvatTrack } from './types';
 
@@ -121,8 +121,8 @@ export function detectAll(tracks: CvatTrack[], labels: string[], start: number, 
     for (const [f, list] of trackIssues(t, labels[i] ?? '', frames)) for (const it of list) out.set(`${i + 1}:${f}:${it.kind}`, it.message);
   });
   for (const o of findOverlaps(tracks, frames, labels)) {
-    out.set(`${o.a}:${o.frame}:O`, `chồng với #${o.b} (IoU ${(o.ratio * 100).toFixed(0)}%)`);
-    out.set(`${o.b}:${o.frame}:O`, `chồng với #${o.a} (IoU ${(o.ratio * 100).toFixed(0)}%)`);
+    out.set(`${o.a}:${o.frame}:O`, `chồng với #${o.b} (IoU ${fmtIou(o.ratio)})`);
+    out.set(`${o.b}:${o.frame}:O`, `chồng với #${o.a} (IoU ${fmtIou(o.ratio)})`);
   }
   return out;
 }
