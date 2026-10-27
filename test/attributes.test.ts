@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { getAttr, matchValue, parseLabelSpecs, setAttrAll, setAttrFrom, setAttrStatic } from '../src/shared/attributes';
+import { getAttr, matchValue, parseLabelSpecs, setAttrAll, setAttrForward, setAttrFrom, setAttrStatic } from '../src/shared/attributes';
 import { animalSpecies, obstacleType, pedestrianAge, pedestrianPose, rideState, riderInside, suggestAttributes, vehicleType } from '../src/shared/attrSuggest';
 import { stateAt } from '../src/shared/interp';
 import type { CvatAnnotations, CvatLabel, CvatShape, CvatTrack } from '../src/shared/types';
@@ -170,5 +170,41 @@ describe.skipIf(!existsSync(file))('gợi ý trên job thật 9999', () => {
   it('không gợi ý bừa: phần lớn xe cỡ car giữ nguyên', () => {
     const veh = all.filter((a) => a.name === 'type');
     expect(veh.length).toBeLessThanOrEqual(5);
+  });
+});
+
+describe('setAttrForward (đồng bộ attribute về sau)', () => {
+  const pose = SPECS.get(12872)!.attrs.find((a) => a.name === 'pose')!;
+  const withPose = (frame: number, value: string | null, outside = false): CvatShape => {
+    const s = box(frame, 0.8, 0.8, 1.7, 10, outside);
+    s.attributes = value === null ? [] : [{ spec_id: pose.id, value }];
+    return s;
+  };
+  const trkPose = (): CvatTrack => ({ ...track(1, [withPose(0, 'standing'), withPose(3, 'sitting'), withPose(6, 'standing'), withPose(9, 'bending')]), label_id: 12872 });
+  it('ghi đè mọi keyframe sau frame đang chọn, không đụng các frame trước', () => {
+    const r = setAttrForward(trkPose(), pose, 3, 'bending')!;
+    expect([...r.frames].sort((a, b) => a - b)).toEqual([3, 6]); // frame 3 được đặt, frame 6 bị ghi đè, frame 9 đã đúng
+    expect(getAttr(r.track, 0, pose)).toBe('standing');
+    expect(getAttr(r.track, 3, pose)).toBe('bending');
+    expect(getAttr(r.track, 6, pose)).toBe('bending');
+    expect(getAttr(r.track, 9, pose)).toBe('bending');
+  });
+  it('tạo keyframe ở frame chưa phải keyframe và các keyframe sau ghi đè', () => {
+    const r = setAttrForward(trkPose(), pose, 4, 'sitting')!;
+    expect(r.track.shapes.some((s) => s.frame === 4)).toBe(true);
+    expect(getAttr(r.track, 4, pose)).toBe('sitting');
+    expect(getAttr(r.track, 7, pose)).toBe('sitting');
+    expect(getAttr(r.track, 9, pose)).toBe('sitting');
+    expect(getAttr(r.track, 3, pose)).toBe('sitting');
+  });
+  it('không có gì đổi hoặc attribute không đổi theo frame → null', () => {
+    const t: CvatTrack = { ...track(1, [withPose(0, 'standing'), withPose(5, 'standing')]), label_id: 12872 };
+    expect(setAttrForward(t, pose, 0, 'standing')).toBeNull();
+    const stat = SPECS.get(12872)!.attrs.find((a) => a.name === 'age')!;
+    expect(setAttrForward(t, stat, 0, 'adult')).toBeNull();
+  });
+  it('frame không có box (outside) → null', () => {
+    const t: CvatTrack = { ...track(1, [withPose(0, 'standing'), withPose(3, null, true)]), label_id: 12872 };
+    expect(setAttrForward(t, pose, 3, 'sitting')).toBeNull();
   });
 });

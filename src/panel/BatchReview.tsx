@@ -210,6 +210,7 @@ function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fi
   const [pc, setPc] = useState<PointCloud | null>(null);
   const [err, setErr] = useState('');
   const [preview, setPreview] = useState<LocalBox | null>(null);
+  const [retryN, setRetryN] = useState(0);
   useEffect(() => {
     let live = true;
     setPc(null); setErr('');
@@ -217,7 +218,7 @@ function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fi
       .then((p) => { if (live) { setPc(p); onLoaded(f); } })
       .catch((e) => { if (live && !(e instanceof Cancelled)) setErr(String(e)); });
     return () => { live = false; };
-  }, [f]);
+  }, [f, retryN]);
   // Lọc điểm một lần ở phạm vi lớn nhất (thu nhỏ tối đa) để phóng to/thu nhỏ không phải lọc lại.
   const loc = useMemo(() => (pc && refCub ? localize(pc, refCub, locHalf) : null), [pc, refCub, locHalf]);
   // Khung nhìn căn theo box: box nghiêng thì điểm, box gợi ý, vật khác... đều quay sang khung riêng của box để mọi view thấy box thẳng.
@@ -309,7 +310,11 @@ function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fi
       {VIEWS.map((v) => (
         <Cell key={v} frame={M} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} autoSnap={autoSnap} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} />
       ))}
-      {!pc && <div style={{ fontSize: 11, padding: 2 }}>{err ? `Lỗi: ${err}` : 'đang tải…'}</div>}
+      {!pc && (
+        <div style={{ fontSize: 11, padding: 2 }}>
+          {err ? <>Lỗi tải frame: {err.slice(0, 120)} <button onClick={(e) => { e.stopPropagation(); setRetryN((x) => x + 1); }} style={{ padding: '0 4px' }}>↻ thử lại</button></> : 'đang tải…'}
+        </div>
+      )}
       {/* cảnh báo / ghi chú đặt DƯỚI các view để các cột luôn thẳng hàng dù số cảnh báo khác nhau */}
       {bad && (
         <div style={{ background: bad.level === 'misfit' ? '#ffe0f7' : '#fff1d6', color: '#5a0040', fontSize: 11, padding: '1px 4px' }} title={bad.message}>
@@ -599,7 +604,6 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
   // Kế hoạch tải: cửa sổ đang xem trước, rồi các frame phía sau (gần trước), rồi phía trước; tối đa 60 frame.
   // Chạy nền trong lúc người dùng chỉnh sửa; đổi cửa sổ thì kế hoạch được sắp lại quanh vị trí mới.
   useEffect(() => {
-    setLoaded(new Set());
     const cs = frames[0]!, ce = frames[frames.length - 1]!;
     const prio = new Map<number, number>();
     for (const f of frames) prio.set(f, 0);
@@ -669,8 +673,9 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [pick]);
+  /** ② Current window: outside cho mọi frame có box trong cửa sổ đang hiển thị. */
   const outsideRange = () => {
-    const r = range();
+    const r: [number, number] | null = frames.length ? [frames[0]!, frames[frames.length - 1]!] : null;
     if (r && track) saveBak(Array.from({ length: Math.abs(r[1] - r[0]) + 1 }, (_, i) => Math.min(r[0], r[1]) + i));
     if (r && track) apply(setOutsideRange(track, r[0], r[1], stop), `Đã đặt outside ${'{n}'} frame trong ${r[0]}–${r[1]}. Hoàn tác được.`, 'Không có frame nào trong khoảng này đổi được.');
   };
@@ -804,17 +809,51 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
         <span><IdBox value={num} max={max} onCommit={setSelectedNum} /></span>
         <span>
           <button disabled={k === 0} onClick={() => setK(k - 1)}>◀</button>{' '}
-          Cửa sổ {k + 1}/{nWin} (frame {frames[0]}–{frames[frames.length - 1]}){' '}
+          <span style={{ display: 'inline-block', minWidth: '6.5em', textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>Cửa sổ {k + 1}/{nWin}</span>{' '}
           <button disabled={k >= nWin - 1} onClick={() => setK(k + 1)}>▶</button>
         </span>
         <span title="Cửa sổ đang hiện. Nhập a: bắt đầu cửa sổ từ frame a, b tự thành a + số frame - 1 (mặc định 6 frame). Sửa b: đổi số frame hiển thị (b - a + 1). Enter để áp dụng.">
           Cửa sổ hiện{' '}
           <input value={winA} onChange={(e) => setWinA(e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} onBlur={commitA} onFocus={(e) => e.target.select()} size={3} style={{ width: 44 }} /> →{' '}
           <input value={winB} onChange={(e) => setWinB(e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} onBlur={commitB} onFocus={(e) => e.target.select()} size={3} style={{ width: 44 }} />{' '}
-          ({frames.length} frame){' '}
+          <span style={{ display: 'inline-block', minWidth: '4.6em', fontVariantNumeric: 'tabular-nums' }}>({frames.length} frame)</span>{' '}
           <label><input type="checkbox" checked={prefs.keyOnly} onChange={(e) => updatePrefs({ ...prefs, keyOnly: e.target.checked })} /> chỉ keyframe</label>
           {viewFrom !== '' && <button style={{ marginLeft: 4 }} onClick={() => { forceFirst.current = true; setViewFrom(''); }} title="Quay về đầu job">⟲ từ đầu</button>}
         </span>
+        </fieldset>
+        <fieldset style={{ border: '1px solid #c5ccd6', margin: 0, padding: '1px 8px 4px', display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center' }}>
+          <legend style={{ fontSize: 11, fontWeight: 700, color: '#456', padding: '0 4px' }}>QC & cảnh báo</legend>
+        <label title="QC mode: hiện ô ghi chú ở mỗi cột frame (xuất Excel ở tab QC)" style={{ fontWeight: 600 }}><input type="checkbox" checked={qcOn} onChange={(e) => qcStore.setMode(e.target.checked)} /> QC</label>
+        <label title="Cảnh báo box không bao đúng cụm điểm (điểm lọt ra ngoài box) hoặc dưới 6 điểm"><input type="checkbox" checked={warn} onChange={(e) => setWarn(e.target.checked)} /> cảnh báo lệch</label>
+        {warn && (misfitFrames.length > 0 || sparseFrames.length > 0) && (
+          <span style={{ color: '#a0006e', fontWeight: 600 }}>
+            ⚠ {misfitFrames.length ? `lệch: frame ${misfitFrames.join(', ')}` : ''}{misfitFrames.length && sparseFrames.length ? ' · ' : ''}{sparseFrames.length ? `ít điểm: frame ${sparseFrames.join(', ')}` : ''}
+          </span>
+        )}
+        {trackSummary.byKind.map(([kind, fr]) => (
+          <span key={kind} style={{ color: '#a0006e', fontWeight: 600 }} title="Cả track. S scale không đồng bộ, K kích thước ngoài ngưỡng, Z z ngoài ngưỡng, H đổi hướng đột ngột, D quá xa, T trôi box (vật đứng yên mà box nhích). Bấm một đoạn để nhảy tới frame đầu của đoạn.">
+            ⚠ {kind} ({fr.length}):{' '}
+            {toRanges(fr).map(([x, y]) => (
+              <button key={x} onClick={() => goFrame(x)} style={{ padding: '0 3px', marginRight: 2, fontWeight: 600, color: '#a0006e' }}>{x === y ? x : `${x}–${y}`}</button>
+            ))}
+            <button
+              onClick={() => { ignoreStore.set(fr.map((f) => issueKey(job.id, num, f, kind)), true); setNote(`Đã bỏ qua ${fr.length} cảnh báo ${kind} của object #${num}.`); }}
+              style={{ padding: '0 3px', fontSize: 10 }} title={`Bỏ qua cả ${fr.length} frame ${kind} của object này (theo lô)`}
+            >✖ bỏ qua tất cả</button>
+          </span>
+        ))}
+        {trackSummary.far.length > 0 && (
+          <span style={{ color: '#a05a00', fontWeight: 600 }} title="Cả track. Bấm một đoạn để nhảy tới frame đầu của đoạn.">
+            ⚠ đi xa bất thường ({trackSummary.far.length}):{' '}
+            {toRanges(trackSummary.far).map(([x, y]) => (
+              <button key={x} onClick={() => goFrame(x)} style={{ padding: '0 3px', marginRight: 2, fontWeight: 600, color: '#a05a00' }}>{x === y ? x : `${x}–${y}`}</button>
+            ))}
+            <button
+              onClick={() => { ignoreStore.set(trackSummary.far.map((f) => motionKey(job.id, num, f)), true); setNote(`Đã bỏ qua ${trackSummary.far.length} cảnh báo đi xa của object #${num}.`); }}
+              style={{ padding: '0 3px', fontSize: 10 }} title="Bỏ qua cả các frame này của object (theo lô)"
+            >✖ bỏ qua tất cả</button>
+          </span>
+        )}
         </fieldset>
         <fieldset style={{ border: '1px solid #c5ccd6', margin: 0, padding: '1px 8px 4px', display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center' }}>
           <legend style={{ fontSize: 11, fontWeight: 700, color: '#456', padding: '0 4px' }}>Hiển thị</legend>
@@ -862,14 +901,14 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
         <button
           disabled={selFrame === null}
           onClick={() => selFrame !== null && toggleOutside(selFrame)}
-          title="Phím O. Frame có box → outside từ frame này tới keyframe kế tiếp; frame outside → đưa object trở lại. Chọn frame bằng cách bấm tiêu đề cột."
-        >① ⛔ Từ frame đang chọn / trở lại — frame {selFrame ?? '…'} (O)</button>
-        <button onClick={outsideRange} title="Đặt outside cho mọi frame có box trong Phạm vi tác động (ô frame → ở nhóm Keyframe & kích thước); frame ngay sau khoảng giữ nguyên">② ⛔ Cả phạm vi tác động</button>
+          title="Phím O. Outside từ frame đang chọn tới keyframe kế tiếp; nếu frame đang là outside thì đưa object trở lại. Chọn frame bằng cách bấm tiêu đề cột."
+        >① ⛔ Outside — frame {selFrame ?? '…'} (O)</button>
+        <button onClick={outsideRange} title="Đặt outside cho mọi frame có box trong cửa sổ đang hiển thị; frame ngay sau cửa sổ giữ nguyên trạng thái">② ⛔ Current window</button>
         <button
           onClick={() => { if (pick) { setPick(null); setNote('Đã hủy chọn khoảng.'); } else { setPick({ first: null }); setNote('Chọn khoảng: bấm tiêu đề cột ĐẦU khoảng (Esc để hủy).'); } }}
           style={{ background: pick ? '#ffd9d9' : undefined, fontWeight: pick ? 700 : 400 }}
-          title="Bấm rồi bấm tiêu đề hai cột (đầu và cuối khoảng): mọi frame có box trong khoảng thành outside"
-        >{pick ? (pick.first === null ? '③ Bấm cột đầu…' : `③ Bấm cột cuối (từ ${pick.first})…`) : '③ ⛔ Chọn khoảng bằng chuột'}</button>
+          title="Select range: bấm nút rồi bấm tiêu đề hai cột (đầu và cuối khoảng, có thể ở hai cửa sổ khác nhau): mọi frame có box trong khoảng thành outside. Esc để hủy."
+        >{pick ? (pick.first === null ? '③ Bấm cột đầu…' : `③ Bấm cột cuối (từ ${pick.first})…`) : '③ ⛔ Select range'}</button>
         </fieldset>
         <fieldset style={{ border: '1px solid #c5ccd6', margin: 0, padding: '1px 8px 4px', display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center', background: '#f0fbff' }}>
           <legend style={{ fontSize: 11, fontWeight: 700, color: '#456', padding: '0 4px' }}>Gợi ý & mặt đất</legend>
@@ -892,40 +931,6 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
           <input type="checkbox" checked={autoSnap} onChange={(e) => setAutoSnap(e.target.checked)} /> tự bám mặt đất khi kéo
         </label>
         </fieldset>
-        <fieldset style={{ border: '1px solid #c5ccd6', margin: 0, padding: '1px 8px 4px', display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center' }}>
-          <legend style={{ fontSize: 11, fontWeight: 700, color: '#456', padding: '0 4px' }}>QC & cảnh báo</legend>
-        <label title="QC mode: hiện ô ghi chú ở mỗi cột frame (xuất Excel ở tab QC)" style={{ fontWeight: 600 }}><input type="checkbox" checked={qcOn} onChange={(e) => qcStore.setMode(e.target.checked)} /> QC</label>
-        <label title="Cảnh báo box không bao đúng cụm điểm (điểm lọt ra ngoài box) hoặc dưới 6 điểm"><input type="checkbox" checked={warn} onChange={(e) => setWarn(e.target.checked)} /> cảnh báo lệch</label>
-        {warn && (misfitFrames.length > 0 || sparseFrames.length > 0) && (
-          <span style={{ color: '#a0006e', fontWeight: 600 }}>
-            ⚠ {misfitFrames.length ? `lệch: frame ${misfitFrames.join(', ')}` : ''}{misfitFrames.length && sparseFrames.length ? ' · ' : ''}{sparseFrames.length ? `ít điểm: frame ${sparseFrames.join(', ')}` : ''}
-          </span>
-        )}
-        {trackSummary.byKind.map(([kind, fr]) => (
-          <span key={kind} style={{ color: '#a0006e', fontWeight: 600 }} title="Cả track. S scale không đồng bộ, K kích thước ngoài ngưỡng, Z z ngoài ngưỡng, H đổi hướng đột ngột, D quá xa, T trôi box (vật đứng yên mà box nhích). Bấm một đoạn để nhảy tới frame đầu của đoạn.">
-            ⚠ {kind} ({fr.length}):{' '}
-            {toRanges(fr).map(([x, y]) => (
-              <button key={x} onClick={() => goFrame(x)} style={{ padding: '0 3px', marginRight: 2, fontWeight: 600, color: '#a0006e' }}>{x === y ? x : `${x}–${y}`}</button>
-            ))}
-            <button
-              onClick={() => { ignoreStore.set(fr.map((f) => issueKey(job.id, num, f, kind)), true); setNote(`Đã bỏ qua ${fr.length} cảnh báo ${kind} của object #${num}.`); }}
-              style={{ padding: '0 3px', fontSize: 10 }} title={`Bỏ qua cả ${fr.length} frame ${kind} của object này (theo lô)`}
-            >✖ bỏ qua tất cả</button>
-          </span>
-        ))}
-        {trackSummary.far.length > 0 && (
-          <span style={{ color: '#a05a00', fontWeight: 600 }} title="Cả track. Bấm một đoạn để nhảy tới frame đầu của đoạn.">
-            ⚠ đi xa bất thường ({trackSummary.far.length}):{' '}
-            {toRanges(trackSummary.far).map(([x, y]) => (
-              <button key={x} onClick={() => goFrame(x)} style={{ padding: '0 3px', marginRight: 2, fontWeight: 600, color: '#a05a00' }}>{x === y ? x : `${x}–${y}`}</button>
-            ))}
-            <button
-              onClick={() => { ignoreStore.set(trackSummary.far.map((f) => motionKey(job.id, num, f)), true); setNote(`Đã bỏ qua ${trackSummary.far.length} cảnh báo đi xa của object #${num}.`); }}
-              style={{ padding: '0 3px', fontSize: 10 }} title="Bỏ qua cả các frame này của object (theo lô)"
-            >✖ bỏ qua tất cả</button>
-          </span>
-        )}
-        </fieldset>
       </div>
       <div style={{ marginBottom: 6, display: 'flex', flexWrap: 'wrap', gap: '4px 12px', alignItems: 'center' }}>
         {row && (
@@ -937,7 +942,7 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
             <Pill title="ID trong database của CVAT">db {row.id || '—'}</Pill>
           </span>
         )}
-        <span>cửa sổ: {loaded.size}/{frames.length} · {gpuActive() ? 'GPU ✓ · ' : ''}đã tải trước: {cached}/{stop - start + 1}{pointClouds.secondsPerFrame() !== null && cached < stop - start + 1 ? ` · ~${pointClouds.secondsPerFrame()!.toFixed(1)} s/frame` : ''}</span>
+        <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>cửa sổ: {frames.filter((f) => pointClouds.has(f)).length}/{frames.length} · {gpuActive() ? 'GPU ✓ · ' : ''}đã tải trước: {cached}/{stop - start + 1}{pointClouds.secondsPerFrame() !== null && cached < stop - start + 1 ? ` · ~${pointClouds.secondsPerFrame()!.toFixed(1)} s/frame` : ''}</span>
         {note && <span style={{ color: '#7a4b00' }}>{note}</span>}
       </div>
       <details open style={{ margin: '0 0 6px', background: '#f8fbff', border: '1px solid #cfe0f5', padding: '2px 6px' }}>

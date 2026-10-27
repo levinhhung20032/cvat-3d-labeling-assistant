@@ -133,17 +133,20 @@ function main() {
   function applyGeo() {
     if (!host || !body) return;
     const vw = window.innerWidth, vh = window.innerHeight;
-    if (geo.max) {
+    // Thu nhỏ (collapse) chỉ gập thành thanh tiêu đề ở vị trí cũ và GIỮ cờ toàn màn hình: mở lại thì về đúng kích thước trước đó.
+    if (geo.min) {
+      geo.w = clamp(geo.w, 320, vw);
+      geo.x = clamp(geo.x, -geo.w + 120, vw - 120); // luôn còn thanh tiêu đề trong tầm nhìn để kéo lại
+      geo.y = clamp(geo.y, 0, vh - TITLE_H);
+      Object.assign(host.style, { left: `${geo.x}px`, top: `${geo.y}px`, width: `${geo.w}px`, height: `${TITLE_H}px`, resize: 'none' });
+    } else if (geo.max) {
       Object.assign(host.style, { left: '0px', top: '0px', width: `${vw}px`, height: `${vh}px`, resize: 'none' });
     } else {
       geo.w = clamp(geo.w, 320, vw);
-      geo.h = clamp(geo.h, geo.min ? TITLE_H : 200, vh);
-      geo.x = clamp(geo.x, -geo.w + 120, vw - 120); // luôn còn thanh tiêu đề trong tầm nhìn để kéo lại
+      geo.h = clamp(geo.h, 200, vh);
+      geo.x = clamp(geo.x, -geo.w + 120, vw - 120);
       geo.y = clamp(geo.y, 0, vh - TITLE_H);
-      Object.assign(host.style, {
-        left: `${geo.x}px`, top: `${geo.y}px`, width: `${geo.w}px`,
-        height: geo.min ? `${TITLE_H}px` : `${geo.h}px`, resize: geo.min ? 'none' : 'both',
-      });
+      Object.assign(host.style, { left: `${geo.x}px`, top: `${geo.y}px`, width: `${geo.w}px`, height: `${geo.h}px`, resize: 'both' });
     }
     body.style.display = geo.min ? 'none' : 'block';
   }
@@ -175,7 +178,7 @@ function main() {
       return b;
     };
     btns.append(
-      mk('—', 'Thu nhỏ / khôi phục', () => { geo.min = !geo.min; if (geo.min) geo.max = false; applyGeo(); persist(); }),
+      mk('—', 'Thu nhỏ / khôi phục (giữ nguyên kích thước trước đó)', () => { geo.min = !geo.min; applyGeo(); persist(); }),
       mk('▢', 'Phóng to toàn màn hình / khôi phục', () => { geo.max = !geo.max; if (geo.max) geo.min = false; applyGeo(); persist(); }),
       mk('✕', 'Đóng', hide),
     );
@@ -184,7 +187,7 @@ function main() {
     // kéo cửa sổ bằng thanh tiêu đề
     let drag: { px: number; py: number; x: number; y: number } | null = null;
     bar.onpointerdown = (e) => {
-      if (geo.max || e.button !== 0) return;
+      if ((geo.max && !geo.min) || e.button !== 0) return;
       bar.setPointerCapture(e.pointerId);
       drag = { px: e.clientX, py: e.clientY, x: geo.x, y: geo.y };
     };
@@ -227,8 +230,7 @@ function main() {
   /** Cửa sổ đang đóng → mở lại; đang mở → thu nhỏ; đang thu nhỏ → khôi phục (trả focus bàn phím cho tool). */
   function toggleWindow() {
     if (!host) { show(); return; }
-    geo.min = !geo.min;
-    if (geo.min) geo.max = false;
+    geo.min = !geo.min; // giữ nguyên cờ toàn màn hình: thu nhỏ rồi mở lại về đúng kích thước cũ
     applyGeo();
     persist();
     if (!geo.min) focusPanel();
@@ -270,7 +272,8 @@ function main() {
 
   /** Panel xin rộng hơn khi vào Batch Review: nới cửa sổ, không đổi vị trí nếu còn vừa màn hình. */
   function ensureWide() {
-    if (!host || geo.max) return;
+    if (!host) return;
+    if (geo.max) { geo.min = false; applyGeo(); persist(); return; } // đang toàn màn hình: chỉ mở lại nếu đang thu nhỏ
     const vw = window.innerWidth, vh = window.innerHeight;
     geo.min = false;
     geo.w = Math.max(geo.w, Math.min(vw - 20, 1400));
@@ -295,7 +298,7 @@ function main() {
     const my = ++focusSeq;
     const stale = () => my !== focusSeq;
     const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    if (minimize && host) { geo.min = true; geo.max = false; applyGeo(); persist(); } // nhường chỗ để thấy giao diện CVAT
+    if (minimize && host) { geo.min = true; applyGeo(); persist(); } // nhường chỗ để thấy giao diện CVAT
     if (targetFrame !== null) {
       // Luôn gửi lệnh đổi frame (không dựa vào số trong ô nhập: ô có thể đang hiện số vừa gõ mà CVAT chưa đổi frame).
       gotoFrame(targetFrame);

@@ -70,6 +70,26 @@ export function setAttrFrom(track: CvatTrack, spec: AttrSpec, f: number, value: 
   return { track: t, frames: [f] };
 }
 
+/**
+ * Đồng bộ attribute mutable TỪ frame f VỀ SAU: đặt giá trị tại f (tạo keyframe giữ nguyên hình dạng nếu chưa có) rồi ghi đè giá trị
+ * ở mọi keyframe sau f đang ghi attribute đó với giá trị khác. Keyframe sau f chưa ghi attribute thì tự kế thừa giá trị mới.
+ * Trả null nếu f không có box hoặc không có gì đổi.
+ */
+export function setAttrForward(track: CvatTrack, spec: AttrSpec, f: number, value: string): AttrChange | null {
+  if (!spec.mutable || !stateAt(track, f).cuboid) return null;
+  const first = setAttrFrom(track, spec, f, value);
+  const base = first?.track ?? track;
+  const frames = new Set(first?.frames ?? []);
+  const shapes = sortedShapes(base).map((sh): CvatShape => {
+    if (sh.outside || sh.frame <= f) return sh;
+    const e = entry(sh.attributes, spec.id);
+    if (!e || e.value === value) return sh;
+    frames.add(sh.frame);
+    return { ...sh, attributes: withEntry(sh.attributes, spec.id, value) };
+  });
+  return frames.size ? { track: { ...base, shapes }, frames: [...frames] } : null;
+}
+
 /** Khớp giá trị mong muốn với danh sách giá trị hợp lệ của attribute (bỏ khác biệt hoa/thường, dấu cách, gạch). */
 export function matchValue(spec: AttrSpec, wanted: string): string | null {
   const norm = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');

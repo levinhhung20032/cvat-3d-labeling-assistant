@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { setAttrAll, setAttrFrom, setAttrStatic, getAttr, type AttrChange, type AttrSpec, type LabelSpec } from '../shared/attributes';
+import { setAttrAll, setAttrForward, setAttrFrom, setAttrStatic, getAttr, type AttrChange, type AttrSpec, type LabelSpec } from '../shared/attributes';
 import { suggestAttributes, type AttrHint } from '../shared/attrSuggest';
 import type { Cuboid } from '../shared/cuboid';
 import type { CvatTrack } from '../shared/types';
@@ -33,6 +33,9 @@ export function AttributePanel({ track, num, label, spec, frame, box, pedestrian
     else if (mode === 'all') run(setAttrAll(track, h.spec, h.suggested), `${h.spec.name} → ${h.suggested} cho cả track.`);
     else run(setAttrFrom(track, h.spec, f, h.suggested), `${h.spec.name} → ${h.suggested} từ frame ${f} (tới keyframe kế tiếp có ghi attribute).`);
   };
+  /** Đồng bộ giá trị hiện tại (hoặc giá trị gợi ý) của attribute đổi theo frame từ frame đang chọn về mọi frame sau. */
+  const forward = (a: AttrSpec, value: string) =>
+    run(setAttrForward(track, a, f, value), `${a.name} = ${value} từ frame ${f} về sau (ghi đè các keyframe sau có giá trị khác).`);
   const acceptAll = () => {
     const live = hints.filter((h) => !ign.has(keyOf(h)));
     if (!live.length) { setNote('Không có gợi ý nào.'); return; }
@@ -77,6 +80,14 @@ export function AttributePanel({ track, num, label, spec, frame, box, pedestrian
                     {!options(a).includes(eff) && <option value="">{eff || '—'}</option>}
                     {options(a).map((v) => <option key={v} value={v}>{v}</option>)}
                   </select>
+                  {a.mutable && (
+                    <div>
+                      <button
+                        onClick={() => forward(a, eff)} style={{ padding: '0 5px', fontSize: 11, marginTop: 2 }}
+                        title={`Đặt ${a.name} = ${eff} từ frame ${f} và đồng bộ cho mọi frame về sau (ghi đè các keyframe sau đang có giá trị khác). Hoàn tác được.`}
+                      >⤵ đồng bộ về sau</button>
+                    </div>
+                  )}
                   {cur === undefined && <div style={{ fontSize: 10, color: '#b00' }}>chưa đặt (mặc định {a.def || '—'})</div>}
                 </td>
                 <td style={{ padding: '3px 0' }}>
@@ -86,6 +97,7 @@ export function AttributePanel({ track, num, label, spec, frame, box, pedestrian
                       <span style={{ color: CONF_COLOR[h.confidence] }}>(độ tin cậy {h.confidence})</span> — {h.reason}
                       <div>
                         <button onClick={() => apply(h, 'default')}>{a.mutable ? `✔ nhận từ frame ${f}` : '✔ nhận'}</button>{' '}
+                        {a.mutable && <button onClick={() => forward(a, h.suggested)} title={`Nhận ${h.suggested} từ frame ${f} và đồng bộ về mọi frame sau`}>✔ nhận về sau</button>}{' '}
                         {a.mutable && <button onClick={() => apply(h, 'all')}>✔ nhận cho cả track</button>}{' '}
                         <button onClick={() => ignoreStore.set([keyOf(h)], true)}>✖ bỏ qua</button>
                       </div>

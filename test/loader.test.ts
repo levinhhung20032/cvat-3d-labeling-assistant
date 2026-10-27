@@ -78,3 +78,33 @@ describe('đọc PCD', () => {
     expect(fast.xyz[3]).toBe(1.5);
   });
 });
+
+describe('thử lại khi tải lỗi và đếm frame đã tải', () => {
+  const mk = (failTimes: number) => {
+    let calls = 0;
+    const loader = new CloudLoader(64, 6, 2, 5,
+      async () => { calls++; if (calls <= failTimes) throw new Error('HTTP 502'); return new ArrayBuffer(0); },
+      () => ({ count: 0, xyz: new Float32Array(0), rgb: null }) as PointCloud);
+    return { loader, get calls() { return calls; } };
+  };
+  it('lỗi thoáng qua: tự thử lại rồi thành công, has() báo đã tải', async () => {
+    vi.useFakeTimers();
+    const s = mk(2);
+    const p = s.loader.get(7, 0);
+    await vi.advanceTimersByTimeAsync(5000);
+    await expect(p).resolves.toBeDefined();
+    expect(s.calls).toBe(3);
+    expect(s.loader.has(7)).toBe(true);
+    vi.useRealTimers();
+  });
+  it('lỗi kéo dài: sau 4 lần mới báo lỗi, has() vẫn false', async () => {
+    vi.useFakeTimers();
+    const s = mk(99);
+    const p = s.loader.get(9, 0).then(() => 'ok', (e: Error) => e.message);
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(await p).toContain('502');
+    expect(s.calls).toBe(4);
+    expect(s.loader.has(9)).toBe(false);
+    vi.useRealTimers();
+  });
+});

@@ -7,6 +7,7 @@ export class Cancelled extends Error {}
 interface Task {
   n: number;
   prio: number; // nhỏ = ưu tiên cao; 0 = cửa sổ đang xem
+  tries?: number; // số lần đã thử lại sau lỗi tải
   ok: (p: PointCloud) => void;
   fail: (e: Error) => void;
 }
@@ -35,6 +36,8 @@ export class CloudLoader {
   ) {}
 
   cachedCount() { return this.cache.size; }
+  /** Frame đã có trong bộ nhớ (dùng đếm "đã tải" của cửa sổ, không phụ thuộc cột nào vừa được dựng). */
+  has(n: number) { return this.cache.has(n); }
   /** Tốc độ tải thực tế (giây/frame, tính trên ~12 frame hoàn thành gần nhất); null nếu chưa đủ số liệu. */
   secondsPerFrame(): number | null {
     const f = this.finished;
@@ -91,6 +94,7 @@ export class CloudLoader {
       this.queue.shift();
       this.running++;
       const urgent = t.prio === 0;
+      let retry = false;
       if (urgent) this.runningUrgent++;
       this.load(t.n)
         .then((buf) => this.parse(buf))
@@ -102,9 +106,15 @@ export class CloudLoader {
           t.ok(pc);
           this.emit();
         })
-        .catch((e) => t.fail(e instanceof Error ? e : new Error(String(e))))
+        .catch((e) => {
+          // Lỗi mạng / máy chủ tạm thời (quá tải khi nhiều kết nối song song…): thử lại tối đa 3 lần với thời gian chờ tăng dần, rồi mới báo lỗi.
+          const tries = (t.tries ?? 0) + 1;
+          console.warn('[CVLA] tải frame', t.n, 'lỗi (lần', tries, '):', String(e));
+          if (tries < 4) { retry = true; t.tries = tries; setTimeout(() => { this.queue.push(t); this.pump(); }, 700 * tries); }
+          else t.fail(e instanceof Error ? e : new Error(String(e)));
+        })
         .finally(() => {
-          this.pending.delete(t.n);
+          if (!retry) this.pending.delete(t.n);
           this.running--;
           if (urgent) this.runningUrgent--;
           this.pump();
