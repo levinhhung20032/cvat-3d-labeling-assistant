@@ -28,6 +28,7 @@ import { qcKey } from '../shared/qc';
 import { onAction } from './actions';
 import { fitReport, type FitReport } from '../shared/fit';
 import { groundSnap, tiltFromPlane, type GroundResult } from '../shared/ground';
+import { refineGround, type GroundFrameIn } from '../shared/groundTrack';
 import { motionJump, type MotionWarning } from '../shared/motion';
 import { trackIssues, type FrameIssue, type IssueKind } from '../shared/qcrules';
 import { flagKey, flagState, type FlagMark, type FlagState } from '../shared/qcimport';
@@ -46,15 +47,15 @@ const ZOOM_MIN = 0.5, ZOOM_MAX = 8;
 const CELL_MIN = 110, CELL_MAX = 520;
 
 // --- tùy chọn hiển thị, nhớ theo từng người dùng (chỉ là tiện ích, không quan trọng nếu mất) ---
-interface Prefs { auto: boolean; size: number; slabMargin: number; perWin: number; keyOnly: boolean; tilt: boolean; gap: number }
-const PREFS_DEFAULT: Prefs = { auto: true, size: 200, slabMargin: 0.5, perWin: 6, keyOnly: false, tilt: true, gap: 28 };
+interface Prefs { auto: boolean; size: number; slabMargin: number; perWin: number; keyOnly: boolean; tilt: boolean; gap: number; ground: boolean }
+const PREFS_DEFAULT: Prefs = { auto: true, size: 200, slabMargin: 0.5, perWin: 6, keyOnly: false, tilt: true, gap: 28, ground: true };
 const loadPrefs = (): Prefs => {
   try {
     const p = JSON.parse(kv.get('cvla-prefs') ?? '{}') as Partial<Prefs>;
     const num = (v: unknown, d: number, lo: number, hi: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
     return {
       auto: p.auto ?? true, size: num(p.size, 200, CELL_MIN, CELL_MAX), slabMargin: num(p.slabMargin, 0.5, 0, 3),
-      perWin: Math.round(num(p.perWin, 6, 2, 30)), keyOnly: p.keyOnly === true, tilt: p.tilt !== false, gap: Math.round(num(p.gap, 28, 4, 80)),
+      perWin: Math.round(num(p.perWin, 6, 2, 30)), keyOnly: p.keyOnly === true, tilt: p.tilt !== false, gap: Math.round(num(p.gap, 28, 4, 80)), ground: p.ground !== false,
     };
   } catch { return { ...PREFS_DEFAULT }; }
 };
@@ -187,10 +188,10 @@ function toRanges(frames: number[]): [number, number][] {
 }
 const CHIP: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 11, lineHeight: '16px', padding: '0 4px', borderRadius: 8, whiteSpace: 'nowrap', height: 16 };
 const CHIP_BTN: React.CSSProperties = { padding: '0 3px', lineHeight: 1, height: 14, fontSize: 10 };
-interface FileFlag { kind: IssueKind; state: FlagState }
+interface FileFlag { kind: IssueKind; state: FlagState; msg?: string; det: boolean }
 const NO_FLAGS: FileFlag[] = [];
 
-function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame }: {
+function Column({ groundOv, groundOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame }: {
   onFocusFrame: (f: number) => void;
   fileFlags: FileFlag[]; onMarkFlag: (f: number, kind: IssueKind, mark: FlagMark | null) => void;
   tiltOn: boolean;
@@ -200,6 +201,7 @@ function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fi
   onToggleOutside: (f: number) => void; onHover: (f: number | null) => void; scene: Scene;
   motion: MotionWarning | null; motionIgnored: boolean; onIgnoreMotion: (f: number, on: boolean) => void;
   autoSnap: boolean; onSnap: (f: number, g: GroundResult | null) => void; onGround: (f: number) => void;
+  groundOv: GroundResult | null; groundOn: boolean; // mặt đường đã tinh chỉnh theo các frame khác của object (BatchReview tính); groundOn: công tắc dò mặt đất
   ignored: boolean; onIgnore: (f: number, on: boolean) => void;
   fixed: boolean; onSuggest: (f: number, s: Suggestion | null) => void; onAccept: (f: number, s: Suggestion) => void;
   warn: boolean; onFit: (f: number, r: FitReport | null) => void;
@@ -243,7 +245,7 @@ function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fi
   const bad = fit && fit.level !== 'ok' && !(ignored && fit.level === 'misfit') ? fit : null;
   useEffect(() => { onFit(f, bad); }, [f, bad]);
   // Ground snap: ước lượng mặt đường dưới chân box.
-  const snap = useMemo(() => (loc && st.cuboid ? groundSnap(loc, st.cuboid.sx, st.cuboid.sy, st.cuboid.sz) : null), [loc, st.cuboid]);
+  const snap = groundOn ? groundOv : null;
   useEffect(() => { onSnap(f, snap); }, [f, snap]);
   // Cảnh báo vật đi xa bất thường: dấu × cam ở vị trí dự đoán từ chuyển động các frame trước.
   const shownMotion = motion && !motionIgnored ? motion : null;
@@ -303,9 +305,9 @@ function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fi
         {bad && sug && <span style={{ ...CHIP, background: '#ffe0f7', color: '#5a0040' }} title={bad.message}>⚠ lệch</span>}
         {issues.filter((i) => !issueIgnored(i.kind)).map((i) => <span key={i.kind} style={{ ...CHIP, background: '#f9d4ee', color: '#5a0040' }} title={i.message}>⚠ {i.kind}</span>)}
         {overlap.map((o) => <span key={o.other} style={{ ...CHIP, background: '#ffd9a8', color: '#5a2d00' }} title={`Chồng với #${o.other} (IoU ${Math.round(o.ratio * 100)}%)`}>⚠ O #{o.other}</span>)}
-        {fileFlags.filter((ff) => ff.state === 'open').map((ff) => <span key={ff.kind} style={{ ...CHIP, background: '#ffd6d6', color: '#600' }} title="Flag từ file QC, tool vẫn thấy lỗi">QC {ff.kind}</span>)}
+        {fileFlags.filter((ff) => ff.state === 'open').map((ff) => <span key={ff.kind} style={{ ...CHIP, background: '#ffd6d6', color: '#600' }} title="Flag từ file QC mà tool không tự phát hiện">QC {ff.kind}</span>)}
         {shownMotion && <span style={{ ...CHIP, background: '#ffe9c7', color: '#6b3a00' }} title={shownMotion.message}>⚠ đi xa</span>}
-        {snap && Math.abs(snap.dz) >= 0.08 && <span style={{ ...CHIP, background: '#eaf6d8', color: '#2d5a00' }} title="Đáy box lơ lửng / chìm so với mặt đường (phím G để snap)">⏬ {snap.dz < 0 ? '↑' : '↓'}{Math.abs(snap.dz).toFixed(2)}m</span>}
+        {snap && Math.abs(snap.dz) >= 0.08 && <span style={{ ...CHIP, background: '#eaf6d8', color: '#2d5a00' }} title={snap.source === 'predicted' ? 'Đáy box lơ lửng / chìm so với mặt đường DỰ ĐOÁN từ các frame khác của cùng object (phép đo ở frame này lệch hoặc thiếu). Phím G để snap.' : 'Đáy box lơ lửng / chìm so với mặt đường (phím G để snap)'}>⏬ {snap.source === 'predicted' ? '~' : ''}{snap.dz < 0 ? '↑' : '↓'}{Math.abs(snap.dz).toFixed(2)}m</span>}
       </div>
       {VIEWS.map((v) => (
         <Cell key={v} frame={M} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} autoSnap={autoSnap} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} />
@@ -349,7 +351,7 @@ function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fi
         </div>
       ))}
       {fileFlags.map((ff) => (
-        <div key={ff.kind} style={{ background: ff.state === 'open' ? '#ffd6d6' : ff.state === 'cleared' ? '#dff5df' : '#eee', color: ff.state === 'open' ? '#600' : '#333', fontSize: 11, padding: '1px 4px' }} title="Flag từ file QC đã nạp (tab QC)">
+        <div key={ff.kind} style={{ background: ff.state === 'open' ? '#ffd6d6' : ff.state === 'cleared' ? '#dff5df' : '#eee', color: ff.state === 'open' ? '#600' : '#333', fontSize: 11, padding: '1px 4px' }} title={`Flag từ file QC đã nạp (tab QC); khi trùng với cảnh báo tự động thì chỉ hiện cảnh báo tự động${ff.msg ? ` — tool thấy: ${ff.msg}` : ''}`}>
           QC file: <b>{ff.kind}</b> {ff.state === 'open' ? 'còn lỗi' : ff.state === 'cleared' ? 'đã hết' : ff.state === 'ignore' ? 'bỏ qua' : 'đã sửa'}{' '}
           {(ff.state === 'open' || ff.state === 'cleared') && (
             <>
@@ -385,7 +387,7 @@ function Column({ f, size, st, refCub, half, locHalf, selected, edited, warn, fi
       )}
       {snap && Math.abs(snap.dz) >= 0.08 && (
         <div style={{ background: '#eaf6d8', color: '#2d5a00', fontSize: 11, padding: '1px 4px' }}>
-          ⏬ đáy {snap.dz < 0 ? 'lơ lửng' : 'chìm'} {Math.abs(snap.dz).toFixed(2)} m{snap.method === 'plane' ? ` · dốc ${snap.slopeDeg!.toFixed(1)}°${snap.steep ? ' — dốc lớn, đáy chỉ chạm một phía' : ''}` : snap.flat ? '' : ' (mặt đất không phẳng)'}{' '}
+          ⏬ đáy {snap.dz < 0 ? 'lơ lửng' : 'chìm'} {Math.abs(snap.dz).toFixed(2)} m{snap.source === 'predicted' ? ' · mặt đường dự đoán từ các frame khác của object' : ''}{snap.method === 'plane' && snap.slopeDeg !== undefined ? ` · dốc ${snap.slopeDeg.toFixed(1)}°${snap.steep ? ' — dốc lớn, đáy chỉ chạm một phía' : ''}` : snap.flat ? '' : ' (mặt đất không phẳng)'}{' '}
           <button onClick={(e) => { e.stopPropagation(); onGround(f); }} style={{ padding: '0 4px' }} title="Dời box theo z để đáy chạm mặt đường (phím G)">snap</button>
         </div>
       )}
@@ -557,7 +559,7 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
   const locHalf = baseHalf / ZOOM_MIN;
 
   // Luật QC (S K Z H D) tính trên cả job để so mốc kích thước và frame liền trước đúng.
-  const issueMap = useMemo(() => {
+  const rawIssueMap = useMemo(() => {
     const m = track ? trackIssues(track, row?.label ?? '', Array.from({ length: stop - start + 1 }, (_, i) => start + i)) : new Map<number, FrameIssue[]>();
     // Trôi box (đứng yên mà box nhích): tính chéo giữa các frame ở App, gộp vào cùng danh sách cảnh báo của frame.
     for (const d of drift.get(num) ?? []) {
@@ -574,11 +576,22 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
       if (fl.num !== num) continue;
       const det = fl.kind === 'O'
         ? overlaps.some((o) => o.frame === fl.frame && (o.a === num || o.b === num))
-        : (issueMap.get(fl.frame) ?? []).some((i) => i.kind === fl.kind);
-      m.set(fl.frame, [...(m.get(fl.frame) ?? []), { kind: fl.kind, state: flagState(flagMarks[flagKey(job.id, fl)], det) }]);
+        : (rawIssueMap.get(fl.frame) ?? []).some((i) => i.kind === fl.kind);
+      const msg = fl.kind === 'O'
+        ? overlaps.filter((o) => o.frame === fl.frame && (o.a === num || o.b === num)).map((o) => `chồng với #${o.a === num ? o.b : o.a} (IoU ${Math.round(o.ratio * 100)}%)`).join('; ')
+        : (rawIssueMap.get(fl.frame) ?? []).find((i) => i.kind === fl.kind)?.message;
+      m.set(fl.frame, [...(m.get(fl.frame) ?? []), { kind: fl.kind, state: flagState(flagMarks[flagKey(job.id, fl)], det), msg, det }]);
     }
     return m;
-  }, [qcImports, flagMarks, issueMap, overlaps, job.id, num]);
+  }, [qcImports, flagMarks, rawIssueMap, overlaps, job.id, num]);
+  // Lỗi trùng với flag của file QC (cùng object, frame, loại) thì chỉ lấy MỘT: ưu tiên QC TỰ ĐỘNG (dự đoán); flag file trùng bị ẩn, cảnh báo tự động ghi chú "file QC cũng báo".
+  const fileCover = useMemo(() => new Set([...fileFlags].flatMap(([f, list]) => list.filter((x) => x.det).map((x) => `${f}:${x.kind}`))), [fileFlags]);
+  const issueMap = useMemo(() => {
+    if (!fileCover.size) return rawIssueMap;
+    const m = new Map<number, FrameIssue[]>();
+    for (const [f, list] of rawIssueMap) m.set(f, list.map((i) => (fileCover.has(`${f}:${i.kind}`) ? { ...i, message: `${i.message} · file QC cũng báo` } : i)));
+    return m;
+  }, [rawIssueMap, fileCover]);
   const openIssues = (f: number) => (issueMap.get(f) ?? NO_ISSUES).filter((i) => !ign.has(issueKey(job.id, num, f, i.kind)));
   // Tóm tắt lỗi của CẢ TRACK (không chỉ cửa sổ đang xem): luật QC theo loại, và đi xa bất thường; bỏ các frame đã bỏ qua.
   const trackSummary = useMemo(() => {
@@ -727,6 +740,7 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
   };
   /** Ground snap: dời box theo z để đáy chạm mặt đường (vào nháp, thành keyframe, hoàn tác được). */
   const groundFrame = (f: number): boolean => {
+    if (!prefs.ground) return false;
     const st = track ? stateAt(track, f) : null;
     const g = snaps.get(f);
     if (!st?.cuboid || !g) return false;
@@ -743,6 +757,7 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
     return true;
   };
   const groundSelectedOrAll = () => {
+    if (!prefs.ground) { setNote('Dò mặt đất đang tắt (bật ở nhóm Gợi ý & mặt đất).'); return; }
     const tgt = hoverRef.current ?? selFrame; // trỏ chuột > frame đã chọn > cả cửa sổ
     const list = tgt !== null ? [tgt] : frames;
     const done = list.filter((f) => groundFrame(f));
@@ -755,6 +770,43 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
 
   const [cached, setCached] = useState(pointClouds.cachedCount());
   useEffect(() => pointClouds.subscribe(() => setCached(pointClouds.cachedCount())), []);
+  // Mặt đường của object theo CẢ track: đo từng frame (đã tải point cloud) rồi tinh chỉnh bằng các frame lân cận (đo lẻ loi bị thay bằng dự đoán).
+  const [series, setSeries] = useState<Map<number, GroundResult | null>>(new Map());
+  // Độ khớp box ↔ cụm điểm (lệch / ít điểm) của CẢ track, tính chung vòng lặp với mặt đường; checked = số frame đã có point cloud để kiểm.
+  const [fitSeries, setFitSeries] = useState<{ fits: Map<number, FitReport>; checked: number }>({ fits: new Map(), checked: 0 });
+  useEffect(() => {
+    if (!(prefs.ground || warn) || !track) { setSeries(new Map()); setFitSeries({ fits: new Map(), checked: 0 }); return; }
+    let live = true;
+    const timer = window.setTimeout(async () => {
+      const ins: GroundFrameIn[] = [];
+      const fits = new Map<number, FitReport>();
+      let checked = 0;
+      for (let f = start; f <= stop && live; f++) {
+        const c = stateAt(track, f).cuboid;
+        const pc = c ? pointClouds.peek(f) : undefined;
+        if (!c || !pc) continue; // chưa tải point cloud thì chưa đo / chưa dự đoán frame đó
+        const loc = localize(pc, c, 16);
+        checked++;
+        if (prefs.ground) ins.push({ f, z: c.z, sz: c.sz, raw: groundSnap(loc, c.sx, c.sy, c.sz) });
+        if (warn) fits.set(f, fitReport(loc, c.sx, c.sy, c.sz));
+        if (checked % 3 === 0) await new Promise((r) => window.setTimeout(r, 0));
+      }
+      if (live) { setSeries(prefs.ground ? refineGround(ins) : new Map()); setFitSeries({ fits, checked }); }
+    }, 300);
+    return () => { live = false; window.clearTimeout(timer); };
+  }, [track, prefs.ground, warn, cached, start, stop]);
+  // Tất cả lỗi đang có của object (cả track): lệch / ít điểm, đáy lơ lửng / chìm, chồng lấn; bỏ các frame đã bỏ qua.
+  const allWarn = useMemo(() => {
+    const misfit: number[] = [], sparse: number[] = [], ground: number[] = [], overl: number[] = [];
+    for (const [f, r] of fitSeries.fits) {
+      if (r.level === 'misfit' && !ign.has(ignoreKey(job.id, num, f))) misfit.push(f);
+      else if (r.level === 'sparse') sparse.push(f);
+    }
+    if (prefs.ground) for (const [f, g] of series) if (g && Math.abs(g.dz) >= 0.08) ground.push(f);
+    for (const f of ovAt.keys()) overl.push(f);
+    const asc = (a: number, b: number) => a - b;
+    return { misfit: misfit.sort(asc), sparse: sparse.sort(asc), ground: ground.sort(asc), overl: overl.sort(asc) };
+  }, [fitSeries, series, ovAt, ign, job.id, num, prefs.ground]);
 
   // Nhảy tới frame hiện tại của CVAT khi đồng bộ.
   useEffect(() => {
@@ -825,10 +877,21 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
           <legend style={{ fontSize: 11, fontWeight: 700, color: '#456', padding: '0 4px' }}>QC & cảnh báo</legend>
         <label title="QC mode: hiện ô ghi chú ở mỗi cột frame (xuất Excel ở tab QC)" style={{ fontWeight: 600 }}><input type="checkbox" checked={qcOn} onChange={(e) => qcStore.setMode(e.target.checked)} /> QC</label>
         <label title="Cảnh báo box không bao đúng cụm điểm (điểm lọt ra ngoài box) hoặc dưới 6 điểm"><input type="checkbox" checked={warn} onChange={(e) => setWarn(e.target.checked)} /> cảnh báo lệch</label>
-        {warn && (misfitFrames.length > 0 || sparseFrames.length > 0) && (
-          <span style={{ color: '#a0006e', fontWeight: 600 }}>
-            ⚠ {misfitFrames.length ? `lệch: frame ${misfitFrames.join(', ')}` : ''}{misfitFrames.length && sparseFrames.length ? ' · ' : ''}{sparseFrames.length ? `ít điểm: frame ${sparseFrames.join(', ')}` : ''}
+        {([
+          ['lệch', allWarn.misfit, '#a0006e', 'Box không bao đúng cụm điểm (cả track, các frame đã tải point cloud)'],
+          ['ít điểm', allWarn.sparse, '#a0006e', 'Dưới 6 điểm trong box (cả track, các frame đã tải point cloud)'],
+          ['⏬ đáy lơ lửng / chìm', allWarn.ground, '#2d5a00', 'Đáy box cách mặt đường từ 8 cm (cả track, theo mặt đường đã tinh chỉnh bằng các frame khác)'],
+          ['chồng lấn', allWarn.overl, '#b45a00', 'Box chồng lên object khác (xét chéo giữa các ID)'],
+        ] as [string, number[], string, string][]).filter(([, fr]) => fr.length > 0).map(([name, fr, color, tip]) => (
+          <span key={name} style={{ color, fontWeight: 600 }} title={tip + '. Bấm một đoạn để nhảy tới frame đầu của đoạn.'}>
+            ⚠ {name} ({fr.length}):{' '}
+            {toRanges(fr).map(([x, y]) => (
+              <button key={x} onClick={() => goFrame(x)} style={{ padding: '0 3px', marginRight: 2, fontWeight: 600, color }}>{x === y ? x : `${x}–${y}`}</button>
+            ))}
           </span>
+        ))}
+        {warn && fitSeries.checked < (row?.assigned ?? 0) && (
+          <span style={{ color: '#666', fontSize: 11 }} title="Lệch / ít điểm / đáy chỉ kiểm được ở frame đã tải point cloud; đang tải nền các frame còn lại">(đã kiểm {fitSeries.checked}/{row?.assigned ?? 0} frame có box)</span>
         )}
         {trackSummary.byKind.map(([kind, fr]) => (
           <span key={kind} style={{ color: '#a0006e', fontWeight: 600 }} title="Cả track. S scale không đồng bộ, K kích thước ngoài ngưỡng, Z z ngoài ngưỡng, H đổi hướng đột ngột, D quá xa, T trôi box (vật đứng yên mà box nhích). Bấm một đoạn để nhảy tới frame đầu của đoạn.">
@@ -926,9 +989,12 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
         <button
           onClick={groundSelectedOrAll}
           title="Ground snap: ước lượng mặt đường quanh chân box (đường xanh lá nét đứt ở view Bên/Trước) rồi hạ/nâng box cho đáy chạm đất. Frame đang chọn, hoặc cả cửa sổ nếu chưa chọn. Phím G."
-        >⏬ Ground snap (G)</button>
+>⏬ Ground snap (G)</button>
+        <label title="Dò mặt đất: đo mặt đường quanh object ở từng frame và tinh chỉnh bằng các frame khác của cùng object (đo lẻ loi bị thay bằng dự đoán). Tắt: không còn chip ⏬, không có Ground snap (G) và tự bám mặt đất." style={{ fontWeight: 600 }}>
+          <input type="checkbox" checked={prefs.ground} onChange={(e) => updatePrefs({ ...prefs, ground: e.target.checked })} /> dò mặt đất
+        </label>
         <label title="Sau mỗi lần dời / đổi cỡ box bằng chuột, tự đặt lại độ cao cho đáy chạm mặt đường tại vị trí mới">
-          <input type="checkbox" checked={autoSnap} onChange={(e) => setAutoSnap(e.target.checked)} /> tự bám mặt đất khi kéo
+          <input type="checkbox" checked={autoSnap} disabled={!prefs.ground} onChange={(e) => setAutoSnap(e.target.checked)} /> tự bám mặt đất khi kéo
         </label>
         </fieldset>
       </div>
@@ -979,12 +1045,12 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
             onIgnore={(f, on) => ignoreFrames([f], on)}
             motion={c.mot} motionIgnored={ign.has(motionKey(job.id, num, c.f))}
             onIgnoreMotion={(f, on) => ignoreStore.set([motionKey(job.id, num, f)], on)}
-            autoSnap={autoSnap} onGround={(f) => { if (!groundFrame(f)) setNote('Không snap được frame này.'); }}
+            autoSnap={autoSnap && prefs.ground} groundOv={series.get(c.f) ?? null} groundOn={prefs.ground} onGround={(f) => { if (!groundFrame(f)) setNote('Không snap được frame này.'); }}
             onSnap={(f, g) => setSnaps((m) => (m.get(f) === g ? m : new Map(m).set(f, g)))}
             onSuggest={(f, s) => setSugs((m) => (m.get(f) === s ? m : new Map(m).set(f, s)))} onAccept={accept}
             onFit={(f, r) => setFits((m) => (m.get(f) === r ? m : new Map(m).set(f, r)))} onSelect={() => onPickSelect(c.f)}
             onLoaded={(f) => setLoaded((s) => new Set(s).add(f))}
-            onCommit={commit} onZoom={zoomBy} onToggleKf={toggleKf} overlap={ovAt.get(c.f) ?? []} overlayCubs={ovCubs.get(c.f) ?? EMPTY_CUBS} onIgnoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], true); setNote(`Đã bỏ qua cặp #${Math.min(num, o)}–#${Math.max(num, o)} (mọi frame).`); }} onOpenObject={setSelectedNum} tiltOn={prefs.tilt} onFocusFrame={onFocusFrame} fileFlags={fileFlags.get(c.f) ?? NO_FLAGS} onMarkFlag={(f, kind, mk) => qcFlagStore.mark(job.id, [{ num, frame: f, kind }], mk)} issues={issueMap.get(c.f) ?? NO_ISSUES} issueIgnored={(k) => ign.has(issueKey(job.id, num, c.f, k))} onIgnoreIssue={(f, k, on) => ignoreStore.set([issueKey(job.id, num, f, k)], on)} qcOn={qcOn} qcNote={qcNotes[qcKey(job.id, num, c.f)] ?? ''} onQcNote={(f, t) => qcStore.set(job.id, num, f, t)} onToggleOutside={toggleOutside} onHover={(f) => { hoverRef.current = f; onHoverFrame(f); }} scene={scene}
+            onCommit={commit} onZoom={zoomBy} onToggleKf={toggleKf} overlap={ovAt.get(c.f) ?? []} overlayCubs={ovCubs.get(c.f) ?? EMPTY_CUBS} onIgnoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], true); setNote(`Đã bỏ qua cặp #${Math.min(num, o)}–#${Math.max(num, o)} (mọi frame).`); }} onOpenObject={setSelectedNum} tiltOn={prefs.tilt} onFocusFrame={onFocusFrame} fileFlags={(fileFlags.get(c.f) ?? NO_FLAGS).filter((x) => !x.det)} onMarkFlag={(f, kind, mk) => qcFlagStore.mark(job.id, [{ num, frame: f, kind }], mk)} issues={issueMap.get(c.f) ?? NO_ISSUES} issueIgnored={(k) => ign.has(issueKey(job.id, num, c.f, k))} onIgnoreIssue={(f, k, on) => ignoreStore.set([issueKey(job.id, num, f, k)], on)} qcOn={qcOn} qcNote={qcNotes[qcKey(job.id, num, c.f)] ?? ''} onQcNote={(f, t) => qcStore.set(job.id, num, f, t)} onToggleOutside={toggleOutside} onHover={(f) => { hoverRef.current = f; onHoverFrame(f); }} scene={scene}
           />
         ))}
       </div>

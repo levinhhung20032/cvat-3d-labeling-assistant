@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { kv } from './storage';
 import { parseQc, qcKey, QC_MAX_LEN } from '../shared/qc';
+import type { NotesPlan } from '../shared/qcnotes';
 
 /** Ghi chú QC theo (job, ID, frame) và công tắc QC mode, lưu cục bộ trong extension (không rời máy trừ khi bấm xuất Excel). */
 const NOTES_KEY = 'cvla-qc';
@@ -30,5 +31,15 @@ export const qcStore = {
     notes = next;
     try { kv.set(NOTES_KEY, JSON.stringify(next)); } catch { /* bỏ qua */ }
     emit();
+  },
+  /** QC note import: thêm ghi chú mới; ghi chú trùng (ID, frame) chỉ bị ghi đè khi overwrite = true. Trả số liệu đã áp dụng. */
+  importNotes(jobId: number, plan: NotesPlan, overwrite: boolean): { added: number; overwritten: number } {
+    const next = { ...notes };
+    for (const n of plan.added) next[qcKey(jobId, n.num, n.frame)] = n.note.slice(0, QC_MAX_LEN);
+    if (overwrite) for (const c of plan.conflicts) next[qcKey(jobId, c.num, c.frame)] = c.incoming.slice(0, QC_MAX_LEN);
+    notes = next;
+    try { kv.set(NOTES_KEY, JSON.stringify(next)); } catch { /* bỏ qua */ }
+    emit();
+    return { added: plan.added.length, overwritten: overwrite ? plan.conflicts.length : 0 };
   },
 };

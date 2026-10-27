@@ -61,6 +61,24 @@ function readGrid(files: Record<string, Uint8Array>, path: string): string[][] {
   return grid;
 }
 
+/**
+ * Đọc một sheet của file xlsx thành lưới chuỗi. Ưu tiên sheet có tên trong `names` (theo thứ tự), không có thì lấy sheet đầu tiên.
+ * Dùng chung cho nhập ghi chú QC (QC note import) và đối chiếu (QC comparison).
+ */
+export function readSheetGrid(bytes: Uint8Array, names: string[]): { ok: true; grid: string[][]; sheet: string } | { ok: false; message: string } {
+  if (bytes.length > MAX_XLSX_BYTES) return { ok: false, message: 'File quá lớn (tối đa 20 MB).' };
+  let files: Record<string, Uint8Array>;
+  try { files = unzipSync(bytes, { filter: (f) => /^xl\/(workbook\.xml|_rels\/workbook\.xml\.rels|sharedStrings\.xml|worksheets\/[^/]+\.xml)$/.test(f.name) }); }
+  catch { return { ok: false, message: 'Không đọc được file: không phải .xlsx hợp lệ.' }; }
+  for (const n of names) {
+    const path = sheetPath(files, n);
+    if (path && files[path]) return { ok: true, grid: readGrid(files, path), sheet: n };
+  }
+  const first = Object.keys(files).filter((k) => k.startsWith('xl/worksheets/')).sort()[0];
+  if (!first) return { ok: false, message: 'File không có sheet nào.' };
+  return { ok: true, grid: readGrid(files, first), sheet: first.split('/').pop()! };
+}
+
 export type ParseResult = { ok: true; flags: QcFlag[]; tracks: number } | { ok: false; message: string };
 
 /** Đọc các flag từ sheet Matrix. Dòng tiêu đề là dòng có ô đầu "Track ID"; các cột sau đó có tiêu đề là số frame. */

@@ -27,6 +27,7 @@ export type ContentMessage = Envelope<typeof CONTENT_SOURCE> &
     | { type: 'loading' }
     | { type: 'cvatDbl'; num: number; frame: number | null } // bấm đúp vào object trong CVAT: mở rộng tool với object đó
     | { type: 'cvat'; num: number | null; frame: number | null } // object/frame đang chọn trong giao diện CVAT
+    | { type: 'focusFailed'; num: number; reason: string } // Focus không zoom được vào object trong CVAT (kèm lý do)
     | { type: 'error'; message: string }
     | {
         type: 'data';

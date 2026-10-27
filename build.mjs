@@ -54,4 +54,6 @@ for (const f of readdirSync(out, { recursive: true })) {
 }
 
 cpSync(firefox ? 'public/manifest.firefox.json' : 'public/manifest.json', `${out}/manifest.json`);
+// Icon extension (PNG 16/32/48/128; icon.svg là bản gốc để vẽ lại)
+for (const n of [16, 32, 48, 128]) cpSync(`public/icons/icon-${n}.png`, `${out}/icons/icon-${n}.png`);
 console.log(`Build xong → ${out}/`);

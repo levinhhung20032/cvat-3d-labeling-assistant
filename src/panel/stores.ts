@@ -26,6 +26,7 @@ export class CloudLoader {
   private listeners = new Set<() => void>();
 
   private runningUrgent = 0;
+  private pausedUntil = 0; // tải nền tạm dừng tới thời điểm này (nhường server cho giao diện CVAT đang nạp frame)
   private finished: number[] = []; // thời điểm (ms) hoàn thành của các frame gần đây, để đo tốc độ
 
   constructor(
@@ -36,8 +37,18 @@ export class CloudLoader {
   ) {}
 
   cachedCount() { return this.cache.size; }
+  /**
+   * Tạm dừng TẢI NỀN `ms` mili giây (yêu cầu khẩn của cửa sổ đang xem vẫn chạy). Dùng khi tool bảo CVAT chuyển frame / zoom:
+   * server sinh mỗi frame ~3 giây, nếu tải nền chiếm hết kết nối thì CVAT phải đợi rất lâu mới nạp xong frame.
+   */
+  pauseBackground(ms: number) {
+    this.pausedUntil = Math.max(this.pausedUntil, this.now() + ms);
+    setTimeout(() => this.pump(), ms + 50);
+  }
   /** Frame đã có trong bộ nhớ (dùng đếm "đã tải" của cửa sổ, không phụ thuộc cột nào vừa được dựng). */
   has(n: number) { return this.cache.has(n); }
+  /** Lấy point cloud nếu ĐÃ có trong bộ nhớ (không kích hoạt tải, không đổi thứ tự LRU). */
+  peek(n: number): PointCloud | undefined { return this.cache.get(n); }
   /** Tốc độ tải thực tế (giây/frame, tính trên ~12 frame hoàn thành gần nhất); null nếu chưa đủ số liệu. */
   secondsPerFrame(): number | null {
     const f = this.finished;
@@ -88,6 +99,7 @@ export class CloudLoader {
     while (this.queue.length) {
       this.queue.sort((a, b) => a.prio - b.prio || a.n - b.n);
       const t = this.queue[0]!;
+      if (t.prio !== 0 && this.now() < this.pausedUntil) break; // hàng đợi đã sắp theo ưu tiên: phía sau toàn tải nền
       const urgentActive = this.runningUrgent > 0 || this.queue.some((q) => q.prio === 0);
       const limit = t.prio === 0 ? this.maxTotal : urgentActive ? this.maxBackground : this.maxIdle;
       if (this.running >= limit) break;
@@ -123,7 +135,7 @@ export class CloudLoader {
   }
 }
 
-export const pointClouds = new CloudLoader(64, 6, 2, 5);
+export const pointClouds = new CloudLoader(64, 6, 2, 3);
 
 class Lru<V> {
   private m = new Map<number, Promise<V>>();

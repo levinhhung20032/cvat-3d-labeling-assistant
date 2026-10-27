@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { findOverlaps, groupPairs, intersectionArea, footprint, overlapIou, allowedIou } from '../src/shared/overlap';
-import { propagateSize, sameSize } from '../src/shared/dynsize';
+import { detectAnchors, propagateEdit, propagateSize, sameSize } from '../src/shared/dynsize';
+import { parseCuboid } from '../src/shared/cuboid';
 import { serializeCuboid, type Cuboid } from '../src/shared/cuboid';
 import { shape, track } from './fixtures';
 import type { CvatTrack } from '../src/shared/types';
@@ -58,5 +59,45 @@ describe('dynamic size tắt', () => {
     const t = tr([[0, cub(0, 0)]]);
     expect(propagateSize(t, { sx: 4, sy: 2, sz: 1.5 }).track).toBe(t);
     expect(sameSize({ sx: 1, sy: 2, sz: 3 }, { sx: 1, sy: 2, sz: 3 })).toBe(true);
+  });
+});
+
+describe('dynamic size tắt: đồng bộ thông minh theo mặt đứng yên', () => {
+  const b = (o: Partial<Cuboid> = {}): Cuboid => ({ x: 0, y: 0, z: 0.75, rx: 0, ry: 0, yaw: 0, sx: 4, sy: 2, sz: 1.5, ...o });
+  it('kéo cạnh trên xuống: nhận ra đáy đứng yên', () => {
+    expect(detectAnchors(b(), b({ sz: 1.0, z: 0.5 })).z).toBe('neg');
+    expect(detectAnchors(b(), b({ sz: 1.0, z: 1.0 })).z).toBe('pos'); // kéo cạnh dưới lên: nóc đứng yên
+    expect(detectAnchors(b(), b({ sz: 1.0, z: 0.75 })).z).toBe('center');
+    expect(detectAnchors(b(), b({ sz: 1.0, z: 3 })).z).toBe('center'); // vừa dời vừa đổi cỡ: không suy ra được
+    expect(detectAnchors(b(), b()).z).toBeNull();
+  });
+  it('mọi keyframe: đáy giữ nguyên, nóc hạ xuống (không căn theo tâm)', () => {
+    const t = tr([[0, b()], [5, b({ x: 5, z: 0.8 })], [9, b({ x: 9, z: 0.7 })]]);
+    const r = propagateEdit(t, b(), b({ sz: 1.0, z: 0.5 }));
+    const s5 = parseCuboid(r.track.shapes.find((s) => s.frame === 5)!.points);
+    expect(s5.sz).toBeCloseTo(1.0); expect(s5.z - s5.sz / 2).toBeCloseTo(0.05); // đáy cũ 0,8 − 0,75 = 0,05
+    const s9 = parseCuboid(r.track.shapes.find((s) => s.frame === 9)!.points);
+    expect(s9.z - s9.sz / 2).toBeCloseTo(-0.05);
+    expect(s5.x).toBe(5); // không đụng vị trí ngang
+  });
+  it('trục dọc xe theo hướng riêng của từng keyframe (yaw 90°)', () => {
+    const t = tr([[0, b()], [5, b({ yaw: Math.PI / 2, x: 10 })]]);
+    // kéo mũi xe lùi 0,5 m ở frame 0: đuôi (âm) đứng yên ⇒ tâm dời -0,25 theo trục dọc
+    const r = propagateEdit(t, b(), b({ sx: 3.5, x: -0.25 }));
+    const s5 = parseCuboid(r.track.shapes.find((s) => s.frame === 5)!.points);
+    expect(s5.sx).toBeCloseTo(3.5);
+    expect(s5.x).toBeCloseTo(10, 6);
+    expect(s5.y).toBeCloseTo(-0.25, 6); // trục dọc của box yaw 90° nằm theo +y, dời -0,25 theo nó
+  });
+  it('đổi đối xứng quanh tâm: giữ nguyên tâm của các keyframe khác (như propagateSize)', () => {
+    const t = tr([[0, b()], [5, b({ x: 5, z: 0.8 })]]);
+    const r = propagateEdit(t, b(), b({ sz: 1.0 }));
+    const s5 = parseCuboid(r.track.shapes.find((s) => s.frame === 5)!.points);
+    expect(s5.z).toBeCloseTo(0.8); expect(s5.sz).toBeCloseTo(1.0);
+  });
+  it('không đụng keyframe outside và keyframe đã cùng kích thước', () => {
+    const t = tr([[0, b({ sz: 1.0, z: 0.5 })], [3, b({ x: 3 }), true], [5, b({ sz: 1.0, z: 0.5, x: 5 })]]); // frame 0 là frame vừa sửa
+    const r = propagateEdit(t, b(), b({ sz: 1.0, z: 0.5 }));
+    expect(r.frames).toEqual([]);
   });
 });

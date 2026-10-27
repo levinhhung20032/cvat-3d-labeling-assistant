@@ -108,3 +108,24 @@ describe('thử lại khi tải lỗi và đếm frame đã tải', () => {
     vi.useRealTimers();
   });
 });
+
+describe('tạm dừng tải nền (nhường server cho CVAT)', () => {
+  it('đang tạm dừng: tải nền không chạy, yêu cầu khẩn vẫn chạy; hết hạn thì tải nền chạy tiếp', async () => {
+    vi.useFakeTimers();
+    const started: number[] = [];
+    let t = 0;
+    const loader = new CloudLoader(64, 6, 2, 5,
+      (n) => { started.push(n); return new Promise<ArrayBuffer>(() => {}); },
+      () => ({ count: 0, xyz: new Float32Array(0), rgb: null }) as PointCloud,
+      () => t);
+    loader.pauseBackground(1000);
+    loader.plan(new Map([[1, 5], [2, 6], [3, 7]]));
+    expect(started).toEqual([]);
+    void loader.get(9, 0);
+    expect(started).toEqual([9]);
+    t = 1100;
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(started.sort()).toEqual([1, 9]); // sau khi hết hạn tải nền chạy lại, nhưng còn yêu cầu khẩn đang chạy nên chỉ dùng tối đa 2 kết nối
+    vi.useRealTimers();
+  });
+});

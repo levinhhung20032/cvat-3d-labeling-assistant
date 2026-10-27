@@ -25,6 +25,7 @@ export interface GroundResult {
   n: number; // số điểm dùng để đo
   flat: boolean; // mặt đất đo được khá phẳng (độ trải thấp)
   method?: 'plane'; // khớp mặt phẳng từ mặt đường quanh / gần object
+  source?: 'measured' | 'predicted'; // measured: đo ở chính frame này; predicted: dự đoán từ các frame khác của cùng vật thể (groundTrack.ts)
   slopeDeg?: number; // độ dốc mặt đường đo được (chỉ khi method = plane)
   steep?: boolean; // dốc lớn: đáy box (phẳng) chỉ chạm một phía
   plane?: { a: number; b: number; c: number }; // mặt đường w = a·u + b·v + c trong hệ toạ độ của box (u theo yaw)

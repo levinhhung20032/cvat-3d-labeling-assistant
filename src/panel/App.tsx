@@ -1,4 +1,4 @@
-import { propagateSize } from '../shared/dynsize';
+import { propagateEdit, propagateSize } from '../shared/dynsize';
 import { findOverlaps, groupPairs } from '../shared/overlap';
 import { applyDraft, buildDraft, checkDraft, draftKey, type SavedDraft } from '../shared/draft';
 import { kv } from './storage';
@@ -19,6 +19,7 @@ import { UploadDialog } from './UploadDialog';
 import { QcPanel } from './QcPanel';
 import { DynSizePanel } from './DynSizePanel';
 import { Help } from './ui';
+import { pointClouds } from './stores';
 import { ShiftBadge, ShiftBanner } from './ShiftBar';
 import { findDrift } from '../shared/drift';
 import { DeleteDialog } from './DeleteDialog';
@@ -101,9 +102,11 @@ function reducer(s: Draft, a: Action): Draft {
     case 'edit':
       if (!s.work) return s;
       {
-        const t1 = upsertKeyframe(s.work.tracks[a.idx]!, a.frame, a.cub);
+        const prev = s.work.tracks[a.idx]!;
+        const before = stateAt(prev, a.frame).cuboid; // box trước khi sửa: để biết mặt nào đứng yên khi đổi kích thước
+        const t1 = upsertKeyframe(prev, a.frame, a.cub);
         if (!a.sizeAll) return applyChange(s, a.idx, t1, [a.frame]);
-        const r = propagateSize(t1, a.cub);
+        const r = before ? propagateEdit(t1, before, a.cub) : propagateSize(t1, a.cub);
         return applyChange(s, a.idx, r.track, [...new Set([a.frame, ...r.frames])]);
       }
     case 'track':
@@ -165,6 +168,8 @@ body { margin: 0; }
 .cvla-root button.cvla-shift { border-radius: 12px; padding: 1px 10px; background: #e6f4ea; border-color: #34a853; color: #14532d; font-size: 12px; }
 .cvla-root button.cvla-shift-ot { background: #ede9fe; border-color: #7c3aed; color: #4c1d95; }
 .cvla-root button.cvla-shift-warn { background: #fde68a; border-color: #d97706; color: #7a4100; font-weight: 700; }
+.cvla-root label.cvla-filebtn { display: inline-flex; align-items: center; border: 1px solid #9aa4b2; border-radius: 4px; padding: 2px 8px; background: #fff; cursor: pointer; }
+.cvla-root label.cvla-filebtn input { display: none; }
 .cvla-badge { display: inline-block; min-width: 16px; padding: 0 5px; margin-left: 6px; border-radius: 9px; background: #fff; color: #1d4ed8; font-size: 11px; line-height: 16px; text-align: center; }
 .cvla-help { display: inline-block; width: 15px; height: 15px; border-radius: 50%; border: 1px solid #8a94a3; color: #5b6573; font-size: 10px; line-height: 14px; text-align: center; cursor: help; margin-left: 4px; font-weight: 700; user-select: none; }
 .cvla-root button.cvla-num { border: 0; background: transparent; padding: 0 2px; min-width: 40px; text-align: left; text-decoration: underline dotted; }
@@ -278,6 +283,14 @@ export function App() {
           lastCvatFrame.current = m.frame;
           setFocus({ frame: m.frame, nonce: Date.now() });
         }
+      } else if (m.type === 'focusFailed') {
+        const why: Record<string, string> = {
+          'wrong-frame': 'CVAT chưa nạp xong frame cần xem (server đang bận?)',
+          'not-drawn': 'CVAT chưa vẽ object này ở frame hiện tại',
+          'no-canvas3d': 'không tìm thấy khung 3D của CVAT (đang ở chế độ khác?)',
+          'no-root': 'không đọc được giao diện CVAT',
+        };
+        setToast(`Focus: không zoom được vào object #${m.num} — ${why[m.reason] ?? m.reason}. Thử bấm Focus lại sau vài giây.`);
       } else if (m.type === 'rpc') resolveRpc(m.reqId, m.result);
       else if (m.type === 'binary') resolveBinary(m.reqId, m.buf, m.error);
     };
@@ -344,6 +357,7 @@ export function App() {
     }
     if (frame !== null) lastCvatFrame.current = frame;
     lastCvatNum.current = selectedNum;
+    pointClouds.pauseBackground(30_000); // nhường server cho CVAT nạp frame rồi mới zoom
     post({ type: 'cvatFocus', num: selectedNum, frame, zoom: true, minimize: true });
   };
 
@@ -368,6 +382,7 @@ export function App() {
       }
     }
     if (frame !== null) lastCvatFrame.current = frame; // không để cửa sổ tool nhảy theo chính thao tác này
+    if (frame !== null) pointClouds.pauseBackground(8_000);
     post({ type: 'cvatFocus', num, frame });
   };
   const ignAll = useIgnored();

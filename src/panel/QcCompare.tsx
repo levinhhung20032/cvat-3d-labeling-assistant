@@ -83,14 +83,14 @@ export function QcCompare({ jobId, tracks, labels, start, stop, onOpen }: {
 
   return (
     <div style={{ marginTop: 14, borderTop: '2px solid #1f2937', paddingTop: 6 }}>
-      <b>Đối chiếu file QC (.xlsx)</b>
+      <b>QC comparison</b> <span style={{ color: '#555', fontSize: 12 }}>— đối chiếu file báo cáo QC (.xlsx, sheet Matrix) với lỗi tool tự phát hiện</span>
       <p style={{ margin: '4px 0', color: '#555' }}>
         Chọn file báo cáo QC của job này; tool đọc sheet <code>Matrix</code> (ID × frame, ký hiệu S K Z H O D) ngay trên máy bạn, không gửi đi đâu.
         Mỗi flag được so với dữ liệu hiện tại (kể cả nháp chưa upload): <b>đã hết</b> nghĩa là tool không còn thấy lỗi đó. Bạn có thể đặt <b>ignore</b> (chấp nhận) hoặc <b>fixed</b> (đã sửa)
         cho từng loại, từng ID, hoặc cả lô ID đã tick. Số frame trong file được hiểu là số frame của job.
       </p>
       <p style={{ margin: '4px 0' }}>
-        <input type="file" accept=".xlsx" onChange={(e) => { void load(e.target.files?.[0]); e.target.value = ''; }} />
+        <label className="cvla-filebtn">⬆ Chọn file QC để đối chiếu (QC comparison){' '}<input type="file" accept=".xlsx" onChange={(e) => { void load(e.target.files?.[0]); e.target.value = ''; }} /></label>
         {imp && <button style={{ marginLeft: 8 }} onClick={() => { if (confirm('Bỏ file QC đã nạp và mọi đánh dấu ignore / fixed của job này?')) qcFlagStore.clearImport(jobId); }}>Bỏ file</button>}
       </p>
       {err && <p style={{ color: '#b00' }}>{err}</p>}

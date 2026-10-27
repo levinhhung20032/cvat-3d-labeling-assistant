@@ -315,14 +315,20 @@ function main() {
       // nên nhờ service worker; đợi tới khi CVAT vẽ xong object ở frame hiện tại.
       // Chỉ zoom khi CVAT đã ĐỔI SANG đúng frame cần xem và đã vẽ xong object (trạng thái frame đọc từ chính CVAT),
       // để không zoom vào vị trí của frame cũ. Đợi tối đa ~14 giây vì nạp point cloud mất vài giây.
-      let done = false;
-      for (let i = 0; i < 40 && !done; i++) {
+      let done = false, reason = '';
+      // Đợi tối đa ~45 giây: CVAT nạp frame mới mất vài giây, lâu hơn khi server đang bận (tool cũng tạm dừng tải nền trong lúc này).
+      for (let i = 0; i < 130 && !done; i++) {
         if (stale()) return;
         try {
-          const r = (await api.runtime.sendMessage({ type: 'cvla-focus3d', num, frame: targetFrame })) as { ok?: boolean } | undefined;
+          const r = (await api.runtime.sendMessage({ type: 'cvla-focus3d', num, frame: targetFrame })) as { ok?: boolean; reason?: string } | undefined;
           done = !!r?.ok;
-        } catch { break; }
+          reason = r?.reason ?? (r ? '' : 'no-response');
+        } catch (e) { reason = `send-error: ${String(e)}`; break; }
         if (!done) await wait(350);
+      }
+      if (!done && !stale()) {
+        log('Focus: không zoom được vào object', num, 'lý do:', reason);
+        send({ type: 'focusFailed', num, reason });
       }
       if (done && !stale()) {
         await wait(500);
