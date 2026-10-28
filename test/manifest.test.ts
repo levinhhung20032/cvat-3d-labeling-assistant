@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 
 interface Manifest {
   manifest_version: number; name: string; version: string;
-  permissions: string[]; host_permissions: string[];
+  permissions: string[]; host_permissions: string[]; optional_host_permissions?: string[];
+  options_ui?: { page: string; open_in_tab?: boolean };
   background: { service_worker?: string; scripts?: string[] };
   content_scripts?: unknown;
   web_accessible_resources: { resources: string[]; matches: string[] }[];
@@ -18,6 +19,10 @@ const HOST = 'https://cvat-a.example.com/*';
 describe.each([['Edge / Chrome', chromium], ['Firefox', firefox]] as const)('manifest %s — luật quyền riêng tư', (_n, m) => {
   it('chỉ có host của CVAT, không xin quyền cookies / tabs / history / webRequest', () => {
     expect(m.host_permissions).toEqual([HOST]);
+    // Máy chủ CVAT khác: người dùng tự thêm ở trang Cài đặt (chủ dự án duyệt 2026-10-28). Chỉ là quyền TÙY CHỌN https —
+    // không tên miền nào được cấp sẵn, trình duyệt hỏi người dùng cho từng tên miền.
+    expect(m.optional_host_permissions).toEqual(['https://*/*']);
+    expect(m.options_ui?.page).toBe('options.html');
     for (const bad of ['cookies', 'tabs', 'history', 'webRequest', 'webRequestBlocking', 'downloads', 'identity', '<all_urls>']) {
       expect(m.permissions).not.toContain(bad);
     }
@@ -39,6 +44,8 @@ describe('hai manifest đồng bộ', () => {
     expect(firefox.version).toBe(chromium.version);
     expect([...firefox.permissions].sort()).toEqual([...chromium.permissions].sort());
     expect(firefox.web_accessible_resources).toEqual(chromium.web_accessible_resources);
+    expect(firefox.optional_host_permissions).toEqual(chromium.optional_host_permissions);
+    expect(firefox.options_ui).toEqual(chromium.options_ui);
   });
   it('khác nhau đúng chỗ cần khác: Edge dùng service worker, Firefox dùng event page + id', () => {
     expect(chromium.background.service_worker).toBe('background.js');

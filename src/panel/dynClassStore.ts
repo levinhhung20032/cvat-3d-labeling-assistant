@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { kv } from './storage';
+import { kv, whenStorageReady } from './storage';
 import { isFixedSize } from '../shared/suggest';
 import type { DynRule } from '../shared/dynrule';
 
@@ -79,3 +79,6 @@ export const dynRuleStore = {
   clear(jobId: number) { writeRules(jobId, {}); },
 };
 export const useDynRules = (jobId: number) => useSyncExternalStore(subscribe, () => readRules(jobId));
+
+// Đặt cuối file (sau mọi khai báo): chế độ iframe gọi ngay lúc nạp module. Bỏ giá trị đọc trước khi kho sẵn sàng.
+whenStorageReady(() => { cache.clear(); ruleCache.clear(); emit(); });

@@ -1,5 +1,8 @@
 import { useState } from 'react';
 
+/** Ô / mục có số liệu CHƯA đủ (còn frame đang tải ngầm hoặc chưa tính): viền vàng nét đứt; tự trở lại bình thường khi xong. */
+export const PENDING_STYLE: React.CSSProperties = { outline: '2px dashed #d4a017', outlineOffset: -2, background: 'rgba(250, 204, 21, 0.16)' };
+
 /** Dấu (?) nhỏ: rê chuột để đọc hướng dẫn dài, thay cho dòng chữ chiếm chỗ cố định trên giao diện. */
 export function Help({ text }: { text: string }) {
   return <span className="cvla-help" title={text} aria-label={text}>?</span>;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fitReport, fitReportAt, type LocalPoints } from '../src/shared/fit';
+import { fitGroundOf, fitReport, fitReportAt, type LocalPoints } from '../src/shared/fit';
 
 const pts = (list: [number, number, number][]): LocalPoints => ({
   u: Float32Array.from(list.map((p) => p[0])),
@@ -59,5 +59,48 @@ describe('fitReportAt (point cloud thô, box có yaw và tâm bất kỳ)', () =
     expect(fitReportAt(xyz(few), few.length, box).level).toBe('sparse');
     expect(fitReportAt(xyz(many), many.length, box).level).toBe('ok');
     expect(fitReportAt(xyz(many), many.length, box).inside).toBe(fitReport(pts(many), 4, 2, 1.5).inside);
+  });
+});
+
+describe('đếm điểm của vật theo mặt đường ĐO ĐƯỢC (không theo một lớp cố định tính từ đáy box)', () => {
+  // box 4 x 2 x 1.5 → đáy ở w = -0.75
+  const groundAt = (w: number, holeUnderBox = false) => {
+    const out: [number, number, number][] = [];
+    for (let u = -4.6; u <= 4.6; u += 0.2) for (let v = -3.6; v <= 3.6; v += 0.2) {
+      if (holeUnderBox && Math.abs(u) <= 2.1 && Math.abs(v) <= 1.1) continue;
+      out.push([u, v, w]);
+    }
+    return out;
+  };
+  const body3 = list(3, (i) => [-0.5 + i * 0.5, 0, 0]);
+  it('box chìm 30 cm: lớp mặt đường nằm TRONG box bị bỏ → còn đúng 3 điểm của vật → ít điểm (cách cũ đếm mặt đường là điểm của vật)', () => {
+    const scene = [...groundAt(-0.45), ...body3];
+    expect(fitReport(pts(scene), 4, 2, 1.5).level).not.toBe('sparse'); // cách cũ: mặt đường ở -0.45 cao hơn đáy + 0,2 nên bị đếm
+    const r = fitReport(pts(scene), 4, 2, 1.5, undefined, { a: 0, b: 0, c: -0.45, clear: 0.2 });
+    expect(r.inside).toBe(3);
+    expect(r.level).toBe('sparse');
+  });
+  it('box lơ lửng 15 cm: không cắt mất bánh xe nằm sát đáy box (cách cũ bỏ cả 20 cm tính từ đáy)', () => {
+    const wheels = list(5, (i) => [-1.5 + i * 0.7, 0.8, -0.65]);
+    const scene = [...groundAt(-0.9), ...wheels, ...list(2, (i) => [i, 0, 0])];
+    expect(fitReport(pts(scene), 4, 2, 1.5).level).toBe('sparse');
+    const r = fitReport(pts(scene), 4, 2, 1.5, undefined, { a: 0, b: 0, c: -0.9, clear: 0.2 });
+    expect(r.inside).toBe(7);
+    expect(r.level).toBe('ok');
+  });
+  it('chỉ dùng mặt đường khi phép đo đủ căn cứ; dải bỏ qua = max(20 cm, 3 × phần dư)', () => {
+    const plane = { a: 0, b: 0, c: -0.9 };
+    expect(fitGroundOf({ confident: false, plane, rms: 0.01 })).toBeNull();
+    expect(fitGroundOf(null)).toBeNull();
+    expect(fitGroundOf({ confident: true, plane, rms: 0.01 })!.clear).toBeCloseTo(0.2, 9);
+    expect(fitGroundOf({ confident: true, plane, rms: 0.1 })!.clear).toBeCloseTo(0.3, 9);
+  });
+  it('fitReportAt tự đo mặt đường quanh box (point cloud thô): box chìm 30 cm vẫn nhận ra chỉ có 3 điểm của vật', () => {
+    const box = { x: 20, y: -5, z: 0.8, yaw: 0.6, sx: 4, sy: 2, sz: 1.5 };
+    const world = ([u, v, w]: [number, number, number]) => [box.x + u * Math.cos(box.yaw) - v * Math.sin(box.yaw), box.y + u * Math.sin(box.yaw) + v * Math.cos(box.yaw), box.z + w];
+    const scene = [...groundAt(-0.45), ...body3];
+    const r = fitReportAt(Float32Array.from(scene.flatMap(world)), scene.length, box);
+    expect(r.inside).toBe(3);
+    expect(r.level).toBe('sparse');
   });
 });

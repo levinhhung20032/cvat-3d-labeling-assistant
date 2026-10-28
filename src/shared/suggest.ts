@@ -1,5 +1,5 @@
 import type { LocalBox } from './edit';
-import { DEFAULT_FIT, type FitConfig, type LocalPoints } from './fit';
+import { DEFAULT_FIT, objectFloor, type FitConfig, type FitGround, type LocalPoints } from './fit';
 
 export interface Suggestion {
   box: LocalBox; // box đề xuất trong hệ tọa độ của box hiện tại
@@ -25,13 +25,14 @@ const fmt = (m: number) => `${Math.abs(m).toFixed(2)} m`;
  * Trả null khi quá ít điểm hoặc thay đổi không đáng kể. Chỉ là đề xuất — người dùng chấp nhận mới áp.
  */
 export function suggestBox(
-  p: LocalPoints, sx: number, sy: number, sz: number, fixedSize: boolean, cfg: FitConfig = DEFAULT_FIT,
+  p: LocalPoints, sx: number, sy: number, sz: number, fixedSize: boolean, cfg: FitConfig = DEFAULT_FIT, ground: FitGround | null = null,
 ): Suggestion | null {
   const hu = sx / 2, hv = sy / 2, hw = sz / 2;
+  const floor = objectFloor(hw, cfg, ground);
   const us: number[] = [], vs: number[] = [], ws: number[] = [];
   for (let i = 0; i < p.n; i++) {
     const u = p.u[i]!, v = p.v[i]!, w = p.w[i]!;
-    if (w < -hw + cfg.groundClear) continue; // mặt đường
+    if (w < floor(u, v)) continue; // mặt đường
     if (Math.abs(u) > hu + cfg.margin || Math.abs(v) > hv + cfg.margin || w > hw + cfg.margin) continue;
     us.push(u); vs.push(v); ws.push(w);
   }

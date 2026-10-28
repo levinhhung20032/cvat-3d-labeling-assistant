@@ -36,14 +36,16 @@ describe('chồng lấn', () => {
     expect(groupPairs(items)).toEqual([{ a: 1, b: 2, frames: [0], max: items[0]!.ratio }]);
   }
   });
-  it("ngưỡng theo nhóm: xe không cho chồng, người / xe máy cho tới IoU 0.5 · phần giao dưới 0.001 m² thì bỏ qua", () => {
+  it("không còn ngưỡng IoU: mọi nhóm đều báo khi có chồng · nới cho một nhóm bằng cấu hình vẫn được · phần giao dưới 0.001 m² thì bỏ qua", () => {
     {
-    expect(allowedIou('vehicles')).toBe(0); expect(allowedIou('Two-wheels')).toBe(0.5); expect(allowedIou('pedestrian')).toBe(0.5);
+    for (const l of ['vehicles', 'Two-wheels', 'pedestrian', 'animal', 'obstacle']) expect(allowedIou(l)).toBe(0);
     const a = tr([[0, cub(0, 0)]]);
     const b = tr([[0, cub(3.5, 0)]]); // giao 1 m² → IoU 1/15
     expect(findOverlaps([a, b], [0], ['vehicles', 'vehicles']).length).toBe(1);
-    expect(findOverlaps([a, b], [0], ['pedestrian', 'pedestrian'])).toEqual([]);
-    expect(findOverlaps([a, b], [0], ['pedestrian', 'vehicles']).length).toBe(1); // khác nhóm: lấy mức chặt hơn
+    expect(findOverlaps([a, b], [0], ['pedestrian', 'pedestrian']).length).toBe(1);
+    expect(findOverlaps([a, b], [0], ['pedestrian', 'vehicles']).length).toBe(1);
+    const loose = { allowed: { pedestrian: 0.5 }, defaultAllowed: 0, minArea: 0.001, minZ: -Infinity };
+    expect(findOverlaps([a, b], [0], ['pedestrian', 'pedestrian'], loose)).toEqual([]);
   }
     {
     const a = tr([[0, cub(0, 0)]]);

@@ -1,4 +1,4 @@
-import { kv } from './storage';
+import { kv, whenStorageReady } from './storage';
 import { useSyncExternalStore } from 'react';
 import type { Shift, ShiftUpload } from '../shared/shift';
 import { DEFAULT_SCHEDULE, normalizeSchedule, type Schedule } from '../shared/schedule';
@@ -32,7 +32,8 @@ const withActive = (fn: (s: Shift) => Shift) => commit(recordActivity(state, new
 
 // ---------- lịch ca tự động ----------
 const SCHEDULE_KEY = 'cvla-schedule';
-let schedule: Schedule = (() => { try { return normalizeSchedule(JSON.parse(kv.get(SCHEDULE_KEY) ?? 'null') as Partial<Schedule> | null); } catch { return DEFAULT_SCHEDULE; } })();
+const loadSchedule = (): Schedule => { try { return normalizeSchedule(JSON.parse(kv.get(SCHEDULE_KEY) ?? 'null') as Partial<Schedule> | null); } catch { return DEFAULT_SCHEDULE; } };
+let schedule: Schedule = loadSchedule();
 const schedListeners = new Set<() => void>();
 const schedSubscribe = (cb: () => void) => { schedListeners.add(cb); return () => { schedListeners.delete(cb); }; };
 export const useSchedule = () => useSyncExternalStore(schedSubscribe, () => schedule);
@@ -62,10 +63,21 @@ export const shiftStore = {
 
 // ---------- bỏ qua gợi ý ----------
 const IGN_KEY = 'cvla-ignore';
-let ignored: Set<string> = (() => {
+const loadIgnored = (): Set<string> => {
   try { return new Set<string>(JSON.parse(kv.get(IGN_KEY) ?? '[]') as string[]); } catch { return new Set<string>(); }
-})();
+};
+let ignored: Set<string> = loadIgnored();
 const ignListeners = new Set<() => void>();
+// Chế độ nhúng: module có thể được nạp TRƯỚC khi kho extension sẵn sàng (content script gộp một file) → nạp lại khi sẵn sàng,
+// không thì lần ghi đầu tiên sẽ ghi đè dữ liệu thật bằng trạng thái rỗng.
+whenStorageReady(() => {
+  state = load();
+  schedule = loadSchedule();
+  ignored = loadIgnored();
+  listeners.forEach((l) => l());
+  schedListeners.forEach((l) => l());
+  ignListeners.forEach((l) => l());
+});
 const ignSubscribe = (cb: () => void) => { ignListeners.add(cb); return () => { ignListeners.delete(cb); }; };
 const ignSnapshot = () => ignored;
 export const useIgnored = () => useSyncExternalStore(ignSubscribe, ignSnapshot);

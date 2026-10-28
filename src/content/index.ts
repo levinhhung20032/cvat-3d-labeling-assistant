@@ -1,6 +1,7 @@
 import { api } from '../shared/api';
 import { CONTENT_SOURCE, PANEL_SOURCE, type ContentMessage, type PanelMessage } from '../shared/protocol';
 import { comboOf } from '../shared/keymap';
+import { matchesPattern } from '../shared/hosts';
 import { checkIdsNotRemoved, trackIds } from '../shared/rules';
 import { CvatClient } from './cvatClient';
 import { activateObject, blurFrameInput, gotoFrame, readCvatState } from './cvatDom';
@@ -202,6 +203,14 @@ function main() {
 
     gotReady = false;
     inPage = null;
+    if (!iframeAllowed()) {
+      // Máy chủ người dùng tự thêm trong Cài đặt: trang của extension chỉ nhúng được vào các host trong web_accessible_resources của
+      // manifest (danh sách này không đổi được lúc chạy; mở cho mọi trang thì trang nào cũng nhúng được panel và đọc được bản nháp)
+      // → dựng panel thẳng trong trang ngay, không tạo iframe.
+      host.append(bar);
+      document.documentElement.append(host);
+      void fallbackToInPage('máy chủ thêm trong Cài đặt (ngoài danh sách nhúng iframe của manifest)', true);
+    } else {
     frame = document.createElement('iframe');
     frame.src = `${api.runtime.getURL('panel.html')}#session=${session}&origin=${encodeURIComponent(location.origin)}`;
     frame.style.cssText = 'flex:1;width:100%;border:0;background:#fff;min-height:0;';
@@ -214,6 +223,7 @@ function main() {
     // chế độ nhúng trực tiếp trong trang thay vì để cửa sổ trống.
     window.clearTimeout(watchdog);
     watchdog = window.setTimeout(() => { if (!gotReady && host) void fallbackToInPage('khung tool không gửi "ready" sau 5 giây'); }, 5000);
+    }
 
     // nhớ kích thước khi người dùng kéo góc dưới phải
     new ResizeObserver(() => {
@@ -248,11 +258,23 @@ function main() {
     titleEl = null;
   }
 
-  /** Dự phòng: dựng panel thẳng trong trang (Shadow DOM) khi khung của extension không hoạt động. */
-  async function fallbackToInPage(reason: string) {
+  /** Trang của extension (panel.html) chỉ nhúng được vào các host trong web_accessible_resources của manifest. */
+  function iframeAllowed(): boolean {
+    try {
+      const war = api.runtime.getManifest().web_accessible_resources ?? [];
+      return war.some((r) => typeof r !== 'string' && (r.matches ?? []).some((m) => matchesPattern(m, location.href)));
+    } catch { return true; }
+  }
+
+  /**
+   * Dựng panel thẳng trong trang (Shadow DOM): dự phòng khi khung của extension không hoạt động, hoặc là cách chạy bình thường
+   * (`planned`) trên máy chủ thêm trong Cài đặt.
+   */
+  async function fallbackToInPage(reason: string, planned = false) {
     if (!host || inPage) return;
-    log('KHUNG KHÔNG PHẢN HỒI:', reason, '→ chuyển sang chế độ nhúng trong trang');
-    setStatus('khung bị chặn → chế độ nhúng');
+    if (planned) log('chế độ nhúng trong trang:', reason);
+    else log('KHUNG KHÔNG PHẢN HỒI:', reason, '→ chuyển sang chế độ nhúng trong trang');
+    setStatus(planned ? 'chế độ nhúng' : 'khung bị chặn → chế độ nhúng');
     frame?.remove();
     frame = null;
     const container = document.createElement('div');

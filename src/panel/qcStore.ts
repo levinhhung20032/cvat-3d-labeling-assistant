@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { kv } from './storage';
+import { kv, whenStorageReady } from './storage';
 import { parseQc, qcKey, QC_MAX_LEN } from '../shared/qc';
 import type { NotesPlan } from '../shared/qcnotes';
 
@@ -12,6 +12,8 @@ let mode = kv.get(MODE_KEY) === '1';
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 const subscribe = (cb: () => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; };
+// Nạp lại khi kho extension sẵn sàng (chế độ nhúng: module có thể được nạp trước), tránh ghi đè ghi chú thật bằng trạng thái rỗng.
+whenStorageReady(() => { notes = parseQc(kv.get(NOTES_KEY)); mode = kv.get(MODE_KEY) === '1'; emit(); });
 
 export const useQcNotes = () => useSyncExternalStore(subscribe, () => notes);
 export const useQcMode = () => useSyncExternalStore(subscribe, () => mode);

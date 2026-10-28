@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { kv } from './storage';
+import { kv, whenStorageReady } from './storage';
 
 /**
  * Sổ ghi các object (track) do CHÍNH TOOL tạo ra, theo job: ID database của chúng. Chỉ những ID trong sổ này mới được phép xóa
@@ -11,6 +11,7 @@ const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 const subscribe = (cb: () => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; };
 const EMPTY: number[] = [];
+whenStorageReady(() => { cache.clear(); emit(); }); // bỏ mọi giá trị đọc trước khi kho sẵn sàng (sổ này quyết định quyền xóa)
 
 function read(jobId: number): number[] {
   const hit = cache.get(jobId);

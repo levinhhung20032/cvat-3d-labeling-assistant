@@ -37,7 +37,7 @@ export async function mountInPage(
   // Phím gõ trong panel không được lọt ra phím tắt của CVAT.
   for (const type of ['keydown', 'keyup', 'keypress'] as const) root.addEventListener(type, (e) => e.stopPropagation());
 
-  await useExtensionStorage();
+  await useExtensionStorage(location.origin);
 
   const listeners = new Set<(m: ContentMessage) => void>();
   const host: PanelHost = {

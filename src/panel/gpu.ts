@@ -12,6 +12,7 @@ export interface GpuParams {
   half: number;
   zClip: number; slab: number; slabFront: number; colorHalf: number;
   dot: number; // px CSS
+  pan: [number, number, number]; // tâm khung nhìn (u, v, w) khi dời bằng chuột phải; [0, 0, 0] = tâm box
   /** Tô hồng điểm nằm ngay sát ngoài box (cảnh báo lệch). */
   misfit: { cu: number; cv: number; cw: number; sx: number; sy: number; sz: number } | null;
 }
@@ -20,7 +21,7 @@ const BUCKETS = 8;
 const VERT = `
 attribute vec3 a_pos;
 uniform float u_view, u_size, u_half, u_zClip, u_slab, u_slabFront, u_colorHalf, u_dotPx, u_dpr, u_misfit;
-uniform vec3 u_bc, u_bs;
+uniform vec3 u_bc, u_bs, u_pan;
 varying vec3 v_col;
 vec3 hsl2rgb(float h, float s, float l) {
   float c = (1.0 - abs(2.0 * l - 1.0)) * s;
@@ -31,18 +32,19 @@ vec3 hsl2rgb(float h, float s, float l) {
 }
 void main() {
   vec3 p = a_pos;
+  vec3 q = p - u_pan; // trục lên màn hình theo khung nhìn đã dời; lát cắt (trục còn lại) vẫn quanh box
   float vis;
   vec2 s;
   float k = u_size / (2.0 * u_half), c = u_size * 0.5;
   if (u_view < 0.5) {
-    vis = step(abs(p.x), u_half) * step(abs(p.y), u_half) * step(abs(p.z), u_zClip);
-    s = vec2(c - p.y * k, c - p.x * k);
+    vis = step(abs(q.x), u_half) * step(abs(q.y), u_half) * step(abs(p.z), u_zClip);
+    s = vec2(c - q.y * k, c - q.x * k);
   } else if (u_view < 1.5) {
-    vis = step(abs(p.x), u_half) * step(abs(p.z), u_half) * step(abs(p.y), u_slab);
-    s = vec2(c + p.x * k, c - p.z * k);
+    vis = step(abs(q.x), u_half) * step(abs(q.z), u_half) * step(abs(p.y), u_slab);
+    s = vec2(c + q.x * k, c - q.z * k);
   } else {
-    vis = step(abs(p.y), u_half) * step(abs(p.z), u_half) * step(abs(p.x), u_slabFront);
-    s = vec2(c + p.y * k, c - p.z * k);
+    vis = step(abs(q.y), u_half) * step(abs(q.z), u_half) * step(abs(p.x), u_slabFront);
+    s = vec2(c + q.y * k, c - q.z * k);
   }
   gl_Position = vis > 0.5 ? vec4(s.x / u_size * 2.0 - 1.0, 1.0 - s.y / u_size * 2.0, 0.0, 1.0) : vec4(2.0, 2.0, 2.0, 1.0);
   gl_PointSize = u_dotPx;
@@ -92,7 +94,7 @@ function init(): Gl | null {
     gl.linkProgram(prog);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog) ?? 'link');
     const u: Record<string, WebGLUniformLocation | null> = {};
-    for (const n of ['u_view', 'u_size', 'u_half', 'u_zClip', 'u_slab', 'u_slabFront', 'u_colorHalf', 'u_dotPx', 'u_dpr', 'u_misfit', 'u_bc', 'u_bs']) u[n] = gl.getUniformLocation(prog, n);
+    for (const n of ['u_view', 'u_size', 'u_half', 'u_zClip', 'u_slab', 'u_slabFront', 'u_colorHalf', 'u_dotPx', 'u_dpr', 'u_misfit', 'u_bc', 'u_bs', 'u_pan']) u[n] = gl.getUniformLocation(prog, n);
     canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); lost = true; });
     canvas.addEventListener('webglcontextrestored', () => { lost = false; state = null; });
     state = { canvas, gl, prog, u, aPos: gl.getAttribLocation(prog, 'a_pos'), buffers: new Map() };
@@ -150,6 +152,7 @@ export function drawPointsGpu(ctx: CanvasRenderingContext2D, loc: Local, p: GpuP
       gl.uniform1f(u.u_misfit!, p.misfit ? 1 : 0);
       gl.uniform3f(u.u_bc!, p.misfit?.cu ?? 0, p.misfit?.cv ?? 0, p.misfit?.cw ?? 0);
       gl.uniform3f(u.u_bs!, p.misfit?.sx ?? 0, p.misfit?.sy ?? 0, p.misfit?.sz ?? 0);
+      gl.uniform3f(u.u_pan!, p.pan[0], p.pan[1], p.pan[2]);
       gl.drawArrays(gl.POINTS, 0, loc.n);
     }
     ctx.drawImage(canvas, 0, 0, p.size, p.size);

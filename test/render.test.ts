@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pointVisible, type Scene } from '../src/panel/render';
+import { clampPan, NO_PAN, panBy, panOffset, pointVisible, type Scene } from '../src/panel/render';
 
 const scene: Scene = { zClip: 5, slab: 2.5, colorHalf: 5 };
 const grid: [number, number, number][] = [];
@@ -30,5 +30,27 @@ describe('zoom không làm tập điểm đổi ngoài ý muốn', () => {
     for (const half of [2.5, 4, 9]) expect(pointVisible('side', 1, 3, 0, half, scene)).toBe(false);
     // view Trên: điểm cao hơn zClip (w = 6) không bao giờ xuất hiện
     for (const half of [2.5, 4, 9]) expect(pointVisible('top', 1, 1, 6, half, scene)).toBe(false);
+  });
+});
+
+describe('dời khung nhìn (giữ chuột phải kéo)', () => {
+  for (const view of ['top', 'side', 'front'] as const) {
+    it(`view ${view}: kéo chuột bao nhiêu thì hình đi theo chuột bấy nhiêu`, () => {
+      const k = 20, p = panBy(view, panBy(view, NO_PAN, 1.5, -0.5), 0.5, 0.25);
+      const [ox, oy] = panOffset(view, p, k);
+      expect(ox).toBeCloseTo(2 * k);
+      expect(oy).toBeCloseTo(-0.25 * k);
+    });
+  }
+  it('chỉ dời hai trục lên màn hình; lát cắt theo trục còn lại vẫn tính quanh box', () => {
+    const pan = { u: 3, v: 0, w: 0 };
+    expect(pointVisible('side', 4, 0, 0, 2, scene)).toBe(false);
+    expect(pointVisible('side', 4, 0, 0, 2, scene, pan)).toBe(true);
+    // view Trước: trục u là bề dày lát cắt, dời u không làm điểm xa box lọt vào lát
+    expect(pointVisible('front', 4, 0, 0, 2, scene, pan)).toBe(false);
+  });
+  it('không dời ra ngoài vùng điểm đã lọc', () => {
+    expect(clampPan({ u: 9, v: -9, w: 1 }, 4)).toEqual({ u: 4, v: -4, w: 1 });
+    expect(clampPan({ u: 9, v: -9, w: 1 }, 0)).toEqual({ u: 0, v: 0, w: 0 });
   });
 });

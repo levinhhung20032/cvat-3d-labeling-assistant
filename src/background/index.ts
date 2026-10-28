@@ -1,15 +1,24 @@
 // Service worker (Edge / Chrome) hoặc event page (Firefox): chỉ bật/tắt theo tab. Không chạm dữ liệu nhãn.
 import { api, IS_FIREFOX } from '../shared/api';
+import { jobOrigin, originPattern } from '../shared/hosts';
 
-const JOB_URL = /^https:\/\/cvat-a\.example\.net\/tasks\/\d+\/jobs\/\d+/;
-const HOST_PATTERN = 'https://cvat-a.example.com/*';
-
+/**
+ * Chạy trên trang job (/tasks/<id>/jobs/<id>) của máy chủ CVAT người dùng đã thêm: host mặc định trong manifest + tên miền đã
+ * thêm ở trang Cài đặt (quyền host tùy chọn, người dùng tự cấp từng tên miền). Tên miền chưa thêm: mở Cài đặt, điền sẵn tên miền.
+ */
 api.action.onClicked.addListener(async (tab) => {
-  // Firefox MV3: quyền truy cập host là TÙY CHỌN, phải xin trong chính thao tác của người dùng (gọi ngay, không await trước).
-  // Nếu đã được cấp thì trả về true ngay, không hiện hộp thoại.
-  const granted = IS_FIREFOX ? api.permissions.request({ origins: [HOST_PATTERN] }) : Promise.resolve(true);
-  if (!tab.id || !tab.url || !JOB_URL.test(tab.url) || !(await granted)) {
+  const origin = jobOrigin(tab.url);
+  // Firefox MV3: quyền host là TÙY CHỌN, phải xin trong chính thao tác của người dùng (gọi ngay, không await trước); hộp thoại
+  // của Firefox ghi rõ tên miền. Đã được cấp thì trả về true ngay, không hỏi.
+  const asked = IS_FIREFOX && origin ? api.permissions.request({ origins: [originPattern(origin)] }) : null;
+  if (!tab.id || !origin) {
     await api.action.setBadgeText({ tabId: tab.id, text: '!' });
+    return;
+  }
+  const granted = asked ? await asked : await api.permissions.contains({ origins: [originPattern(origin)] });
+  if (!granted) {
+    await api.action.setBadgeText({ tabId: tab.id, text: '+' });
+    if (!IS_FIREFOX) await api.tabs.create({ url: api.runtime.getURL(`options.html#add=${encodeURIComponent(origin)}`) });
     return;
   }
   await api.action.setBadgeText({ tabId: tab.id, text: '' });
@@ -52,7 +61,7 @@ function focusObject3d(num: number, frame: number | null): { ok: boolean; reason
 // rồi tự mở lại tool. Cờ chỉ có hiệu lực 60 giây và chỉ cho đúng tab đó.
 const REOPEN_KEY = 'cvla-reopen';
 api.tabs.onUpdated.addListener(async (tabId, info, tab) => {
-  if (info.status !== 'complete' || !tab.url || !JOB_URL.test(tab.url)) return;
+  if (info.status !== 'complete' || !jobOrigin(tab.url)) return;
   const got = (await api.storage.local.get(REOPEN_KEY)) as Record<string, { tabId: number; at: number } | undefined>;
   const flag = got[REOPEN_KEY];
   if (!flag || flag.tabId !== tabId) return;

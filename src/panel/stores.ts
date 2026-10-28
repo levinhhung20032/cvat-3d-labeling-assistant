@@ -28,6 +28,8 @@ export class CloudLoader {
   private runningUrgent = 0;
   private pausedUntil = 0; // tải nền tạm dừng tới thời điểm này (nhường server cho giao diện CVAT đang nạp frame)
   private finished: number[] = []; // thời điểm (ms) hoàn thành của các frame gần đây, để đo tốc độ
+  private everLoaded_ = new Set<number>(); // frame đã từng tải xong (kể cả đã bị đẩy khỏi bộ nhớ LRU)
+  private failed_ = new Set<number>(); // frame tải lỗi sau mọi lần thử lại (không tính frame bị hủy khỏi kế hoạch)
 
   constructor(
     private cap: number, private maxTotal: number, private maxBackground: number, private maxIdle = maxBackground,
@@ -37,6 +39,10 @@ export class CloudLoader {
   ) {}
 
   cachedCount() { return this.cache.size; }
+  /** Frame n đã từng tải xong chưa (bộ nhớ chỉ giữ `cap` frame nên job dài hơn không bao giờ nằm trọn trong bộ nhớ). */
+  everLoaded(n: number) { return this.everLoaded_.has(n); }
+  /** Frame n đã tải lỗi sau mọi lần thử lại (để tiến độ "tải xong" không kẹt mãi vì một frame hỏng). */
+  failed(n: number) { return this.failed_.has(n) && !this.everLoaded_.has(n); }
   /**
    * Tạm dừng TẢI NỀN `ms` mili giây (yêu cầu khẩn của cửa sổ đang xem vẫn chạy). Dùng khi tool bảo CVAT chuyển frame / zoom:
    * server sinh mỗi frame ~3 giây, nếu tải nền chiếm hết kết nối thì CVAT phải đợi rất lâu mới nạp xong frame.
@@ -75,10 +81,37 @@ export class CloudLoader {
   }
 
   /**
-   * Đặt kế hoạch tải: frame → độ ưu tiên. Yêu cầu đang xếp hàng mà không còn trong kế hoạch bị hủy;
-   * yêu cầu đang chạy không bị ngắt.
+   * Đặt kế hoạch tải của cửa sổ đang xem: frame → độ ưu tiên. Sống cùng kế hoạch tải nền (`background`): yêu cầu đang xếp hàng mà
+   * không còn trong kế hoạch nào bị hủy; yêu cầu đang chạy không bị ngắt.
    */
   plan(wanted: Map<number, number>) {
+    this.windowPlan = wanted;
+    this.replan();
+  }
+  /** Kế hoạch tải nền của cả job (ưu tiên thấp hơn cửa sổ); frame có trong cả hai lấy ưu tiên cao hơn. */
+  background(wanted: Map<number, number>) {
+    this.bgPlan = wanted;
+    this.replan();
+  }
+  /**
+   * Frame nào KHÔNG được đẩy khỏi bộ nhớ (vd frame đã tải nhưng chưa tính xong mặt đường / ít điểm). Bộ nhớ có thể vượt `cap`
+   * tạm thời đúng bằng số frame đang được giữ.
+   */
+  setKeep(keep: (n: number) => boolean) { this.keep = keep; }
+  private windowPlan = new Map<number, number>();
+  private bgPlan = new Map<number, number>();
+  private keep: (n: number) => boolean = () => false;
+  private evict() {
+    if (this.cache.size <= this.cap) return;
+    for (const n of [...this.cache.keys()]) { // cũ nhất trước (LRU)
+      if (this.cache.size <= this.cap) break;
+      if (!this.keep(n)) this.cache.delete(n);
+    }
+  }
+
+  private replan() {
+    const wanted = new Map(this.bgPlan);
+    for (const [n, p] of this.windowPlan) wanted.set(n, Math.min(p, wanted.get(n) ?? Infinity));
     this.queue = this.queue.filter((t) => {
       const prio = wanted.get(t.n);
       if (prio === undefined) {
@@ -114,7 +147,8 @@ export class CloudLoader {
           this.finished.push(this.now());
           if (this.finished.length > 12) this.finished.shift();
           this.cache.set(t.n, pc);
-          while (this.cache.size > this.cap) this.cache.delete(this.cache.keys().next().value as number);
+          this.everLoaded_.add(t.n);
+          this.evict();
           t.ok(pc);
           this.emit();
         })
@@ -123,7 +157,7 @@ export class CloudLoader {
           const tries = (t.tries ?? 0) + 1;
           console.warn('[CVLA] tải frame', t.n, 'lỗi (lần', tries, '):', String(e));
           if (tries < 4) { retry = true; t.tries = tries; setTimeout(() => { this.queue.push(t); this.pump(); }, 700 * tries); }
-          else t.fail(e instanceof Error ? e : new Error(String(e)));
+          else { this.failed_.add(t.n); t.fail(e instanceof Error ? e : new Error(String(e))); this.emit(); }
         })
         .finally(() => {
           if (!retry) this.pending.delete(t.n);

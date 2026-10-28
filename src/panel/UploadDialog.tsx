@@ -14,9 +14,10 @@ interface LastInfo { time: string; tracks: number; reverted: boolean; verified: 
  * Màn hình xem lại trước khi upload. Mặc định là CHẠY THỬ (kiểm tra xung đột và luật, không gửi gì).
  * Ghi thật chỉ khi bạn tick xác nhận rồi bấm "Gửi lên CVAT". Chỉ gửi lệnh update, không bao giờ delete.
  */
-export function UploadDialog({ baseline, working, job, labels, onClose, onReload, onUploaded }: {
+export function UploadDialog({ baseline, working, job, labels, onClose, onReload, onUploaded, onBeforeReload }: {
   baseline: CvatAnnotations; working: CvatAnnotations; job: CvatJob; labels: CvatLabel[];
   onClose: () => void; onReload: () => void; onUploaded: (tracks: ShiftTrackRec[]) => void;
+  onBeforeReload: () => void; // ngay trước khi tải lại tab CVAT: ghi lại chỗ đang làm để tool mở lại đúng chỗ
 }) {
   const root = useRef<HTMLDivElement>(null);
   const resultBox = useRef<HTMLDivElement>(null);
@@ -45,7 +46,7 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
       // (hẹn giờ lồng nhau để không bị hủy khi hộp thoại đóng lại sau onReload)
       const t = window.setTimeout(() => {
         onReload();
-        if (autoReload) window.setTimeout(() => post({ type: 'reloadCvat' }), 600);
+        if (autoReload) window.setTimeout(() => { onBeforeReload(); post({ type: 'reloadCvat' }); }, 600);
       }, 1200);
       return () => window.clearTimeout(t);
     }

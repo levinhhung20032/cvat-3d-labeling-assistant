@@ -18,11 +18,14 @@ import { KeysPanel } from './KeysPanel';
 import { UploadDialog } from './UploadDialog';
 import { QcPanel } from './QcPanel';
 import { DynSizePanel } from './DynSizePanel';
-import { Help } from './ui';
+import { Help, PENDING_STYLE } from './ui';
 import { pointClouds } from './stores';
 import { ShiftBadge, ShiftBanner } from './ShiftBar';
 import { findDrift } from '../shared/drift';
 import { fitReportAt } from '../shared/fit';
+import { loadPass, savePass, sigOf, type PassEntry } from './passStore';
+import { DEFAULT_GROUND } from '../shared/ground';
+import { splitTrack } from '../shared/splitId';
 import { DeleteDialog } from './DeleteDialog';
 import { madeStore, useMadeIds } from './madeStore';
 import { dynClassStore } from './dynClassStore';
@@ -52,6 +55,7 @@ type Action =
   | { t: 'restore'; work: CvatAnnotations; edited: Set<string> } // khôi phục bản nháp đã lưu
   | { t: 'addTrack'; track: CvatTrack } // object MỚI do tool tạo (chưa có id), thêm vào cuối
   | { t: 'removeTrack'; idx: number } // xóa object do tool tạo trong nháp (chỉ track chưa có id)
+  | { t: 'split'; idx: number; oldTrack: CvatTrack; newTrack: CvatTrack; frames: number[] } // tách ID: track cũ (update) + object mới ở cuối (create)
   | { t: 'undo' | 'redo' | 'reset'; baseline?: CvatAnnotations };
 
 const replaceTrack = (a: CvatAnnotations, idx: number, tr: CvatTrack): CvatAnnotations => {
@@ -85,6 +89,14 @@ function reducer(s: Draft, a: Action): Draft {
       const keys = a.track.shapes.map((x) => `${idx + 1}:${x.frame}`);
       // thêm / xóa object làm đổi chỉ số track nên lịch sử hoàn tác cũ không còn dùng được
       return { work: { ...s.work, tracks: [...s.work.tracks, a.track] }, edited: new Set([...s.edited, ...keys]), undo: [], redo: [] };
+    }
+    case 'split': {
+      const old = s.work?.tracks[a.idx];
+      if (!s.work || !old || typeof a.newTrack.id === 'number') return s;
+      const newIdx = s.work.tracks.length;
+      const keys = [...a.frames.map((f) => `${a.idx + 1}:${f}`), ...a.newTrack.shapes.map((x) => `${newIdx + 1}:${x.frame}`)];
+      // thêm object làm đổi chỉ số track nên lịch sử hoàn tác cũ không còn dùng được (như addTrack)
+      return { work: { ...s.work, tracks: [...replaceTrack(s.work, a.idx, a.oldTrack).tracks, a.newTrack] }, edited: new Set([...s.edited, ...keys]), undo: [], redo: [] };
     }
     case 'removeTrack': {
       const t = s.work?.tracks[a.idx];
@@ -137,6 +149,9 @@ const EMPTY: Draft = { work: null, edited: new Set<string>(), undo: [], redo: []
 
 type State = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ok'; data: Data };
 type Tab = 'objects' | 'review' | 'shift' | 'qc' | 'dyn' | 'keys' | 'job';
+/** Batch Review mở được khi đã tải và tính xong ngần này frame (job ngắn hơn: cả job); phần còn lại chạy ngầm. */
+const UNLOCK_FRAMES = 60;
+
 
 /** Giao diện chung: nút bo góc, tab rõ ràng, thanh đầu (tiêu đề, ca, tab, nút upload) dính ở đầu khi cuộn. */
 const STYLE = `
@@ -266,7 +281,7 @@ export function App() {
         if (syncRef.current && m.num >= 1 && m.num <= countRef.current) {
           lastCvatNum.current = m.num;
           setSelectedNum(m.num);
-          setTab('review');
+          if (readyRef.current) setTab('review'); // Batch Review chỉ mở khi đã tải xong
           if (m.frame !== null) {
             lastCvatFrame.current = m.frame;
             setFocus({ frame: m.frame, nonce: Date.now() });
@@ -277,7 +292,7 @@ export function App() {
         if (syncRef.current && m.num !== null && m.num !== lastCvatNum.current && Date.now() - toolSelAt.current > 5000 && m.num >= 1 && m.num <= countRef.current) {
           lastCvatNum.current = m.num;
           setSelectedNum(m.num);
-          setTab((t) => (t === 'job' || t === 'keys' ? t : 'review'));
+          setTab((t) => (t === 'job' || t === 'keys' || !readyRef.current ? t : 'review')); // Batch Review chỉ mở khi đã tải xong
         } else if (m.num === null) lastCvatNum.current = null;
         // Đổi frame trong CVAT → cửa sổ của tool chạy theo.
         if (syncRef.current && m.frame !== null && m.frame !== lastCvatFrame.current && countRef.current > 0) {
@@ -440,30 +455,139 @@ export function App() {
     }
     return m;
   }, [driftAll, data, ignAll]);
-  // Ít điểm (dưới 6 điểm trong box) của MỌI object, tính trên các frame đã tải point cloud; tải thêm frame thì tính lại.
-  const [cachedClouds, setCachedClouds] = useState(pointClouds.cachedCount());
-  useEffect(() => pointClouds.subscribe(() => setCachedClouds(pointClouds.cachedCount())), []);
-  const [sparseAll, setSparseAll] = useState<Map<number, number>>(new Map());
+  // Ít điểm (dưới 6 điểm trong box) + mặt đường riêng của MỌI object (fitReportAt đo mặt đường quanh từng box), tính TĂNG DẦN:
+  // kết quả lưu theo (frame, object) kèm chữ ký box (mã băm vị trí / hướng / kích thước). Frame "chờ" = còn box chưa tính với đúng chữ
+  // ký hiện tại; sửa nhãn chỉ làm chờ lại đúng các box đã đổi. Frame chờ được tải nền (kể cả tải lại khi đã rời bộ nhớ) và không bị
+  // đẩy khỏi bộ nhớ trước khi tính xong. Kết quả được lưu theo job: tab CVAT tải lại (sau upload) thì dùng lại, không tính từ đầu.
+  const [cloudTick, setCloudTick] = useState(0); // tăng mỗi lần kho point cloud đổi (tải xong / tải lỗi)
+  useEffect(() => pointClouds.subscribe(() => setCloudTick((x) => x + 1)), []);
+  const passRes = useRef(new Map<number, Map<number, PassEntry>>());
+  const passKey = data ? `cvla-pass:${data.job.id}` : null;
+  const restored = useMemo(() => { passRes.current = passKey ? loadPass(passKey) : new Map(); return passKey; }, [passKey]);
+  const [passTick, setPassTick] = useState(0);
+  const computed = useRef(0); // số frame thực sự đã tính trong phiên này (khôi phục từ kho thì không tính)
+  // Frame chờ: tính ngay trong lần vẽ (không trong effect), để tiến độ / mở khoá không bao giờ đọc một tập rỗng cũ.
+  const pending = useMemo(() => {
+    const out = new Set<number>();
+    if (!data || !work) return out;
+    const tracks = work.tracks;
+    for (let f = data.job.start_frame; f <= data.job.stop_frame; f++) {
+      const r = passRes.current.get(f);
+      let ok = !!r;
+      if (r) for (const num of r.keys()) if (num > tracks.length) ok = false;
+      for (let i = 0; ok && i < tracks.length; i++) {
+        const c = stateAt(tracks[i]!, f).cuboid, e = r!.get(i + 1);
+        if (c ? !e || e.sig !== sigOf(c) : e) ok = false;
+      }
+      if (!ok) out.add(f);
+    }
+    return out;
+  }, [data, work, passTick, restored]);
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
+  useEffect(() => { pointClouds.setKeep((n) => pendingRef.current.has(n)); return () => pointClouds.setKeep(() => false); }, []);
   useEffect(() => {
-    if (!data || !work) { setSparseAll(new Map()); return; }
+    if (!data || !work) return;
+    const a = data.job.start_frame, tracks = work.tracks;
+    const bg = new Map<number, number>();
+    for (const f of pending) if (!pointClouds.peek(f) && !pointClouds.failed(f)) bg.set(f, 100 + f - a); // sau cửa sổ Batch Review
+    pointClouds.background(bg);
     let live = true;
     const timer = window.setTimeout(async () => {
-      const m = new Map<number, number>();
-      let done = 0;
-      for (let f = data.job.start_frame; f <= data.job.stop_frame && live; f++) {
+      let n = 0, frames = 0;
+      for (const f of pending) {
         const pc = pointClouds.peek(f);
         if (!pc) continue;
-        for (let i = 0; i < work.tracks.length && live; i++) {
-          const c = stateAt(work.tracks[i]!, f).cuboid;
+        const old = passRes.current.get(f), r = new Map<number, PassEntry>();
+        for (let i = 0; i < tracks.length && live; i++) {
+          const c = stateAt(tracks[i]!, f).cuboid;
           if (!c) continue;
-          if (fitReportAt(pc.xyz, pc.count, c).level === 'sparse') m.set(i + 1, (m.get(i + 1) ?? 0) + 1);
-          if (++done % 40 === 0) await new Promise((r) => window.setTimeout(r, 0));
+          const sig = sigOf(c), prev = old?.get(i + 1);
+          r.set(i + 1, prev && prev.sig === sig ? prev : { sig, sparse: fitReportAt(pc.xyz, pc.count, c).level === 'sparse' });
+          if (++n % 40 === 0) await new Promise((res) => window.setTimeout(res, 0));
         }
+        if (!live) return; // bị ngắt giữa chừng thì không ghi frame đó, lần sau tính lại
+        passRes.current.set(f, r);
+        frames++;
       }
-      if (live) setSparseAll(m);
-    }, 500);
+      if (live && frames) { computed.current += frames; setPassTick((x) => x + 1); }
+    }, 200);
     return () => { live = false; window.clearTimeout(timer); };
-  }, [data, work, cachedClouds]);
+  }, [data, work, cloudTick, pending]);
+  // Lưu kết quả (gom lại, không ghi sau từng frame).
+  useEffect(() => {
+    if (!passKey || !passTick) return;
+    const t = window.setTimeout(() => savePass(passKey, passRes.current), 1500);
+    return () => window.clearTimeout(t);
+  }, [passKey, passTick]);
+  // Tổng hợp: số frame ít điểm theo object (chỉ kết quả khớp box hiện tại), object còn frame chờ (số liệu chưa đáng tin), tiến độ.
+  const passView = useMemo(() => {
+    const sparse = new Map<number, number>(), incomplete = new Set<number>();
+    if (!data || !work) return { sparse, incomplete, pending: 0, failed: 0, total: 0 };
+    const { start_frame: a, stop_frame: b } = data.job;
+    let failed = 0, waitingFrames = 0;
+    for (let f = a; f <= b; f++) {
+      const waiting = pending.has(f);
+      if (waiting && pointClouds.failed(f)) { failed++; continue; } // tải lỗi sau mọi lần thử: bỏ qua, không chờ mãi
+      if (waiting) waitingFrames++;
+      const r = passRes.current.get(f);
+      work.tracks.forEach((t, i) => {
+        const c = stateAt(t, f).cuboid;
+        if (!c) return;
+        const e = r?.get(i + 1);
+        if (waiting && (!e || e.sig !== sigOf(c))) incomplete.add(i + 1);
+        else if (e?.sparse) sparse.set(i + 1, (sparse.get(i + 1) ?? 0) + 1);
+      });
+    }
+    return { sparse, incomplete, pending: waitingFrames, failed, total: b - a + 1 };
+  }, [data, work, pending, cloudTick]);
+  const sparseAll = passView.sparse;
+  // Batch Review mở được khi đã có đủ UNLOCK_FRAMES frame tính xong (job ngắn hơn: cả job); phần còn lại chạy ngầm. Đã mở thì giữ nguyên
+  // cho job đó. Báo "đã tải xong" (một lần mỗi job) khi không còn frame chờ — chỉ khi phiên này đã thực sự tính (khôi phục thì không).
+  const [readyJob, setReadyJob] = useState<number | null>(null);
+  const ready = !!data && readyJob === data.job.id;
+  const readyRef = useRef(false);
+  readyRef.current = ready;
+  const [doneJob, setDoneJob] = useState<number | null>(null);
+  const [doneNote, setDoneNote] = useState('');
+  useEffect(() => {
+    if (!data || !work) return;
+    const { pending: waiting, failed, total } = passView, finished = total - waiting - failed;
+    if (!ready && finished + failed >= Math.min(UNLOCK_FRAMES, total)) setReadyJob(data.job.id);
+    if (waiting === 0 && doneJob !== data.job.id) {
+      setDoneJob(data.job.id);
+      if (computed.current > 0) setDoneNote(`Job ${data.job.id}: đã tải ${total - failed}/${total} frame${failed ? ` (${failed} frame tải lỗi, bỏ qua)` : ''}, đo xong mặt đường cho ${work.tracks.length} object (trong bán kính ${DEFAULT_GROUND.maxRange} m quanh ego), đã tính trôi box (${driftAll.size} object có trôi). Mọi số liệu trong bảng đã đầy đủ.`);
+    }
+  }, [data, work, passView, ready, doneJob, driftAll]);
+  const openReview = () => {
+    if (readyRef.current) setTab('review');
+    else setToast(`Batch Review mở được khi đã tải và tính xong ${Math.min(UNLOCK_FRAMES, passView.total)} frame đầu (xem tiến độ phía trên).`);
+  };
+  // Trước khi tool tự tải lại tab CVAT (sau upload / xóa): ghi lại chỗ đang làm; tool mở lại thì về đúng chỗ (hiệu lực 2 phút).
+  const here = useRef({ job: 0, tab, num: selectedNum, start: startFrame }); // trạng thái mới nhất (hộp thoại giữ hàm cũ)
+  here.current = { job: data?.job.id ?? 0, tab, num: selectedNum, start: startFrame };
+  const saveResume = () => {
+    if (here.current.job) kv.set('cvla-resume', JSON.stringify({ ...here.current, at: Date.now() }));
+  };
+  const [resumeTab, setResumeTab] = useState<Tab | null>(null);
+  useEffect(() => {
+    if (!data) return;
+    const raw = kv.get('cvla-resume');
+    if (!raw) return;
+    kv.remove('cvla-resume');
+    try {
+      const r = JSON.parse(raw) as { job: number; tab: Tab; num: number | null; start: number; at: number };
+      if (r.job !== data.job.id || Date.now() - r.at > 120_000) return;
+      if (r.num) setSelectedNum(r.num);
+      if (Number.isInteger(r.start)) setStartFrame(r.start);
+      setResumeTab(r.tab);
+    } catch { /* bỏ qua */ }
+  }, [data?.job.id]);
+  useEffect(() => {
+    if (!resumeTab || (resumeTab === 'review' && !ready)) return; // Batch Review: chờ tới khi mở được
+    setTab(resumeTab);
+    setResumeTab(null);
+  }, [resumeTab, ready]);
   const rows = useMemo(
     () => (data && work
       ? buildRows(work, data.labels, data.job.start_frame, data.job.stop_frame, (num, f) => ignAll.has(motionKey(data.job.id, num, f)), (num, f, k) => ignAll.has(issueKey(data.job.id, num, f, k)), new Set(madeIds)).map((r) => {
@@ -495,7 +619,9 @@ export function App() {
 
   const tabBtn = (t: Tab, label: string) => (
     <button
-      onClick={() => setTab(t)}
+      onClick={() => (t === 'review' ? openReview() : setTab(t))}
+      disabled={t === 'review' && !ready}
+      title={t === 'review' && !ready ? 'Mở được khi đã tải xong point cloud mọi frame và tính xong mặt đường / trôi box' : undefined}
       className={tab === t ? 'cvla-tab cvla-tab-on' : 'cvla-tab'}
     >
       {label}
@@ -562,13 +688,13 @@ export function App() {
       {deleting && data && (
         <DeleteDialog
           job={data.job} baseline={data.ann} labels={data.labels} ids={deleting}
-          onClose={() => setDeleting(null)} onDone={() => { setDeleting(null); post({ type: 'load' }); }}
+          onClose={() => setDeleting(null)} onDone={() => { setDeleting(null); post({ type: 'load' }); }} onBeforeReload={saveResume}
         />
       )}
       {uploading && data && work && (
         <UploadDialog
           baseline={data.ann} working={work} job={data.job} labels={data.labels}
-          onClose={() => setUploading(false)}
+          onClose={() => setUploading(false)} onBeforeReload={saveResume}
           onUploaded={(tracks) => {
             // đã lên CVAT thì không còn là nháp: xóa ngay để lần nạp lại / F5 không hiện lại "bản nháp chưa upload"
             kv.remove(draftKey(data.job.id)); restorableRef.current = null; setRestorable(null);
@@ -576,11 +702,26 @@ export function App() {
           }}
           onReload={() => {
             setUploading(false);
-            setTab('review');
+            openReview();
             setToast('Đã upload thành công, tool đã nạp lại dữ liệu từ CVAT. Nếu CVAT không tự tải lại, hãy F5 tab CVAT trước khi bấm Save ở đó.');
             post({ type: 'load' });
           }}
         />
+      )}
+      {data && passView.pending > 0 && (
+        <div style={{ background: '#eef4ff', border: '1px solid #7aa2e3', padding: '4px 8px', margin: '6px 0', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <progress value={passView.total - passView.pending} max={passView.total} style={{ width: 160 }} />
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+            ⏳ {ready ? 'Đang tải ngầm phần còn lại' : `Đang tải ${Math.min(UNLOCK_FRAMES, passView.total)} frame đầu`}: đã tính xong <b>{passView.total - passView.pending - passView.failed}/{passView.total}</b> frame
+            (point cloud, mặt đường, ít điểm){passView.failed ? ` · ${passView.failed} frame tải lỗi, bỏ qua` : ''} · trôi box: đã tính.{' '}
+            {ready ? <>Ô có <span style={PENDING_STYLE}>viền vàng</span>: số liệu chưa đủ, tự cập nhật khi tải xong.</> : 'Batch Review mở được khi xong.'}
+          </span>
+        </div>
+      )}
+      {doneNote && (
+        <div style={{ background: '#e8ffe8', border: '1px solid #0a0', padding: 6, margin: '6px 0' }}>
+          ✅ <b>Đã tải xong.</b> {doneNote} <button onClick={() => setDoneNote('')}>×</button>
+        </div>
       )}
       {toast && (
         <div style={{ background: '#e8ffe8', border: '1px solid #0a0', padding: 6, margin: '6px 0' }}>
@@ -609,11 +750,12 @@ export function App() {
       )}
       {data && work && tab === 'objects' && (
         <ObjectTable
-          onDelete={deleteMade} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs}
+          onDelete={deleteMade} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs} incomplete={passView.incomplete}
+          tracks={work.tracks} start={data.job.start_frame} stop={data.job.stop_frame} cvatFrame={focus?.frame ?? null}
           onOpen={(num, first) => {
             selectFromTool(num);
             setStartFrame(first ?? data.job.start_frame);
-            setTab('review');
+            openReview();
           }}
         />
       )}
@@ -621,7 +763,7 @@ export function App() {
         <QcPanel
           jobId={data.job.id} count={work.tracks.length} tracks={work.tracks} start={data.job.start_frame} stop={data.job.stop_frame}
           labels={trackLabels}
-          onOpen={(num, frame) => { selectFromTool(num); setStartFrame(frame); setTab('review'); }}
+          onOpen={(num, frame) => { selectFromTool(num); setStartFrame(frame); openReview(); }}
         />
       )}
       {data && work && tab === 'review' && (
@@ -637,6 +779,14 @@ export function App() {
           }} initialFrame={startFrame} edited={draft.edited} focus={focus}
           onEdit={(idx, frame, cub, sizeAll) => { dispatch({ t: 'edit', idx, frame, cub, sizeAll }); shiftStore.edit(data.job.id, idx + 1); }}
           onTrack={(idx, track, frames) => { dispatch({ t: 'track', idx, track, frames }); shiftStore.edit(data.job.id, idx + 1); }}
+          onSplit={(idx, resume) => {
+            const t = work.tracks[idx];
+            const r = t ? splitTrack(t, resume, data.job.stop_frame) : null;
+            if (!r) return null;
+            dispatch({ t: 'split', idx, oldTrack: r.oldTrack, newTrack: r.newTrack, frames: r.frames });
+            shiftStore.edit(data.job.id, idx + 1);
+            return work.tracks.length + 1; // số thứ tự (ID hiển thị) của object mới: nằm cuối danh sách
+          }}
         />
       )}
       {data && work && tab === 'dyn' && <DynSizePanel jobId={data.job.id} labels={data.labels} tracks={work.tracks} />}

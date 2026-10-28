@@ -52,6 +52,28 @@ const PALETTE = Array.from({ length: BUCKETS }, (_, i) => `hsl(${220 - (i * 200)
 const project = (view: View, u: number, v: number, w: number, k: number, c: number): [number, number] =>
   view === 'top' ? [c - v * k, c - u * k] : view === 'side' ? [c + u * k, c - w * k] : [c + v * k, c - w * k];
 
+/**
+ * Dời khung nhìn (giữ chuột phải kéo): tâm ô là điểm (u, v, w) này trong hệ của object thay vì tâm box. Dùng chung cho cả 3 view và
+ * mọi frame — kéo ở view Trên dời u / v, view Bên dời u / w, view Trước dời v / w — nên các view luôn khớp nhau.
+ */
+export interface Pan { u: number; v: number; w: number }
+export const NO_PAN: Pan = { u: 0, v: 0, w: 0 };
+const VIEW_LABEL: Record<View, string> = { top: 'Trên', side: 'Bên', front: 'Trước' };
+
+/** Độ lệch trên màn hình (px) do dời khung nhìn: hình vẽ khi chưa dời cộng thêm (ox, oy). */
+export function panOffset(view: View, pan: Pan, k: number): [number, number] {
+  return view === 'top' ? [pan.v * k, pan.u * k] : view === 'side' ? [-pan.u * k, pan.w * k] : [-pan.v * k, pan.w * k];
+}
+/** Kéo chuột (dx, dy, mét theo màn hình: sang phải / xuống dưới) thì hình đi theo chuột. */
+export function panBy(view: View, p: Pan, dx: number, dy: number): Pan {
+  return view === 'top' ? { ...p, u: p.u + dy, v: p.v + dx } : view === 'side' ? { ...p, u: p.u - dx, w: p.w + dy } : { ...p, v: p.v - dx, w: p.w + dy };
+}
+/** Giới hạn dời: không ra ngoài vùng điểm đã lọc (lim = 0 thì về giữa). */
+export function clampPan(p: Pan, lim: number): Pan {
+  const c = (x: number) => Math.min(lim, Math.max(-lim, x)) || 0; // || 0: bỏ -0
+  return { u: c(p.u), v: c(p.v), w: c(p.w) };
+}
+
 /** Thông số cảnh KHÔNG phụ thuộc mức zoom (để phóng to / thu nhỏ chỉ đổi khung nhìn, không đổi tập điểm được vẽ). */
 export interface Scene { zClip: number; slab: number; colorHalf: number; slabFront?: number }
 
@@ -60,10 +82,12 @@ export interface Scene { zClip: number; slab: number; colorHalf: number; slabFro
  * lớn hơn thì thấy thêm điểm ở rìa, đúng như kỳ vọng); trục còn lại dùng ngưỡng cố định của `scene`, nên cùng một vùng
  * nhìn thấy cùng một tập điểm ở mọi mức zoom.
  */
-export function pointVisible(view: View, u: number, v: number, w: number, half: number, scene: Scene): boolean {
-  if (view === 'top') return Math.abs(u) <= half && Math.abs(v) <= half && Math.abs(w) <= scene.zClip;
-  if (view === 'side') return Math.abs(u) <= half && Math.abs(w) <= half && Math.abs(v) <= scene.slab;
-  return Math.abs(v) <= half && Math.abs(w) <= half && Math.abs(u) <= (scene.slabFront ?? scene.slab);
+export function pointVisible(view: View, u: number, v: number, w: number, half: number, scene: Scene, pan: Pan = NO_PAN): boolean {
+  // Dời khung nhìn chỉ dời hai trục lên màn hình; lát cắt theo trục còn lại vẫn tính quanh box.
+  const pu = u - pan.u, pv = v - pan.v, pw = w - pan.w;
+  if (view === 'top') return Math.abs(pu) <= half && Math.abs(pv) <= half && Math.abs(w) <= scene.zClip;
+  if (view === 'side') return Math.abs(pu) <= half && Math.abs(pw) <= half && Math.abs(v) <= scene.slab;
+  return Math.abs(pv) <= half && Math.abs(pw) <= half && Math.abs(u) <= (scene.slabFront ?? scene.slab);
 }
 
 /** Vẽ khung 12 cạnh của một box (đã xoay dyaw quanh tâm). */
@@ -88,15 +112,17 @@ export function drawView(
   ctx: CanvasRenderingContext2D, size: number, view: View, loc: Local | null,
   box: LocalBox | null, half: number, status: Status, active = false, misfit = false, ghost: LocalBox | null = null, ground: number | null = null, mark: { u: number; v: number; w: number } | null = null,
   scene: Scene = { zClip: half, slab: half * 0.5, colorHalf: half }, overlays: LocalBox[] = [], tiltBase: Pick<Cuboid, 'rx' | 'ry' | 'yaw'> | null = null,
+  groundMarks: { u: number; v: number; w: number; used: boolean }[] = [], contactW: number | null = null, pan: Pan = NO_PAN,
 ) {
   ctx.fillStyle = '#0b0f14';
   ctx.fillRect(0, 0, size, size);
   const k = size / (2 * half), c = size / 2;
   const dot = Math.max(1.5, size / 110);
+  const [ox, oy] = panOffset(view, pan, k);
   // GPU (WebGL) nếu có: chiếu, cắt lát, tô màu và tô hồng điểm lọt ngoài box đều làm trong shader; không thì vẽ bằng canvas 2D như cũ.
   const gpuDone = !!loc && drawPointsGpu(ctx, loc, {
     view: view === 'top' ? 0 : view === 'side' ? 1 : 2, size, half, zClip: scene.zClip, slab: scene.slab, slabFront: scene.slabFront ?? scene.slab,
-    colorHalf: scene.colorHalf, dot, misfit: misfit && box && box.dyaw === 0 ? { cu: box.cu, cv: box.cv, cw: box.cw, sx: box.sx, sy: box.sy, sz: box.sz } : null,
+    colorHalf: scene.colorHalf, dot, pan: [pan.u, pan.v, pan.w], misfit: misfit && box && box.dyaw === 0 ? { cu: box.cu, cv: box.cv, cw: box.cw, sx: box.sx, sy: box.sy, sz: box.sz } : null,
   });
   if (loc && !gpuDone) {
     const buckets: number[][] = Array.from({ length: BUCKETS }, () => []);
@@ -105,7 +131,7 @@ export function drawView(
       // loc được lọc ở phạm vi lớn nhất. Hai trục lên màn hình chỉ bị cắt theo khung nhìn (zoom); trục còn lại
       // (độ cao ở view Trên, bề dày lát cắt ở view Bên / Trước) dùng ngưỡng CỐ ĐỊNH theo object, không đổi theo zoom.
       const lu = loc.u[i]!, lv = loc.v[i]!, lw = loc.w[i]!;
-      if (!pointVisible(view, lu, lv, lw, half, scene)) continue;
+      if (!pointVisible(view, lu, lv, lw, half, scene, pan)) continue;
       if (misfit && box && box.dyaw === 0) {
         // điểm nằm ngay sát ngoài box (trừ lớp sát đáy) → tô hồng để so sánh với box
         const du = Math.abs(loc.u[i]! - box.cu) - box.sx / 2, dv = Math.abs(loc.v[i]! - box.cv) - box.sy / 2;
@@ -120,91 +146,133 @@ export function drawView(
       ctx.fillStyle = b === BUCKETS ? '#ff2bd6' : PALETTE[b]!;
       for (const i of idx) {
         const [x, y] = project(view, loc.u[i]!, loc.v[i]!, loc.w[i]!, k, c);
-        ctx.fillRect(x - dot / 2, y - dot / 2, dot, dot);
+        ctx.fillRect(x + ox - dot / 2, y + oy - dot / 2, dot, dot);
       }
     });
   }
-  if (mark) {
-    // vị trí DỰ ĐOÁN từ chuyển động các frame trước (dấu × cam, nối bằng nét đứt tới tâm box) để thấy box đã đi xa bao nhiêu
-    const [mx, my] = project(view, mark.u, mark.v, mark.w, k, c);
-    ctx.save();
-    ctx.strokeStyle = '#ff9f1a';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([3, 3]);
-    ctx.beginPath(); ctx.moveTo(c, c); ctx.lineTo(mx, my); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.beginPath();
-    ctx.moveTo(mx - 6, my - 6); ctx.lineTo(mx + 6, my + 6); ctx.moveTo(mx - 6, my + 6); ctx.lineTo(mx + 6, my - 6);
-    ctx.stroke();
-    ctx.restore();
-  }
-  if (ground !== null && view !== 'top') {
-    // mặt đường ước lượng (xanh lá nét đứt) để so với đáy box
-    const gy = c - ground * k;
-    ctx.save();
-    ctx.strokeStyle = '#7cfc00';
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([5, 4]);
-    ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(size, gy); ctx.stroke();
-    ctx.restore();
-  }
-  for (const o of overlays) wire(ctx, view, o, k, c, o.color ?? '#ff8c00', 2, [4, 3]); // box của object khác đang chồng lấn
-  if (!box) return;
+  // Mọi thứ còn lại (box, mặt đường, dấu…) vẽ theo khung nhìn đã dời; khung + nhãn view vẽ sau cùng, đứng yên.
+  ctx.save();
+  ctx.translate(ox, oy);
+  shapes();
+  ctx.restore();
+  frameOf(ctx, size, view, ox !== 0 || oy !== 0);
 
-  // 8 đỉnh của box (đã xoay dyaw quanh tâm) rồi nối 12 cạnh.
-  const cos = Math.cos(box.dyaw), sin = Math.sin(box.dyaw);
-  const tilted = tiltBase !== null && isTilted(tiltBase, box); // box nghiêng theo mặt đường (roll / pitch ≠ 0)
-  const pt = (a: number, b: number, w: number) => {
-    const [x, y, z] = tilted ? cornerInView(tiltBase!, box, [a, b, w]) : [a * cos - b * sin, a * sin + b * cos, w];
-    return project(view, box.cu + x, box.cv + y, box.cw + z, k, c);
-  };
-  const hu = box.sx / 2, hv = box.sy / 2, hw = box.sz / 2;
-  const corner = (i: number) => pt(i & 1 ? hu : -hu, i & 2 ? hv : -hv, i & 4 ? hw : -hw);
-  ctx.strokeStyle = STATUS_COLOR[status];
-  ctx.lineWidth = active ? 2.5 : 2;
-  ctx.beginPath();
-  for (let i = 0; i < 8; i++) {
-    for (const bit of [1, 2, 4]) {
-      if (i & bit) continue;
-      const [x1, y1] = corner(i), [x2, y2] = corner(i | bit);
-      ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+  function shapes() {
+    if (mark) {
+      // vị trí DỰ ĐOÁN từ chuyển động các frame trước (dấu × cam, nối bằng nét đứt tới tâm box) để thấy box đã đi xa bao nhiêu
+      const [mx, my] = project(view, mark.u, mark.v, mark.w, k, c);
+      ctx.save();
+      ctx.strokeStyle = '#ff9f1a';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(c, c); ctx.lineTo(mx, my); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(mx - 6, my - 6); ctx.lineTo(mx + 6, my + 6); ctx.moveTo(mx - 6, my + 6); ctx.lineTo(mx + 6, my - 6);
+      ctx.stroke();
+      ctx.restore();
     }
-  }
-  ctx.stroke();
+    if (ground !== null && view !== 'top') {
+      // mặt đường ước lượng (xanh lá nét đứt) để so với đáy box
+      const gy = c - ground * k;
+      ctx.save();
+      ctx.strokeStyle = '#7cfc00';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.moveTo(-ox, gy); ctx.lineTo(size - ox, gy); ctx.stroke();
+      ctx.restore();
+    }
+    if (view !== 'top' && (groundMarks.length || contactW !== null)) {
+      // mặt đường đo được ở từng cung quanh box (vạch xanh lá đậm: cung đã dùng, xám: tầng bị loại như vỉa hè) và lớp tiếp xúc dưới gầm (xanh lơ)
+      ctx.save();
+      ctx.lineWidth = 3;
+      for (const m of groundMarks) {
+        const [x, y] = project(view, m.u, m.v, m.w, k, c);
+        ctx.strokeStyle = m.used ? '#7cfc00' : '#9aa4b2';
+        ctx.beginPath(); ctx.moveTo(x - 6, y); ctx.lineTo(x + 6, y); ctx.stroke();
+      }
+      if (contactW !== null) {
+        const [x, y] = project(view, 0, 0, contactW, k, c);
+        ctx.strokeStyle = '#00e5ff';
+        ctx.beginPath(); ctx.moveTo(x - 9, y); ctx.lineTo(x + 9, y); ctx.stroke();
+      }
+      ctx.restore();
+    }
+    for (const o of overlays) wire(ctx, view, o, k, c, o.color ?? '#ff8c00', 2, [4, 3]); // box của object khác đang chồng lấn
+    if (!box) return;
 
-  if (ghost) {
-    // box gợi ý: nét đứt xanh lơ
-    const gc = Math.cos(ghost.dyaw), gs = Math.sin(ghost.dyaw);
-    const gp = (a: number, b: number, w: number) =>
-      project(view, ghost.cu + a * gc - b * gs, ghost.cv + a * gs + b * gc, ghost.cw + w, k, c);
-    const gu = ghost.sx / 2, gv = ghost.sy / 2, gw = ghost.sz / 2;
-    const gcorner = (i: number) => gp(i & 1 ? gu : -gu, i & 2 ? gv : -gv, i & 4 ? gw : -gw);
-    ctx.save();
-    ctx.strokeStyle = '#00e5ff';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 4]);
+    // 8 đỉnh của box (đã xoay dyaw quanh tâm) rồi nối 12 cạnh.
+    const cos = Math.cos(box.dyaw), sin = Math.sin(box.dyaw);
+    const tilted = tiltBase !== null && isTilted(tiltBase, box); // box nghiêng theo mặt đường (roll / pitch ≠ 0)
+    const pt = (a: number, b: number, w: number) => {
+      const [x, y, z] = tilted ? cornerInView(tiltBase!, box, [a, b, w]) : [a * cos - b * sin, a * sin + b * cos, w];
+      return project(view, box.cu + x, box.cv + y, box.cw + z, k, c);
+    };
+    const hu = box.sx / 2, hv = box.sy / 2, hw = box.sz / 2;
+    const corner = (i: number) => pt(i & 1 ? hu : -hu, i & 2 ? hv : -hv, i & 4 ? hw : -hw);
+    ctx.strokeStyle = STATUS_COLOR[status];
+    ctx.lineWidth = active ? 2.5 : 2;
     ctx.beginPath();
     for (let i = 0; i < 8; i++) {
       for (const bit of [1, 2, 4]) {
         if (i & bit) continue;
-        const [x1, y1] = gcorner(i), [x2, y2] = gcorner(i | bit);
+        const [x1, y1] = corner(i), [x2, y2] = corner(i | bit);
         ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
       }
     }
     ctx.stroke();
-    ctx.restore();
-  }
 
-  // Mũi tên đỏ chỉ hướng box (+u); trên view Trên, đầu mũi tên là tay nắm xoay.
-  ctx.strokeStyle = ctx.fillStyle = '#ff2d2d';
-  ctx.lineWidth = 2;
-  const [cx, cy] = pt(0, 0, 0);
-  if (view === 'front') {
-    ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2); ctx.fill();
-  } else {
-    const [tx, ty] = pt(hu + handleOffset(k), 0, 0);
-    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(tx, ty); ctx.stroke();
-    ctx.beginPath(); ctx.arc(tx, ty, view === 'top' && active ? 6 : 3, 0, Math.PI * 2);
-    if (view === 'top') { ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke(); } else ctx.fill();
+    if (ghost) {
+      // box gợi ý: nét đứt xanh lơ
+      const gc = Math.cos(ghost.dyaw), gs = Math.sin(ghost.dyaw);
+      const gp = (a: number, b: number, w: number) =>
+        project(view, ghost.cu + a * gc - b * gs, ghost.cv + a * gs + b * gc, ghost.cw + w, k, c);
+      const gu = ghost.sx / 2, gv = ghost.sy / 2, gw = ghost.sz / 2;
+      const gcorner = (i: number) => gp(i & 1 ? gu : -gu, i & 2 ? gv : -gv, i & 4 ? gw : -gw);
+      ctx.save();
+      ctx.strokeStyle = '#00e5ff';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        for (const bit of [1, 2, 4]) {
+          if (i & bit) continue;
+          const [x1, y1] = gcorner(i), [x2, y2] = gcorner(i | bit);
+          ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+        }
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Mũi tên đỏ chỉ hướng box (+u); trên view Trên, đầu mũi tên là tay nắm xoay.
+    ctx.strokeStyle = ctx.fillStyle = '#ff2d2d';
+    ctx.lineWidth = 2;
+    const [cx, cy] = pt(0, 0, 0);
+    if (view === 'front') {
+      ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2); ctx.fill();
+    } else {
+      const [tx, ty] = pt(hu + handleOffset(k), 0, 0);
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(tx, ty); ctx.stroke();
+      ctx.beginPath(); ctx.arc(tx, ty, view === 'top' && active ? 6 : 3, 0, Math.PI * 2);
+      if (view === 'top') { ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke(); } else ctx.fill();
+    }
   }
+}
+
+/** Viền + nhãn tên view ở góc trên trái, để phân biệt 3 view xếp chồng trong một cột frame. */
+function frameOf(ctx: CanvasRenderingContext2D, size: number, view: View, panned: boolean) {
+  ctx.save();
+  ctx.setLineDash([]);
+  ctx.strokeStyle = '#5b6b80';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, size - 1, size - 1);
+  const text = VIEW_LABEL[view] + (panned ? ' · đã dời' : '');
+  ctx.font = '10px system-ui, sans-serif';
+  ctx.fillStyle = 'rgba(11, 15, 20, 0.75)';
+  ctx.fillRect(1, 1, ctx.measureText(text).width + 8, 14);
+  ctx.fillStyle = panned ? '#fbbf24' : '#cbd5e1';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 5, 8);
+  ctx.restore();
 }

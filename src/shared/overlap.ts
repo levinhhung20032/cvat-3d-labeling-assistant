@@ -10,9 +10,10 @@ export interface OverlapConfig {
   minArea: number; // m²: phần giao nhỏ hơn mức này thì bỏ qua
   minZ: number; // m: hai box phải chồng nhau theo chiều cao ít nhất mức này; -Infinity = không xét chiều cao (như tool QC)
 }
+// Chủ dự án (2026-10-28) bỏ ngưỡng IoU: mọi nhóm đều 0, tức cảnh báo mọi cặp có phần giao ≥ minArea. Muốn nới lại cho một nhóm thì đặt IoU ở đây.
 export const DEFAULT_OVERLAP: OverlapConfig = {
-  allowed: { vehicle: 0, two_wheel: 0.5, pedestrian: 0.5, animal: 0.5, obstacle: 0 },
-  defaultAllowed: 0.5, minArea: 0.001, minZ: -Infinity,
+  allowed: { vehicle: 0, two_wheel: 0, pedestrian: 0, animal: 0, obstacle: 0 },
+  defaultAllowed: 0, minArea: 0.001, minZ: -Infinity,
 };
 
 /** Mức IoU cho phép của một nhãn (tên nhãn CVAT). */

@@ -1,7 +1,7 @@
 import { apply, transpose, type Mat3 } from '../shared/rot';
 import { kv } from './storage';
 import { onViewport, viewport } from './bridge';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { azimuthDeg, type Cuboid } from '../shared/cuboid';
 import {
   applyLocalBox, viewFrame, dragCorner, dragEdge, dragMove, dragRotateRel, dragTilt, dragYawByX, hitTest, identityBox, localBoxOf, type Hit, type LocalBox,
@@ -18,17 +18,17 @@ import type { CvatAnnotations, CvatJob, CvatLabel, CvatTrack } from '../shared/t
 import { parseLabelSpecs } from '../shared/attributes';
 import { AttributePanel } from './AttributePanel';
 import { gpuActive } from './gpu';
-import { Help, Pill, Slider } from './ui';
-import { drawView, localize, rotateLocal, STATUS_COLOR, type Local, type Scene, type View } from './render';
+import { Help, PENDING_STYLE, Pill, Slider } from './ui';
+import { clampPan, drawView, localize, NO_PAN, panBy, panOffset, rotateLocal, STATUS_COLOR, type Local, type Pan, type Scene, type View } from './render';
 import { Cancelled, pointClouds } from './stores';
 import { issueKey, ignoreKey, ignoreStore, motionKey, overlapKey, shiftStore, useIgnored } from './shiftStore';
 import { CameraPanel } from './CameraPanel';
 import { qcStore, useQcMode, useQcNotes } from './qcStore';
 import { qcKey } from '../shared/qc';
 import { onAction } from './actions';
-import { fitReport, type FitReport } from '../shared/fit';
-import { footprintLow, groundSnap, tiltFromPlane, type GroundResult } from '../shared/ground';
-import { refineGround, type GroundFrameIn } from '../shared/groundTrack';
+import { DEFAULT_FIT, fitGroundOf, fitReport, type FitReport } from '../shared/fit';
+import { findLongOutsideGaps, SPLIT_OUTSIDE_FRAMES, type OutsideGap } from '../shared/splitId';
+import { confirmSnap, DEFAULT_GROUND, groundSnap, tiltFromPlane, type GroundResult, type GroundSector } from '../shared/ground';
 import { motionJump, type MotionWarning } from '../shared/motion';
 import { trackIssues, type FrameIssue, type IssueKind } from '../shared/qcrules';
 import { flagKey, flagState, type FlagMark, type FlagState } from '../shared/qcimport';
@@ -79,23 +79,27 @@ function cursorFor(view: View, hit: Hit, alt = false): string {
 
 interface DragState { hit: NonNullable<Hit>; x0: number; y0: number; base: LocalBox; moved: boolean }
 
-function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, mark, scene, overlays, tiltOn, autoSnap, onPreview, onCommit, onZoom }: {
+function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, mark, scene, overlays, tiltOn, autoSnap, onPreview, onCommit, onZoom, pan, onPan }: {
   scene: Scene; overlays: LocalBox[]; tiltOn: boolean; frame: Mat3 | null; // frame: khung nhìn căn theo box nghiêng (null nếu box không nghiêng)
   mark: { u: number; v: number; w: number } | null;
   ground: number | null; autoSnap: boolean;
+  groundMarks: GroundSector[]; contactW: number | null; // mặt đường đo được ở từng cung quanh box + lớp tiếp xúc dưới gầm (để vẽ)
   ghost: LocalBox | null; misfit: boolean; view: View; size: number; loc: Local | null; st: FrameState; half: number; box: LocalBox | null;
   onPreview: (b: LocalBox | null) => void; onCommit: (c: Cuboid) => void; onZoom: (factor: number) => void;
+  pan: Pan; onPan: (p: Pan) => void; // dời khung nhìn (giữ chuột phải kéo), dùng chung mọi view / frame
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const drag = useRef<DragState | null>(null);
+  const panDrag = useRef<{ x0: number; y0: number; base: Pan } | null>(null);
   const k = size / (2 * half);
+  const [ox, oy] = panOffset(view, pan, k);
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   useEffect(() => {
     const ctx = ref.current?.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawView(ctx, size, view, loc, box, half, st.status, !!drag.current, misfit, ghost, ground, mark, scene, overlays, st.cuboid);
-  }, [view, size, dpr, loc, st.status, st.cuboid, half, box, misfit, ghost, ground, mark, scene, overlays]);
+    drawView(ctx, size, view, loc, box, half, st.status, !!drag.current, misfit, ghost, ground, mark, scene, overlays, st.cuboid, groundMarks, contactW, pan);
+  }, [view, size, dpr, loc, st.status, st.cuboid, half, box, misfit, ghost, ground, groundMarks, contactW, mark, scene, overlays, pan]);
 
   // Cuộn chuột trên ô = phóng to/thu nhỏ mọi frame (listener gốc để chặn cuộn trang).
   const zoomRef = useRef(onZoom);
@@ -108,12 +112,21 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, ma
     return () => el.removeEventListener('wheel', on);
   }, []);
 
+  // Toạ độ chuột quy về khung nhìn CHƯA dời, để chọn cạnh / kéo / xoay box không phải biết tới việc dời.
   const pos = (e: React.PointerEvent) => {
     const r = ref.current!.getBoundingClientRect();
-    return [e.clientX - r.left, e.clientY - r.top] as const;
+    return [e.clientX - r.left - ox, e.clientY - r.top - oy] as const;
   };
 
   const down = (e: React.PointerEvent) => {
+    if (e.button === 2) {
+      // Giữ chuột phải kéo = dời khung nhìn (mọi frame cùng dời), không sửa box.
+      e.preventDefault();
+      ref.current!.setPointerCapture(e.pointerId);
+      panDrag.current = { x0: e.clientX, y0: e.clientY, base: pan };
+      ref.current!.style.cursor = 'grabbing';
+      return;
+    }
     if (!st.cuboid || e.button !== 0) return;
     const [px, py] = pos(e);
     const base = identityBox(st.cuboid);
@@ -126,6 +139,8 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, ma
   };
 
   const move = (e: React.PointerEvent) => {
+    const p = panDrag.current;
+    if (p) { onPan(panBy(view, p.base, (e.clientX - p.x0) / k, (e.clientY - p.y0) / k)); return; }
     const [px, py] = pos(e);
     const d = drag.current;
     if (!d) {
@@ -150,6 +165,11 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, ma
   };
 
   const up = () => {
+    if (panDrag.current) {
+      panDrag.current = null;
+      if (ref.current) ref.current.style.cursor = 'default';
+      return;
+    }
     const d = drag.current;
     drag.current = null;
     if (!d || !st.cuboid) return;
@@ -158,8 +178,9 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, ma
       // Tự bám mặt đất: sau khi dời / đổi cỡ, đặt lại độ cao để đáy chạm mặt đường tại vị trí mới.
       const geometryChanged = b.cu !== 0 || b.cv !== 0 || b.cw !== 0 || b.sx !== st.cuboid.sx || b.sy !== st.cuboid.sy || b.sz !== st.cuboid.sz;
       if (autoSnap && loc && geometryChanged && !frame) {
-        const g = groundSnap(loc, b.sx, b.sy, b.sz, { cu: b.cu, cv: b.cv, cw: b.cw });
-        if (g) b = { ...b, cw: b.cw + g.dz };
+        const at = { cu: b.cu, cv: b.cv, cw: b.cw, range: Math.hypot(st.cuboid.x, st.cuboid.y) };
+        const g = groundSnap(loc, b.sx, b.sy, b.sz, at);
+        if (g && confirmSnap(loc, b.sx, b.sy, b.sz, at, g)) b = { ...b, cw: b.cw + g.dz }; // đo lại tại chỗ mới phải ra cùng mặt đường
       }
       if (frame) { const [cu, cv, cw] = apply(transpose(frame), [b.cu, b.cv, b.cw]); b = { ...b, cu, cv, cw }; } // về hệ yaw
       onCommit(applyLocalBox(st.cuboid, b));
@@ -171,12 +192,22 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, ma
     <canvas
       ref={ref} width={Math.round(size * dpr)} height={Math.round(size * dpr)}
       style={{ display: 'block', width: size, height: size, touchAction: 'none' }}
-      onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => { drag.current = null; onPreview(null); }}
+      onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => { drag.current = null; panDrag.current = null; onPreview(null); }}
+      onContextMenu={(e) => e.preventDefault()}
     />
   );
 }
 
 const NO_ISSUES: FrameIssue[] = [];
+const NO_MARKS: GroundSector[] = [];
+
+const cm = (m: number) => Math.round(Math.abs(m) * 100);
+/** Hành động cần làm để đáy box nằm trên mặt đường ("nâng 12 cm" / "hạ 12 cm"), thay cho mũi tên dễ hiểu nhầm. */
+const groundAction = (g: GroundResult) => `${g.dz > 0 ? 'nâng' : 'hạ'} ${cm(g.dz)} cm`;
+const groundTip = (g: GroundResult) =>
+  `Đáy box ${g.dz < 0 ? 'CAO hơn' : 'THẤP hơn'} mặt đường ${cm(g.dz)} cm (cho phép ${g.dz < 0 ? 'cao' : 'thấp'} tới ${cm(g.dz < 0 ? DEFAULT_GROUND.floatTol : DEFAULT_GROUND.sinkTol)} cm) · độ bất định ±${cm(g.sigma)} cm · `
+  + `${g.nSectors} cung quanh box${g.contactW !== null ? ' + lớp tiếp xúc dưới gầm' : ''}${g.ambiguous ? ' · có hai tầng (vỉa hè?), chưa chắc chọn đúng' : ''}. `
+  + 'Vạch xanh lá ở view Bên / Trước: mặt đường đo được ở từng cung; vạch xanh lơ: lớp tiếp xúc dưới gầm. Phím G để snap.';
 
 /** [1,2,3,5,6,9] → [[1,3],[5,6],[9,9]] (các frame liền nhau gom thành một đoạn). */
 function toRanges(frames: number[]): [number, number][] {
@@ -192,8 +223,9 @@ const CHIP_BTN: React.CSSProperties = { padding: '0 3px', lineHeight: 1, height:
 interface FileFlag { kind: IssueKind; state: FlagState; msg?: string; det: boolean }
 const NO_FLAGS: FileFlag[] = [];
 
-function Column({ groundOv, groundOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame }: {
+function Column({ groundOv, groundOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan }: {
   onFocusFrame: (f: number) => void;
+  pan: Pan; onPan: (p: Pan) => void;
   fileFlags: FileFlag[]; onMarkFlag: (f: number, kind: IssueKind, mark: FlagMark | null) => void;
   tiltOn: boolean;
   issues: FrameIssue[]; issueIgnored: (kind: string) => boolean; onIgnoreIssue: (f: number, kind: string, on: boolean) => void;
@@ -233,15 +265,21 @@ function Column({ groundOv, groundOn, suggestOn, f, size, st, refCub, half, locH
     const [cu, cv, cw] = apply(M, [b.cu, b.cv, b.cw]);
     return { ...b, cu, cv, cw };
   };
+  // Mặt đường riêng của object ở frame này, đo độc lập với công tắc "dò mặt đất": để khi đếm điểm của vật (ít điểm / lệch / gợi ý)
+  // bỏ đúng lớp mặt đường thật thay vì một lớp cố định tính từ đáy box (box chìm / lơ lửng sẽ đếm sai).
+  const fitGround = useMemo(
+    () => (warn && loc && st.cuboid ? fitGroundOf(groundSnap(loc, st.cuboid.sx, st.cuboid.sy, st.cuboid.sz, { cu: 0, cv: 0, cw: 0, range: Math.hypot(st.cuboid.x, st.cuboid.y) })) : null),
+    [warn, loc, st.cuboid],
+  );
   // Tắt "gợi ý kích thước box" thì bỏ luôn cảnh báo lệch (lệch chỉ có ý nghĩa đi kèm gợi ý); ít điểm vẫn báo.
   const fit = useMemo(() => {
-    const r = warn && loc && st.cuboid ? fitReport(loc, st.cuboid.sx, st.cuboid.sy, st.cuboid.sz) : null;
+    const r = warn && loc && st.cuboid ? fitReport(loc, st.cuboid.sx, st.cuboid.sy, st.cuboid.sz, DEFAULT_FIT, fitGround) : null;
     return r && r.level === 'misfit' && !suggestOn ? null : r;
-  }, [warn, loc, st.cuboid, suggestOn]);
+  }, [warn, loc, st.cuboid, suggestOn, fitGround]);
   // Gợi ý sửa box khi cảnh báo lệch; hiện nét đứt trên 3 view, chấp nhận bằng nút / phím A.
   const sug = useMemo(
-    () => (suggestOn && !ignored && fit?.level === 'misfit' && loc && st.cuboid ? suggestBox(loc, st.cuboid.sx, st.cuboid.sy, st.cuboid.sz, fixed) : null),
-    [suggestOn, fit, loc, st.cuboid, fixed, ignored],
+    () => (suggestOn && !ignored && fit?.level === 'misfit' && loc && st.cuboid ? suggestBox(loc, st.cuboid.sx, st.cuboid.sy, st.cuboid.sz, fixed, DEFAULT_FIT, fitGround) : null),
+    [suggestOn, fit, loc, st.cuboid, fixed, ignored, fitGround],
   );
   useEffect(() => { onSuggest(f, sug); }, [f, sug]);
   // Gợi ý đã bỏ qua: không vẽ nét đứt, không tô điểm lọt ngoài, không tính vào cảnh báo.
@@ -310,10 +348,10 @@ function Column({ groundOv, groundOn, suggestOn, f, size, st, refCub, half, locH
         {overlap.map((o) => <span key={o.other} style={{ ...CHIP, background: '#ffd9a8', color: '#5a2d00' }} title={`Chồng với #${o.other} (IoU ${fmtIou(o.ratio)})`}>⚠ O #{o.other}</span>)}
         {fileFlags.filter((ff) => ff.state === 'open').map((ff) => <span key={ff.kind} style={{ ...CHIP, background: '#ffd6d6', color: '#600' }} title="Flag từ file QC mà tool không tự phát hiện">QC {ff.kind}</span>)}
         {shownMotion && <span style={{ ...CHIP, background: '#ffe9c7', color: '#6b3a00' }} title={shownMotion.message}>⚠ đi xa</span>}
-        {snap && Math.abs(snap.dz) >= 0.08 && <span style={{ ...CHIP, background: '#eaf6d8', color: '#2d5a00' }} title={snap.source === 'predicted' ? 'Đáy box lơ lửng / chìm so với mặt đường DỰ ĐOÁN từ các frame khác của cùng object (phép đo ở frame này lệch hoặc thiếu). Phím G để snap.' : 'Đáy box lơ lửng / chìm so với mặt đường (phím G để snap)'}>⏬ {snap.source === 'predicted' ? '~' : ''}{snap.dz < 0 ? '↑' : '↓'}{Math.abs(snap.dz).toFixed(2)}m</span>}
+        {snap?.warn && <span style={{ ...CHIP, background: '#eaf6d8', color: '#2d5a00' }} title={groundTip(snap)}>⏬ {groundAction(snap)}</span>}
       </div>
       {VIEWS.map((v) => (
-        <Cell key={v} frame={M} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} autoSnap={autoSnap} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} />
+        <Cell key={v} frame={M} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} pan={pan} onPan={onPan} />
       ))}
       {!pc && (
         <div style={{ fontSize: 11, padding: 2 }}>
@@ -388,9 +426,9 @@ function Column({ groundOv, groundOn, suggestOn, f, size, st, refCub, half, locH
           <button onClick={(e) => { e.stopPropagation(); onIgnoreMotion(f, false); }} style={{ padding: '0 4px' }}>hoàn lại</button>
         </div>
       )}
-      {snap && Math.abs(snap.dz) >= 0.08 && (
-        <div style={{ background: '#eaf6d8', color: '#2d5a00', fontSize: 11, padding: '1px 4px' }}>
-          ⏬ đáy {snap.dz < 0 ? 'lơ lửng' : 'chìm'} {Math.abs(snap.dz).toFixed(2)} m{snap.source === 'predicted' ? ' · mặt đường dự đoán từ các frame khác của object' : ''}{snap.method === 'plane' && snap.slopeDeg !== undefined ? ` · dốc ${snap.slopeDeg.toFixed(1)}°${snap.steep ? ' — dốc lớn, đáy chỉ chạm một phía' : ''}` : snap.flat ? '' : ' (mặt đất không phẳng)'}{' '}
+      {snap?.warn && (
+        <div style={{ background: '#eaf6d8', color: '#2d5a00', fontSize: 11, padding: '1px 4px' }} title={groundTip(snap)}>
+          ⏬ {groundAction(snap)}: đáy {snap.dz < 0 ? 'cao hơn' : 'thấp hơn'} mặt đường {cm(snap.dz)} cm (±{cm(snap.sigma)}){snap.slopeDeg >= 1 ? ` · dốc ${snap.slopeDeg.toFixed(1)}°${snap.steep ? ' — dốc lớn, đáy chỉ chạm một phía' : ''}` : ''}{' '}
           <button onClick={(e) => { e.stopPropagation(); onGround(f); }} style={{ padding: '0 4px' }} title="Dời box theo z để đáy chạm mặt đường (phím G)">snap</button>
         </div>
       )}
@@ -423,8 +461,9 @@ function IdBox({ value, max, onCommit }: { value: number; max: number; onCommit:
   );
 }
 
-export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, setSelectedNum, initialFrame, edited, onEdit, onTrack, focus, onView, onSel, onHoverFrame, labels, overlaps }: {
+export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, selectedNum, setSelectedNum, initialFrame, edited, onEdit, onTrack, focus, onView, onSel, onHoverFrame, labels, overlaps }: {
   overlaps: OverlapItem[]; // chồng lấn của cả job (đã bỏ cặp được bỏ qua)
+  onSplit: (trackIndex: number, resume: number) => number | null; // tách ID tại frame resume; trả số thứ tự object mới, null nếu không tách được
   onHoverFrame: (f: number | null) => void;
   onFocusFrame: (f: number) => void; // bấm đúp vào cột frame
   drift: Map<number, { f: number; dist: number }[]>; // trôi box theo số thứ tự object
@@ -566,6 +605,13 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
     };
   }, [baseHalf, track, prefs.slabMargin]);
   const locHalf = baseHalf / ZOOM_MIN;
+  // Dời khung nhìn (giữ chuột phải kéo trên ô): dùng chung mọi frame; không dời ra ngoài vùng điểm đã lọc; đổi object thì về giữa.
+  const [pan, setPan] = useState<Pan>(NO_PAN);
+  const panLim = Math.max(0, locHalf - half);
+  const panEff = useMemo(() => clampPan(pan, panLim), [pan, panLim]);
+  const panned = panEff.u !== 0 || panEff.v !== 0 || panEff.w !== 0;
+  const setPanClamped = useCallback((p: Pan) => setPan(clampPan(p, panLim)), [panLim]);
+  useEffect(() => setPan(NO_PAN), [num]);
 
   // Luật QC (S K Z H D) tính trên cả job để so mốc kích thước và frame liền trước đúng.
   const rawIssueMap = useMemo(() => {
@@ -766,7 +812,12 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
     if (!prefs.ground) return false;
     const st = track ? stateAt(track, f) : null;
     const g = snaps.get(f);
-    if (!st?.cuboid || !g) return false;
+    if (!st?.cuboid || !g?.confident) return false; // chỉ dời khi đủ căn cứ (≥ 2 cung cùng tầng hoặc có lớp tiếp xúc xác nhận, không mơ hồ)
+    // Đo lại tại vị trí sau khi dời: phép đo phụ thuộc đáy box, hai lần phải ra cùng mặt đường, không thì không dời.
+    const pc = pointClouds.peek(f);
+    if (!pc) return false;
+    const c0 = st.cuboid;
+    if (!confirmSnap(localize(pc, c0, 16), c0.sx, c0.sy, c0.sz, { cu: 0, cv: 0, cw: 0, range: Math.hypot(c0.x, c0.y) }, g)) return false;
     // Mặt dốc: nghiêng box song song mặt đường (roll / pitch) nếu bật và dốc đủ rõ; không thì chỉ dời z.
     if (prefs.tilt && g.method === 'plane' && g.plane && g.dzTilt !== undefined && (g.slopeDeg ?? 0) >= 1) {
       const t = tiltFromPlane(g.plane.a, g.plane.b, st.cuboid.yaw);
@@ -786,14 +837,30 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
     const done = list.filter((f) => groundFrame(f));
     setNote(done.length
       ? `Ground snap: đã hạ/nâng đáy box chạm mặt đường ở frame ${done.join(', ')}. Hoàn tác được.`
-      : `Không có gì để snap${hoverRef.current !== null || selFrame !== null ? ` ở frame ${hoverRef.current ?? selFrame}` : ''} (đã chạm đất, thiếu điểm mặt đường, hoặc lệch quá 1 m).`);
+      : `Không có gì để snap${hoverRef.current !== null || selFrame !== null ? ` ở frame ${hoverRef.current ?? selFrame}` : ''} (đã nằm trên mặt đường, thiếu điểm mặt đường, mặt đường mơ hồ như có vỉa hè, hoặc lệch quá 1 m).`);
+  };
+  // Outside dài (≥ SPLIT_OUTSIDE_FRAMES frame) rồi có box lại: gợi ý tách ID, có hộp xác nhận (xem trước) trước khi áp.
+  const outGaps = useMemo(() => (track ? findLongOutsideGaps(track, start, stop) : []), [track, start, stop]);
+  const splitAt = (g: OutsideGap) => {
+    if (!track) return;
+    const msg = `Tách ID object #${num}?\n\n`
+      + `• Outside ${g.len} frame (${g.from}–${g.to}), có box lại từ frame ${g.resume}.\n`
+      + `• Phần từ frame ${g.resume} trở đi thành object MỚI (cuối danh sách, chưa có trên CVAT tới khi upload).\n`
+      + `• Object #${num} giữ ID, giữ phần trước, và outside có keyframe từ frame ${g.resume} tới frame ${stop}.\n\n`
+      + 'Không xóa ID nào. Chỉ nằm trong nháp tới khi bạn upload.';
+    if (!window.confirm(msg)) return;
+    const n = onSplit(num - 1, g.resume);
+    setNote(n === null ? 'Không tách được: frame này không phải keyframe có box ngay sau đoạn outside.' : `Đã tách: object mới #${n} (từ frame ${g.resume}); #${num} outside từ frame ${g.resume}. Nằm trong nháp, chưa upload.`);
   };
   const misfitFrames = prefs.suggest ? frames.filter((f) => fits.get(f)?.level === 'misfit') : [];
   const sparseFrames = frames.filter((f) => fits.get(f)?.level === 'sparse');
 
-  const [cached, setCached] = useState(pointClouds.cachedCount());
-  useEffect(() => pointClouds.subscribe(() => setCached(pointClouds.cachedCount())), []);
-  // Mặt đường của object theo CẢ track: đo từng frame (đã tải point cloud) rồi tinh chỉnh bằng các frame lân cận (đo lẻ loi bị thay bằng dự đoán).
+  // Đếm sự kiện của kho point cloud (không đếm số frame trong bộ nhớ: job dài thì số đó đứng ở mức tối đa, frame mới tải không làm
+  // tính lại) và số frame đã từng tải của job (để hiển thị).
+  const [cloudTick, setCloudTick] = useState(0);
+  useEffect(() => pointClouds.subscribe(() => setCloudTick((x) => x + 1)), []);
+  const loadedFrames = useMemo(() => { let n = 0; for (let f = start; f <= stop; f++) if (pointClouds.everLoaded(f)) n++; return n; }, [cloudTick, start, stop]);
+  // Mặt đường của object theo CẢ track: đo ĐỘC LẬP ở từng frame (đã tải point cloud), không dự đoán từ frame khác; σ quyết định có báo hay không.
   const [series, setSeries] = useState<Map<number, GroundResult | null>>(new Map());
   // Độ khớp box ↔ cụm điểm (lệch / ít điểm) của CẢ track, tính chung vòng lặp với mặt đường; checked = số frame đã có point cloud để kiểm.
   const [fitSeries, setFitSeries] = useState<{ fits: Map<number, FitReport>; checked: number }>({ fits: new Map(), checked: 0 });
@@ -801,23 +868,24 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
     if (!(prefs.ground || warn) || !track) { setSeries(new Map()); setFitSeries({ fits: new Map(), checked: 0 }); return; }
     let live = true;
     const timer = window.setTimeout(async () => {
-      const ins: GroundFrameIn[] = [];
+      const grounds = new Map<number, GroundResult | null>();
       const fits = new Map<number, FitReport>();
       let checked = 0;
       for (let f = start; f <= stop && live; f++) {
         const c = stateAt(track, f).cuboid;
         const pc = c ? pointClouds.peek(f) : undefined;
-        if (!c || !pc) continue; // chưa tải point cloud thì chưa đo / chưa dự đoán frame đó
+        if (!c || !pc) continue; // chưa tải point cloud thì chưa đo frame đó
         const loc = localize(pc, c, 16);
         checked++;
-        if (prefs.ground) ins.push({ f, z: c.z, sz: c.sz, raw: groundSnap(loc, c.sx, c.sy, c.sz), footLowW: footprintLow(loc, c.sx, c.sy, c.sz) });
-        if (warn) fits.set(f, fitReport(loc, c.sx, c.sy, c.sz));
+        const g = groundSnap(loc, c.sx, c.sy, c.sz, { cu: 0, cv: 0, cw: 0, range: Math.hypot(c.x, c.y) });
+        if (prefs.ground) grounds.set(f, g);
+        if (warn) fits.set(f, fitReport(loc, c.sx, c.sy, c.sz, DEFAULT_FIT, fitGroundOf(g)));
         if (checked % 3 === 0) await new Promise((r) => window.setTimeout(r, 0));
       }
-      if (live) { setSeries(prefs.ground ? refineGround(ins) : new Map()); setFitSeries({ fits, checked }); }
+      if (live) { setSeries(prefs.ground ? grounds : new Map()); setFitSeries({ fits, checked }); }
     }, 300);
     return () => { live = false; window.clearTimeout(timer); };
-  }, [track, prefs.ground, warn, cached, start, stop]);
+  }, [track, prefs.ground, warn, cloudTick, start, stop]);
   // Tất cả lỗi đang có của object (cả track): lệch / ít điểm, đáy lơ lửng / chìm, chồng lấn; bỏ các frame đã bỏ qua.
   const allWarn = useMemo(() => {
     const misfit: number[] = [], sparse: number[] = [], ground: number[] = [], overl: number[] = [];
@@ -825,11 +893,13 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
       if (r.level === 'misfit') { if (prefs.suggest && !ign.has(ignoreKey(job.id, num, f))) misfit.push(f); }
       else if (r.level === 'sparse') sparse.push(f);
     }
-    if (prefs.ground) for (const [f, g] of series) if (g && Math.abs(g.dz) >= 0.08) ground.push(f);
+    if (prefs.ground) for (const [f, g] of series) if (g?.warn) ground.push(f);
     for (const f of ovAt.keys()) overl.push(f);
     const asc = (a: number, b: number) => a - b;
     return { misfit: misfit.sort(asc), sparse: sparse.sort(asc), ground: ground.sort(asc), overl: overl.sort(asc) };
   }, [fitSeries, series, ovAt, ign, job.id, num, prefs.ground, prefs.suggest]);
+  // Còn frame có box chưa có point cloud (đang tải ngầm): lệch / ít điểm / đáy của track chưa đủ dữ liệu → viền vàng.
+  const cloudPartial = fitSeries.checked < (row?.assigned ?? 0);
 
   // Nhảy tới frame hiện tại của CVAT khi đồng bộ.
   useEffect(() => {
@@ -859,7 +929,7 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
         case 'ground.snap': groundSelectedOrAll(); break;
         case 'zoom.in': zoomBy(1.25); break;
         case 'zoom.out': zoomBy(1 / 1.25); break;
-        case 'zoom.reset': setZoom(1); break;
+        case 'zoom.reset': setZoom(1); setPan(NO_PAN); break;
         case 'kf.unlockInner': unlockInner(); break;
         case 'kf.toggle': {
           const tgt = hoverRef.current ?? selFrame;
@@ -901,20 +971,23 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
         <label title="QC mode: hiện ô ghi chú ở mỗi cột frame (xuất Excel ở tab QC)" style={{ fontWeight: 600 }}><input type="checkbox" checked={qcOn} onChange={(e) => qcStore.setMode(e.target.checked)} /> QC</label>
         <label title="Cảnh báo box không bao đúng cụm điểm (điểm lọt ra ngoài box) hoặc dưới 6 điểm"><input type="checkbox" checked={warn} onChange={(e) => setWarn(e.target.checked)} /> cảnh báo lệch</label>
         {([
-          ['lệch', allWarn.misfit, '#a0006e', 'Box không bao đúng cụm điểm (cả track, các frame đã tải point cloud)'],
-          ['ít điểm', allWarn.sparse, '#a0006e', 'Dưới 6 điểm trong box (cả track, các frame đã tải point cloud)'],
-          ['⏬ đáy lơ lửng / chìm', allWarn.ground, '#2d5a00', 'Đáy box cách mặt đường từ 8 cm (cả track, theo mặt đường đã tinh chỉnh bằng các frame khác)'],
-          ['chồng lấn', allWarn.overl, '#b45a00', 'Box chồng lên object khác (xét chéo giữa các ID)'],
-        ] as [string, number[], string, string][]).filter(([, fr]) => fr.length > 0).map(([name, fr, color, tip]) => (
-          <span key={name} style={{ color, fontWeight: 600 }} title={tip + '. Bấm một đoạn để nhảy tới frame đầu của đoạn.'}>
-            ⚠ {name} ({fr.length}):{' '}
+          ['lệch', allWarn.misfit, '#a0006e', 'Box không bao đúng cụm điểm (cả track, các frame đã tải point cloud)', true],
+          ['ít điểm', allWarn.sparse, '#a0006e', 'Dưới 6 điểm trong box (cả track, các frame đã tải point cloud)', true],
+          ['⏬ đáy lơ lửng / chìm', allWarn.ground, '#2d5a00', `Đáy box lệch mặt đường quá ngưỡng (cả track, mặt đường đo riêng ở từng frame, trong ${DEFAULT_GROUND.maxRange} m quanh ego)`, true],
+          ['chồng lấn', allWarn.overl, '#b45a00', 'Box chồng lên object khác (xét chéo giữa các ID)', false],
+        ] as [string, number[], string, string, boolean][]).filter(([, fr]) => fr.length > 0).map(([name, fr, color, tip, needsCloud]) => (
+          <span
+            key={name} style={{ color, fontWeight: 600, ...(needsCloud && cloudPartial ? PENDING_STYLE : null) }}
+            title={tip + (needsCloud && cloudPartial ? `. Chưa đủ dữ liệu: mới kiểm ${fitSeries.checked}/${row?.assigned ?? 0} frame có box, các frame còn lại đang tải ngầm` : '') + '. Bấm một đoạn để nhảy tới frame đầu của đoạn.'}
+          >
+            {needsCloud && cloudPartial ? '⏳' : '⚠'} {name} ({fr.length}):{' '}
             {toRanges(fr).map(([x, y]) => (
               <button key={x} onClick={() => goFrame(x)} style={{ padding: '0 3px', marginRight: 2, fontWeight: 600, color }}>{x === y ? x : `${x}–${y}`}</button>
             ))}
           </span>
         ))}
-        {warn && fitSeries.checked < (row?.assigned ?? 0) && (
-          <span style={{ color: '#666', fontSize: 11 }} title="Lệch / ít điểm / đáy chỉ kiểm được ở frame đã tải point cloud; đang tải nền các frame còn lại">(đã kiểm {fitSeries.checked}/{row?.assigned ?? 0} frame có box)</span>
+        {(warn || prefs.ground) && cloudPartial && (
+          <span style={{ color: '#666', fontSize: 11, ...PENDING_STYLE }} title="Lệch / ít điểm / đáy chỉ kiểm được ở frame đã tải point cloud; các frame còn lại đang tải ngầm, số liệu tự cập nhật">(đã kiểm {fitSeries.checked}/{row?.assigned ?? 0} frame có box)</span>
         )}
         {trackSummary.byKind.map(([kind, fr]) => (
           <span key={kind} style={{ color: '#a0006e', fontWeight: 600 }} title="Cả track. S scale không đồng bộ, K kích thước ngoài ngưỡng, Z z ngoài ngưỡng, H đổi hướng đột ngột, D quá xa, T trôi box (vật đứng yên mà box nhích). Bấm một đoạn để nhảy tới frame đầu của đoạn.">
@@ -926,6 +999,16 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
               onClick={() => { ignoreStore.set(fr.map((f) => issueKey(job.id, num, f, kind)), true); setNote(`Đã bỏ qua ${fr.length} cảnh báo ${kind} của object #${num}.`); }}
               style={{ padding: '0 3px', fontSize: 10 }} title={`Bỏ qua cả ${fr.length} frame ${kind} của object này (theo lô)`}
             >✖ bỏ qua tất cả</button>
+          </span>
+        ))}
+        {outGaps.map((g) => (
+          <span key={g.from} style={{ color: '#7a1f1f', fontWeight: 600 }} title={`Outside liên tục ${g.len} frame (${g.from}–${g.to}) rồi có box lại từ frame ${g.resume}. Từ ${SPLIT_OUTSIDE_FRAMES} frame trở lên nên tách ID (guideline).`}>
+            ⚠ outside {g.len} frame ({g.from}–{g.to}){' '}
+            <button
+              onClick={() => splitAt(g)}
+              style={{ padding: '0 4px', fontWeight: 600 }}
+              title={`Tách ID: phần từ frame ${g.resume} thành object MỚI (nằm cuối danh sách, chưa lên CVAT cho tới khi upload); object #${num} giữ phần trước và outside có keyframe tới cuối job. Có hộp xác nhận, hoàn tác bằng cách không upload nháp.`}
+            >✂ tách ID từ frame {g.resume}</button>
           </span>
         ))}
         {trackSummary.far.length > 0 && (
@@ -945,7 +1028,8 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
           <legend style={{ fontSize: 11, fontWeight: 700, color: '#456', padding: '0 4px' }}>Hiển thị</legend>
         <span>
           Zoom <button onClick={() => zoomBy(1 / 1.25)}>−</button> <b>{Math.round(zoom * 100)}%</b>{' '}
-          <button onClick={() => zoomBy(1.25)}>+</button> <button onClick={() => setZoom(1)}>Vừa object</button>
+          <button onClick={() => zoomBy(1.25)}>+</button> <button onClick={() => { setZoom(1); setPan(NO_PAN); }} title="Zoom 100% và đưa box về giữa ô">Vừa object</button>{' '}
+          <button onClick={() => setPan(NO_PAN)} disabled={!panned} style={panned ? { fontWeight: 700, color: '#a16207' } : undefined} title="Đưa khung nhìn về giữa box (đang dời bằng chuột phải). Giữ chuột phải trên ô rồi kéo để dời khung nhìn.">⌖ Về giữa</button>
         </span>
         <span>
           Cỡ ô{' '}
@@ -1020,7 +1104,7 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
         <label title="Gợi ý box: khi box lệch cụm điểm, đề xuất box mới (nét đứt xanh lơ, nút ✔ nhận, phím A) kèm cảnh báo ⚠ lệch. Tắt: không có gợi ý và không có cảnh báo lệch (⚠ ít điểm vẫn hiện)." style={{ fontWeight: 600 }}>
           <input type="checkbox" checked={prefs.suggest} onChange={(e) => updatePrefs({ ...prefs, suggest: e.target.checked })} /> gợi ý kích thước box
         </label>
-        <label title="Dò mặt đất: đo mặt đường quanh object ở từng frame và tinh chỉnh bằng các frame khác của cùng object (đo lẻ loi bị thay bằng dự đoán). Tắt: không còn chip ⏬, không có Ground snap (G) và tự bám mặt đất." style={{ fontWeight: 600 }}>
+        <label title={`Dò mặt đất: đo mặt đường riêng cho object ở đúng frame đang xét (lớp thấp nhất có mật độ ở 8 cung quanh box + lớp tiếp xúc dưới gầm), không dự đoán từ frame khác. Báo khi đáy cao hơn mặt đường quá ${cm(DEFAULT_GROUND.floatTol)} cm hoặc thấp hơn quá ${cm(DEFAULT_GROUND.sinkTol)} cm và vượt độ bất định của phép đo. Tắt: không còn chip ⏬, không có Ground snap (G) và tự bám mặt đất.`} style={{ fontWeight: 600 }}>
           <input type="checkbox" checked={prefs.ground} onChange={(e) => updatePrefs({ ...prefs, ground: e.target.checked })} /> dò mặt đất
         </label>
         <label title="Sau mỗi lần dời / đổi cỡ box bằng chuột, tự đặt lại độ cao cho đáy chạm mặt đường tại vị trí mới">
@@ -1038,7 +1122,7 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
             <Pill title="ID trong database của CVAT">db {row.id || '—'}</Pill>
           </span>
         )}
-        <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>cửa sổ: {frames.filter((f) => pointClouds.has(f)).length}/{frames.length} · {gpuActive() ? 'GPU ✓ · ' : ''}đã tải trước: {cached}/{stop - start + 1}{pointClouds.secondsPerFrame() !== null && cached < stop - start + 1 ? ` · ~${pointClouds.secondsPerFrame()!.toFixed(1)} s/frame` : ''}</span>
+        <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>cửa sổ: {frames.filter((f) => pointClouds.has(f)).length}/{frames.length} · {gpuActive() ? 'GPU ✓ · ' : ''}đã tải: {loadedFrames}/{stop - start + 1}{pointClouds.secondsPerFrame() !== null && loadedFrames < stop - start + 1 ? ` · ~${pointClouds.secondsPerFrame()!.toFixed(1)} s/frame` : ''}</span>
         {note && <span style={{ color: '#7a4b00' }}>{note}</span>}
       </div>
       <details open style={{ margin: '0 0 6px', background: '#f8fbff', border: '1px solid #cfe0f5', padding: '2px 6px' }}>
@@ -1065,12 +1149,12 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
         })()}
       </details>
       <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>
-        Mẹo thao tác <Help text={"phím K / O / G / A / I tác dụng lên cột frame đang trỏ chuột (viền xanh) · xem/đổi phím ở tab \"Phím tắt\" · cuộn chuột trên ô để zoom mọi frame · kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo để xoay (view Trên: yaw · view Bên: pitch · view Trước: roll, nếu bật \"nghiêng theo mặt đường\") · sửa frame nào thì frame đó thành keyframe"} />
+        Mẹo thao tác <Help text={"phím K / O / G / A / I tác dụng lên cột frame đang trỏ chuột (viền xanh) · xem/đổi phím ở tab \"Phím tắt\" · cuộn chuột trên ô để zoom mọi frame · giữ chuột phải rồi kéo để dời khung nhìn (mọi frame cùng dời), nút ⌖ Về giữa / phím 0 để đưa về giữa · kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo để xoay (view Trên: yaw · view Bên: pitch · view Trước: roll, nếu bật \"nghiêng theo mặt đường\") · sửa frame nào thì frame đó thành keyframe"} />
       </div>
       <div style={{ display: 'flex', gap: prefs.gap, overflowX: 'auto', justifyContent: 'safe center', padding: '2px 4px 6px' }}>
         {cols.map((c) => (
           <Column
-            key={c.f} f={c.f} size={size} st={c.st} refCub={c.ref} half={half} locHalf={locHalf} selected={selFrame === c.f}
+            key={c.f} f={c.f} size={size} st={c.st} refCub={c.ref} half={half} locHalf={locHalf} selected={selFrame === c.f} pan={panEff} onPan={setPanClamped}
             edited={edited.has(`${num}:${c.f}`)} warn={warn} fixed={!dyn} ignored={ign.has(ignoreKey(job.id, num, c.f))}
             onIgnore={(f, on) => ignoreFrames([f], on)}
             motion={c.mot} motionIgnored={ign.has(motionKey(job.id, num, c.f))}

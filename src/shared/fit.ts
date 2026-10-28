@@ -1,5 +1,28 @@
+import { DEFAULT_GROUND, groundSnap } from './ground';
+
 /** Điểm trong hệ tọa độ của box: u dọc hướng box, v sang trái, w lên; gốc = tâm box. */
 export interface LocalPoints { u: Float32Array; v: Float32Array; w: Float32Array; n: number }
+
+/** Mặt đường đo được dưới object (hệ box: w = a·u + b·v + c là mặt trên lớp điểm mặt đường) và bề dày dải bỏ qua phía trên nó. */
+export interface FitGround { a: number; b: number; c: number; clear: number }
+
+/**
+ * Chỉ dùng mặt đường đo được khi phép đo đủ căn cứ; dải bỏ qua = max(groundClear, 3 × phần dư của phép khớp). Không có thì null
+ * (đếm điểm như cũ: bỏ lớp groundClear tính từ đáy box).
+ */
+export function fitGroundOf(
+  g: { confident: boolean; plane: { a: number; b: number; c: number }; rms: number } | null | undefined, cfg: FitConfig = DEFAULT_FIT,
+): FitGround | null {
+  return g?.confident ? { a: g.plane.a, b: g.plane.b, c: g.plane.c, clear: Math.max(cfg.groundClear, 3 * g.rms) } : null;
+}
+
+/**
+ * Độ cao thấp nhất (w) của một điểm để được tính là của vật tại (u, v). Có mặt đường đo được: trên mặt đường + dải bỏ qua, nhưng
+ * không thấp hơn đáy box — box chìm thì bỏ được lớp mặt đường nằm trong box, box lơ lửng thì không cắt mất bánh xe / chân. Không có:
+ * cách đáy box groundClear như cũ (box chìm sâu hơn mức này thì mặt đường bị đếm nhầm là điểm của vật).
+ */
+export const objectFloor = (hw: number, cfg: FitConfig, ground: FitGround | null) => (u: number, v: number) =>
+  ground ? Math.max(ground.a * u + ground.b * v + ground.c + ground.clear, -hw) : -hw + cfg.groundClear;
 
 export interface FitConfig {
   margin: number; // m: vùng quanh box được xét để tìm điểm nằm ngoài
@@ -25,12 +48,13 @@ export interface FitReport {
 
 /**
  * Như fitReport nhưng nhận thẳng point cloud (xyz xen kẽ, hệ ego) và box; chỉ gom điểm quanh box nên không cấp phát theo cả frame.
- * Dùng khi cần kiểm hàng loạt (mọi object × mọi frame).
+ * Dùng khi cần kiểm hàng loạt (mọi object × mọi frame). Gom cả vành mặt đường quanh box để đo mặt đường riêng của object (dải bỏ qua).
  */
 export function fitReportAt(
   xyz: Float32Array, count: number, c: { x: number; y: number; z: number; yaw: number; sx: number; sy: number; sz: number }, cfg: FitConfig = DEFAULT_FIT,
 ): FitReport {
-  const hu = c.sx / 2 + cfg.margin, hv = c.sy / 2 + cfg.margin, hw = c.sz / 2;
+  const ring = Math.max(cfg.margin, DEFAULT_GROUND.farRing + 0.1);
+  const hu = c.sx / 2 + ring, hv = c.sy / 2 + ring, hw = c.sz / 2;
   const cos = Math.cos(c.yaw), sin = Math.sin(c.yaw), r = Math.hypot(hu, hv);
   const us: number[] = [], vs: number[] = [], ws: number[] = [];
   for (let i = 0; i < count; i++) {
@@ -39,12 +63,14 @@ export function fitReportAt(
     const dy = xyz[i * 3 + 1]! - c.y;
     if (dy > r || dy < -r) continue;
     const dz = xyz[i * 3 + 2]! - c.z;
-    if (dz > hw + cfg.margin || dz < -hw - 1) continue;
+    if (dz > hw + Math.max(cfg.margin, DEFAULT_GROUND.band[1]) || dz < -hw - DEFAULT_GROUND.band[0]) continue;
     const u = dx * cos + dy * sin, v = -dx * sin + dy * cos;
     if (u > hu || u < -hu || v > hv || v < -hv) continue;
     us.push(u); vs.push(v); ws.push(dz);
   }
-  return fitReport({ u: Float32Array.from(us), v: Float32Array.from(vs), w: Float32Array.from(ws), n: us.length }, c.sx, c.sy, c.sz, cfg);
+  const local = { u: Float32Array.from(us), v: Float32Array.from(vs), w: Float32Array.from(ws), n: us.length };
+  const ground = groundSnap(local, c.sx, c.sy, c.sz, { cu: 0, cv: 0, cw: 0, range: Math.hypot(c.x, c.y) });
+  return fitReport(local, c.sx, c.sy, c.sz, cfg, fitGroundOf(ground, cfg));
 }
 
 /**
@@ -53,15 +79,16 @@ export function fitReportAt(
  * ngay sát mặt box (box thiếu / dời sai) so với điểm nằm trong.
  */
 export function fitReport(
-  p: LocalPoints, sx: number, sy: number, sz: number, cfg: FitConfig = DEFAULT_FIT,
+  p: LocalPoints, sx: number, sy: number, sz: number, cfg: FitConfig = DEFAULT_FIT, ground: FitGround | null = null,
 ): FitReport {
   const hu = sx / 2, hv = sy / 2, hw = sz / 2;
+  const floor = objectFloor(hw, cfg, ground);
   let inside = 0, outside = 0;
   const cnt: Record<Side, number> = { trước: 0, sau: 0, trái: 0, phải: 0, trên: 0 };
   const sum: Record<Side, number> = { trước: 0, sau: 0, trái: 0, phải: 0, trên: 0 };
   for (let i = 0; i < p.n; i++) {
     const u = p.u[i]!, v = p.v[i]!, w = p.w[i]!;
-    if (w < -hw + cfg.groundClear) continue; // mặt đường / đáy
+    if (w < floor(u, v)) continue; // mặt đường / đáy
     if (Math.abs(u) > hu + cfg.margin || Math.abs(v) > hv + cfg.margin || w > hw + cfg.margin) continue;
     const exU = Math.abs(u) - hu, exV = Math.abs(v) - hv, exW = w - hw;
     if (exU <= 0 && exV <= 0 && exW <= 0) { inside++; continue; }

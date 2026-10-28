@@ -32,7 +32,7 @@ for (const [name, entry] of [
   });
 }
 
-// Panel (React) chạy trong iframe của extension.
+// Panel (React) chạy trong iframe của extension, và trang Cài đặt (danh sách máy chủ CVAT).
 await build({
   configFile: false,
   publicDir: false,
@@ -40,7 +40,7 @@ await build({
   plugins: [react()],
   logLevel: 'warn',
   define,
-  build: { outDir: out, emptyOutDir: false, rollupOptions: { input: 'panel.html' } },
+  build: { outDir: out, emptyOutDir: false, rollupOptions: { input: ['panel.html', 'options.html'] } },
 });
 
 // Chrome / Edge từ chối nạp content script không phải UTF-8 hợp lệ ("It isn't UTF-8 encoded"), ví dụ khi bundle chứa ký tự

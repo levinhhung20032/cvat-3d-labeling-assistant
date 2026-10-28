@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { kv } from './storage';
+import { kv, whenStorageReady } from './storage';
 import { flagKey, type FlagMark, type QcFlag, type QcImport } from '../shared/qcimport';
 
 /** Flag nhập từ file QC (theo job) và đánh dấu ignore / fixed của từng flag. Lưu cục bộ trong extension, không gửi đi đâu. */
@@ -16,6 +16,8 @@ let marks: Record<string, FlagMark> = readJson(MARK_KEY, {}, isObj);
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 const subscribe = (cb: () => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; };
+// Nạp lại khi kho extension sẵn sàng (chế độ nhúng: module có thể được nạp trước), tránh ghi đè dữ liệu thật bằng trạng thái rỗng.
+whenStorageReady(() => { imports = readJson(IMP_KEY, {}, isObj); marks = readJson(MARK_KEY, {}, isObj); emit(); });
 const save = () => {
   try { kv.set(IMP_KEY, JSON.stringify(imports)); kv.set(MARK_KEY, JSON.stringify(marks)); } catch { /* bỏ qua */ }
 };

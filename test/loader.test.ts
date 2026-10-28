@@ -129,3 +129,64 @@ describe('tạm dừng tải nền (nhường server cho CVAT)', () => {
     vi.useRealTimers();
   });
 });
+
+describe('frame đã từng tải (để báo "đã tải xong")', () => {
+  it('frame bị đẩy khỏi bộ nhớ LRU vẫn được tính là đã tải; frame chưa tải thì không', async () => {
+    const loader = new CloudLoader(2, 6, 2, 5, async () => new ArrayBuffer(0), () => ({ count: 0, xyz: new Float32Array(0), rgb: null }) as PointCloud);
+    for (const n of [1, 2, 3]) await loader.get(n);
+    expect(loader.cachedCount()).toBe(2); // bộ nhớ chỉ giữ 2 frame
+    expect(loader.peek(1)).toBeUndefined();
+    expect([1, 2, 3].every((n) => loader.everLoaded(n))).toBe(true);
+    expect(loader.everLoaded(4)).toBe(false);
+  });
+});
+
+describe('frame tải lỗi (để tiến độ "tải xong" không kẹt mãi)', () => {
+  it('lỗi sau mọi lần thử lại → failed; tải lại được thì không còn tính là lỗi', async () => {
+    vi.useFakeTimers();
+    let ok = false;
+    const loader = new CloudLoader(64, 6, 2, 5, async () => { if (!ok) throw new Error('HTTP 502'); return new ArrayBuffer(0); }, () => ({ count: 0, xyz: new Float32Array(0), rgb: null }) as PointCloud);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const p = loader.get(7).catch(() => 'failed');
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await p).toBe('failed');
+    expect(loader.failed(7)).toBe(true);
+    expect(loader.failed(8)).toBe(false);
+    ok = true;
+    await loader.get(7);
+    expect(loader.failed(7)).toBe(false);
+    expect(loader.everLoaded(7)).toBe(true);
+    warn.mockRestore();
+    vi.useRealTimers();
+  });
+});
+
+describe('tải nền cả job song song với cửa sổ Batch Review', () => {
+  it('kế hoạch cửa sổ đặt lại KHÔNG hủy tải nền; frame cửa sổ chạy trước', () => {
+    const s = fake({ total: 6, bg: 2, idle: 1 });
+    s.loader.background(new Map([10, 11, 12].map((f) => [f, 100 + f])));
+    s.loader.plan(new Map([[1, 0], [2, 0]]));
+    expect(s.started.slice(0, 1)).toEqual([10]); // tải nền đã chạy trước khi có cửa sổ
+    expect(s.started).toContain(1);
+    expect(s.started).toContain(2);
+    s.loader.plan(new Map([[3, 0]])); // đổi cửa sổ
+    expect(s.started).toContain(3);
+    // các frame nền còn xếp hàng vẫn còn: hoàn thành các yêu cầu đang chạy thì chúng được chạy tiếp
+    return (async () => {
+      for (const n of [10, 1, 2, 3]) if (s.started.includes(n)) await s.finish(n);
+      expect(s.started).toContain(11);
+    })();
+  });
+  it('frame đang được giữ (đã tải nhưng chưa tính) không bị đẩy khỏi bộ nhớ khi đầy; frame khác thì bị đẩy như thường', async () => {
+    const loader = new CloudLoader(2, 6, 2, 5, async () => new ArrayBuffer(0), () => ({ count: 0, xyz: new Float32Array(0), rgb: null }) as PointCloud);
+    const keep = new Set([1]);
+    loader.setKeep((n) => keep.has(n));
+    for (const n of [1, 2, 3]) await loader.get(n);
+    expect(loader.peek(1)).toBeDefined(); // cũ nhất nhưng đang giữ
+    expect(loader.peek(2)).toBeUndefined();
+    expect(loader.peek(3)).toBeDefined();
+    keep.clear();
+    await loader.get(4);
+    expect(loader.peek(1)).toBeUndefined(); // hết giữ thì bị đẩy như thường
+  });
+});

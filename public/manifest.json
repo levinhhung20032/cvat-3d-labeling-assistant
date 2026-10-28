@@ -11,6 +11,13 @@
   "host_permissions": [
     "https://cvat-a.example.com/*"
   ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "background": {
     "service_worker": "background.js"
   },

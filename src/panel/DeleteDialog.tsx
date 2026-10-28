@@ -10,8 +10,9 @@ import { madeStore } from './madeStore';
  * không có đường nào để xóa. Mặc định chạy thử; xóa thật cần tick xác nhận. Không hoàn tác được trên CVAT (nội dung trước khi xóa
  * được ghi vào nhật ký cục bộ).
  */
-export function DeleteDialog({ job, baseline, labels, ids, onClose, onDone }: {
+export function DeleteDialog({ job, baseline, labels, ids, onClose, onDone, onBeforeReload }: {
   job: CvatJob; baseline: CvatAnnotations; labels: CvatLabel[]; ids: number[]; onClose: () => void; onDone: () => void;
+  onBeforeReload: () => void; // ngay trước khi tải lại tab CVAT: ghi lại chỗ đang làm
 }) {
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => { scrollIntoPanel(root.current); }, []);
@@ -33,7 +34,7 @@ export function DeleteDialog({ job, baseline, labels, ids, onClose, onDone }: {
     setBusy(false); setResult(r);
     if (real && r.ok && r.sent && r.stage === 'done') {
       madeStore.remove(job.id, r.deletedIds ?? ids);
-      window.setTimeout(() => { onDone(); post({ type: 'reloadCvat' }); }, 1500);
+      window.setTimeout(() => { onDone(); onBeforeReload(); post({ type: 'reloadCvat' }); }, 1500);
     }
   };
 

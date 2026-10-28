@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CVAT 3D Assistant · Cài đặt</title>
+    <style>
+      :root { --bg: #f6f7f9; --card: #fff; --text: #1f2937; --muted: #5b6575; --line: #d5dbe3; --accent: #2563eb; --ok: #15803d; --bad: #b91c1c; }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg: #15181d; --card: #1e232a; --text: #e5e7eb; --muted: #9aa4b2; --line: #333a44; --accent: #60a5fa; --ok: #4ade80; --bad: #f87171; }
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, sans-serif; }
+      main { max-width: 640px; margin: 32px auto; padding: 0 16px; }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      p.lead { color: var(--muted); margin: 0 0 20px; }
+      section { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
+      h2 { font-size: 14px; margin: 0 0 10px; }
+      ul { list-style: none; margin: 0 0 14px; padding: 0; }
+      li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
+      li:first-child { border-top: 0; }
+      li code { flex: 1; font-size: 13px; overflow-wrap: anywhere; }
+      .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 9px; padding: 0 7px; }
+      form { display: flex; gap: 8px; }
+      input { flex: 1; min-width: 0; font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
+      button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      #msg { min-height: 1.5em; margin: 10px 0 0; }
+      #msg.ok { color: var(--ok); } #msg.bad { color: var(--bad); }
+      .note { color: var(--muted); font-size: 12px; margin: 14px 0 0; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Máy chủ CVAT</h1>
+      <p class="lead">Tool chỉ chạy trên trang job (<code>/tasks/…/jobs/…</code>) của các máy chủ dưới đây. Thêm máy chủ mới không cần sửa code.</p>
+      <section>
+        <h2>Đang dùng</h2>
+        <ul id="list"></ul>
+        <form id="add">
+          <input id="host" placeholder="vd: cvat-b.example.com hoặc dán URL bất kỳ của trang CVAT" autocomplete="off" spellcheck="false" />
+          <button class="primary" type="submit">Thêm</button>
+        </form>
+        <p id="msg" role="status"></p>
+        <p class="note">Bấm "Thêm" thì trình duyệt hỏi cấp quyền cho đúng tên miền đó (chỉ https). Tool chỉ gửi request tới chính máy chủ CVAT của tab, dùng phiên đăng nhập sẵn có; không đọc cookie hay mật khẩu. Máy chủ mới chạy ở chế độ nhúng trong trang; sau khi thêm, quay lại tab CVAT và bấm biểu tượng extension.</p>
+      </section>
+    </main>
+    <script type="module" src="/src/options/main.ts"></script>
+  </body>
+</html>
