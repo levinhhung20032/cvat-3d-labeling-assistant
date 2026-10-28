@@ -27,7 +27,7 @@ import { qcStore, useQcMode, useQcNotes } from './qcStore';
 import { qcKey } from '../shared/qc';
 import { onAction } from './actions';
 import { fitReport, type FitReport } from '../shared/fit';
-import { groundSnap, tiltFromPlane, type GroundResult } from '../shared/ground';
+import { footprintLow, groundSnap, tiltFromPlane, type GroundResult } from '../shared/ground';
 import { refineGround, type GroundFrameIn } from '../shared/groundTrack';
 import { motionJump, type MotionWarning } from '../shared/motion';
 import { trackIssues, type FrameIssue, type IssueKind } from '../shared/qcrules';
@@ -48,15 +48,15 @@ const ZOOM_MIN = 0.5, ZOOM_MAX = 8;
 const CELL_MIN = 110, CELL_MAX = 520;
 
 // --- tùy chọn hiển thị, nhớ theo từng người dùng (chỉ là tiện ích, không quan trọng nếu mất) ---
-interface Prefs { auto: boolean; size: number; slabMargin: number; perWin: number; keyOnly: boolean; tilt: boolean; gap: number; ground: boolean }
-const PREFS_DEFAULT: Prefs = { auto: true, size: 200, slabMargin: 0.5, perWin: 6, keyOnly: false, tilt: true, gap: 28, ground: true };
+interface Prefs { auto: boolean; size: number; slabMargin: number; perWin: number; keyOnly: boolean; tilt: boolean; gap: number; ground: boolean; suggest: boolean }
+const PREFS_DEFAULT: Prefs = { auto: true, size: 200, slabMargin: 0.5, perWin: 6, keyOnly: false, tilt: true, gap: 28, ground: true, suggest: true };
 const loadPrefs = (): Prefs => {
   try {
     const p = JSON.parse(kv.get('cvla-prefs') ?? '{}') as Partial<Prefs>;
     const num = (v: unknown, d: number, lo: number, hi: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
     return {
       auto: p.auto ?? true, size: num(p.size, 200, CELL_MIN, CELL_MAX), slabMargin: num(p.slabMargin, 0.5, 0, 3),
-      perWin: Math.round(num(p.perWin, 6, 2, 30)), keyOnly: p.keyOnly === true, tilt: p.tilt !== false, gap: Math.round(num(p.gap, 28, 4, 80)), ground: p.ground !== false,
+      perWin: Math.round(num(p.perWin, 6, 2, 30)), keyOnly: p.keyOnly === true, tilt: p.tilt !== false, gap: Math.round(num(p.gap, 28, 4, 80)), ground: p.ground !== false, suggest: p.suggest !== false,
     };
   } catch { return { ...PREFS_DEFAULT }; }
 };
@@ -192,7 +192,7 @@ const CHIP_BTN: React.CSSProperties = { padding: '0 3px', lineHeight: 1, height:
 interface FileFlag { kind: IssueKind; state: FlagState; msg?: string; det: boolean }
 const NO_FLAGS: FileFlag[] = [];
 
-function Column({ groundOv, groundOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame }: {
+function Column({ groundOv, groundOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame }: {
   onFocusFrame: (f: number) => void;
   fileFlags: FileFlag[]; onMarkFlag: (f: number, kind: IssueKind, mark: FlagMark | null) => void;
   tiltOn: boolean;
@@ -202,6 +202,7 @@ function Column({ groundOv, groundOn, f, size, st, refCub, half, locHalf, select
   onToggleOutside: (f: number) => void; onHover: (f: number | null) => void; scene: Scene;
   motion: MotionWarning | null; motionIgnored: boolean; onIgnoreMotion: (f: number, on: boolean) => void;
   autoSnap: boolean; onSnap: (f: number, g: GroundResult | null) => void; onGround: (f: number) => void;
+  suggestOn: boolean; // công tắc gợi ý sửa box (kích thước / vị trí) khi lệch
   groundOv: GroundResult | null; groundOn: boolean; // mặt đường đã tinh chỉnh theo các frame khác của object (BatchReview tính); groundOn: công tắc dò mặt đất
   ignored: boolean; onIgnore: (f: number, on: boolean) => void;
   fixed: boolean; onSuggest: (f: number, s: Suggestion | null) => void; onAccept: (f: number, s: Suggestion) => void;
@@ -232,14 +233,15 @@ function Column({ groundOv, groundOn, f, size, st, refCub, half, locHalf, select
     const [cu, cv, cw] = apply(M, [b.cu, b.cv, b.cw]);
     return { ...b, cu, cv, cw };
   };
-  const fit = useMemo(
-    () => (warn && loc && st.cuboid ? fitReport(loc, st.cuboid.sx, st.cuboid.sy, st.cuboid.sz) : null),
-    [warn, loc, st.cuboid],
-  );
+  // Tắt "gợi ý kích thước box" thì bỏ luôn cảnh báo lệch (lệch chỉ có ý nghĩa đi kèm gợi ý); ít điểm vẫn báo.
+  const fit = useMemo(() => {
+    const r = warn && loc && st.cuboid ? fitReport(loc, st.cuboid.sx, st.cuboid.sy, st.cuboid.sz) : null;
+    return r && r.level === 'misfit' && !suggestOn ? null : r;
+  }, [warn, loc, st.cuboid, suggestOn]);
   // Gợi ý sửa box khi cảnh báo lệch; hiện nét đứt trên 3 view, chấp nhận bằng nút / phím A.
   const sug = useMemo(
-    () => (!ignored && fit?.level === 'misfit' && loc && st.cuboid ? suggestBox(loc, st.cuboid.sx, st.cuboid.sy, st.cuboid.sz, fixed) : null),
-    [fit, loc, st.cuboid, fixed, ignored],
+    () => (suggestOn && !ignored && fit?.level === 'misfit' && loc && st.cuboid ? suggestBox(loc, st.cuboid.sx, st.cuboid.sy, st.cuboid.sz, fixed) : null),
+    [suggestOn, fit, loc, st.cuboid, fixed, ignored],
   );
   useEffect(() => { onSuggest(f, sug); }, [f, sug]);
   // Gợi ý đã bỏ qua: không vẽ nét đứt, không tô điểm lọt ngoài, không tính vào cảnh báo.
@@ -786,7 +788,7 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
       ? `Ground snap: đã hạ/nâng đáy box chạm mặt đường ở frame ${done.join(', ')}. Hoàn tác được.`
       : `Không có gì để snap${hoverRef.current !== null || selFrame !== null ? ` ở frame ${hoverRef.current ?? selFrame}` : ''} (đã chạm đất, thiếu điểm mặt đường, hoặc lệch quá 1 m).`);
   };
-  const misfitFrames = frames.filter((f) => fits.get(f)?.level === 'misfit');
+  const misfitFrames = prefs.suggest ? frames.filter((f) => fits.get(f)?.level === 'misfit') : [];
   const sparseFrames = frames.filter((f) => fits.get(f)?.level === 'sparse');
 
   const [cached, setCached] = useState(pointClouds.cachedCount());
@@ -808,7 +810,7 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
         if (!c || !pc) continue; // chưa tải point cloud thì chưa đo / chưa dự đoán frame đó
         const loc = localize(pc, c, 16);
         checked++;
-        if (prefs.ground) ins.push({ f, z: c.z, sz: c.sz, raw: groundSnap(loc, c.sx, c.sy, c.sz) });
+        if (prefs.ground) ins.push({ f, z: c.z, sz: c.sz, raw: groundSnap(loc, c.sx, c.sy, c.sz), footLowW: footprintLow(loc, c.sx, c.sy, c.sz) });
         if (warn) fits.set(f, fitReport(loc, c.sx, c.sy, c.sz));
         if (checked % 3 === 0) await new Promise((r) => window.setTimeout(r, 0));
       }
@@ -820,14 +822,14 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
   const allWarn = useMemo(() => {
     const misfit: number[] = [], sparse: number[] = [], ground: number[] = [], overl: number[] = [];
     for (const [f, r] of fitSeries.fits) {
-      if (r.level === 'misfit' && !ign.has(ignoreKey(job.id, num, f))) misfit.push(f);
+      if (r.level === 'misfit') { if (prefs.suggest && !ign.has(ignoreKey(job.id, num, f))) misfit.push(f); }
       else if (r.level === 'sparse') sparse.push(f);
     }
     if (prefs.ground) for (const [f, g] of series) if (g && Math.abs(g.dz) >= 0.08) ground.push(f);
     for (const f of ovAt.keys()) overl.push(f);
     const asc = (a: number, b: number) => a - b;
     return { misfit: misfit.sort(asc), sparse: sparse.sort(asc), ground: ground.sort(asc), overl: overl.sort(asc) };
-  }, [fitSeries, series, ovAt, ign, job.id, num, prefs.ground]);
+  }, [fitSeries, series, ovAt, ign, job.id, num, prefs.ground, prefs.suggest]);
 
   // Nhảy tới frame hiện tại của CVAT khi đồng bộ.
   useEffect(() => {
@@ -982,6 +984,8 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
         <button onClick={() => lockAll(true)} title="Như trên nhưng cho cả track">🔒 Cả track</button>
 
         </fieldset>
+        {/* Ngắt dòng cố định: nhóm Outside luôn bắt đầu một hàng mới, không tự nhảy lên cùng hàng với Keyframe & kích thước khi cửa sổ đủ rộng. */}
+        <div style={{ flexBasis: '100%', height: 0 }} />
         <fieldset style={{ border: '1px solid #c5ccd6', margin: 0, padding: '1px 8px 4px', display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center', background: '#fff4f4' }}>
           <legend style={{ fontSize: 11, fontWeight: 700, color: '#456', padding: '0 4px' }}>Outside</legend>
         <button
@@ -1013,6 +1017,9 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
           onClick={groundSelectedOrAll}
           title="Ground snap: ước lượng mặt đường quanh chân box (đường xanh lá nét đứt ở view Bên/Trước) rồi hạ/nâng box cho đáy chạm đất. Frame đang chọn, hoặc cả cửa sổ nếu chưa chọn. Phím G."
 >⏬ Ground snap (G)</button>
+        <label title="Gợi ý box: khi box lệch cụm điểm, đề xuất box mới (nét đứt xanh lơ, nút ✔ nhận, phím A) kèm cảnh báo ⚠ lệch. Tắt: không có gợi ý và không có cảnh báo lệch (⚠ ít điểm vẫn hiện)." style={{ fontWeight: 600 }}>
+          <input type="checkbox" checked={prefs.suggest} onChange={(e) => updatePrefs({ ...prefs, suggest: e.target.checked })} /> gợi ý kích thước box
+        </label>
         <label title="Dò mặt đất: đo mặt đường quanh object ở từng frame và tinh chỉnh bằng các frame khác của cùng object (đo lẻ loi bị thay bằng dự đoán). Tắt: không còn chip ⏬, không có Ground snap (G) và tự bám mặt đất." style={{ fontWeight: 600 }}>
           <input type="checkbox" checked={prefs.ground} onChange={(e) => updatePrefs({ ...prefs, ground: e.target.checked })} /> dò mặt đất
         </label>
@@ -1068,7 +1075,7 @@ export function BatchReview({ drift, onFocusFrame, job, ann, rows, selectedNum, 
             onIgnore={(f, on) => ignoreFrames([f], on)}
             motion={c.mot} motionIgnored={ign.has(motionKey(job.id, num, c.f))}
             onIgnoreMotion={(f, on) => ignoreStore.set([motionKey(job.id, num, f)], on)}
-            autoSnap={autoSnap && prefs.ground} groundOv={series.get(c.f) ?? null} groundOn={prefs.ground} onGround={(f) => { if (!groundFrame(f)) setNote('Không snap được frame này.'); }}
+            autoSnap={autoSnap && prefs.ground} groundOv={series.get(c.f) ?? null} groundOn={prefs.ground} suggestOn={prefs.suggest} onGround={(f) => { if (!groundFrame(f)) setNote('Không snap được frame này.'); }}
             onSnap={(f, g) => setSnaps((m) => (m.get(f) === g ? m : new Map(m).set(f, g)))}
             onSuggest={(f, s) => setSugs((m) => (m.get(f) === s ? m : new Map(m).set(f, s)))} onAccept={accept}
             onFit={(f, r) => setFits((m) => (m.get(f) === r ? m : new Map(m).set(f, r)))} onSelect={() => onPickSelect(c.f)}

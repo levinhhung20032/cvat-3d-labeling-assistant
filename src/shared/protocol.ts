@@ -14,6 +14,7 @@ export type PanelMessage = Envelope<typeof PANEL_SOURCE> &
     // chuyển focus trong giao diện CVAT sang object (đổi frame nếu cần); zoom = camera 3D của CVAT lại gần object; minimize = thu nhỏ tool
     | { type: 'reloadCvat' } // tải lại tab CVAT (sau upload) rồi tự mở lại tool
     | { type: 'toggleWindow' } // thu nhỏ / mở lại cửa sổ tool
+    | { type: 'dblOpen'; on: boolean } // ô "CVAT → tool": tắt thì bấm đúp trong CVAT không tự mở rộng / chọn object trong tool
     | { type: 'hotkeys'; toggle: string[] } // phím bật tắt cửa sổ để content script nghe ngay trên trang CVAT
     | { type: 'cvatFocus'; num: number; frame: number | null; zoom?: boolean; minimize?: boolean }
     | { type: 'upload'; reqId: number; req: UploadReq }

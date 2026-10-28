@@ -22,6 +22,7 @@ import { Help } from './ui';
 import { pointClouds } from './stores';
 import { ShiftBadge, ShiftBanner } from './ShiftBar';
 import { findDrift } from '../shared/drift';
+import { fitReportAt } from '../shared/fit';
 import { DeleteDialog } from './DeleteDialog';
 import { madeStore, useMadeIds } from './madeStore';
 import { dynClassStore } from './dynClassStore';
@@ -261,8 +262,8 @@ export function App() {
         countRef.current = m.annotations.tracks.length;
         dynClassStore.ensure(m.job.id, m.labels.map((l) => l.name)); // lấy class của job một lần
       } else if (m.type === 'cvatDbl') {
-        // Bấm đúp trong CVAT: luôn chọn object đó và chuyển sang Batch Review (không phụ thuộc ô đồng bộ).
-        if (m.num >= 1 && m.num <= countRef.current) {
+        // Bấm đúp trong CVAT: chọn object đó và chuyển sang Batch Review; ô "CVAT → tool" tắt thì bỏ qua (content script cũng không gửi).
+        if (syncRef.current && m.num >= 1 && m.num <= countRef.current) {
           lastCvatNum.current = m.num;
           setSelectedNum(m.num);
           setTab('review');
@@ -303,6 +304,7 @@ export function App() {
   keymapRef.current = keymap;
   // Báo cho content script phím bật tắt cửa sổ hiện hành để nó nghe được cả khi con trỏ đang ở trang CVAT.
   useEffect(() => { post({ type: 'hotkeys', toggle: keymap['window.toggle'] ?? [] }); }, [keymap]);
+  useEffect(() => { post({ type: 'dblOpen', on: sync }); }, [sync]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isCapturing()) return;
@@ -438,11 +440,38 @@ export function App() {
     }
     return m;
   }, [driftAll, data, ignAll]);
+  // Ít điểm (dưới 6 điểm trong box) của MỌI object, tính trên các frame đã tải point cloud; tải thêm frame thì tính lại.
+  const [cachedClouds, setCachedClouds] = useState(pointClouds.cachedCount());
+  useEffect(() => pointClouds.subscribe(() => setCachedClouds(pointClouds.cachedCount())), []);
+  const [sparseAll, setSparseAll] = useState<Map<number, number>>(new Map());
+  useEffect(() => {
+    if (!data || !work) { setSparseAll(new Map()); return; }
+    let live = true;
+    const timer = window.setTimeout(async () => {
+      const m = new Map<number, number>();
+      let done = 0;
+      for (let f = data.job.start_frame; f <= data.job.stop_frame && live; f++) {
+        const pc = pointClouds.peek(f);
+        if (!pc) continue;
+        for (let i = 0; i < work.tracks.length && live; i++) {
+          const c = stateAt(work.tracks[i]!, f).cuboid;
+          if (!c) continue;
+          if (fitReportAt(pc.xyz, pc.count, c).level === 'sparse') m.set(i + 1, (m.get(i + 1) ?? 0) + 1);
+          if (++done % 40 === 0) await new Promise((r) => window.setTimeout(r, 0));
+        }
+      }
+      if (live) setSparseAll(m);
+    }, 500);
+    return () => { live = false; window.clearTimeout(timer); };
+  }, [data, work, cachedClouds]);
   const rows = useMemo(
     () => (data && work
-      ? buildRows(work, data.labels, data.job.start_frame, data.job.stop_frame, (num, f) => ignAll.has(motionKey(data.job.id, num, f)), (num, f, k) => ignAll.has(issueKey(data.job.id, num, f, k)), new Set(madeIds)).map((r) => { const dn = drift.get(r.num)?.length ?? 0; return { ...r, issues: r.issues + dn, issuesByKind: dn ? { ...r.issuesByKind, T: dn } : r.issuesByKind }; })
+      ? buildRows(work, data.labels, data.job.start_frame, data.job.stop_frame, (num, f) => ignAll.has(motionKey(data.job.id, num, f)), (num, f, k) => ignAll.has(issueKey(data.job.id, num, f, k)), new Set(madeIds)).map((r) => {
+        const dr = drift.get(r.num) ?? [], sn = sparseAll.get(r.num) ?? 0;
+        return { ...r, drift: dr.length, driftFrames: dr.map((x) => x.f), issues: r.issues + sn, issuesByKind: { ...r.issuesByKind, ...(sn ? { P: sn } : {}) } };
+      })
       : []),
-    [data, work, ignAll, madeIds, drift],
+    [data, work, ignAll, madeIds, drift, sparseAll],
   );
 
   /** Xóa object do tool tạo: trong nháp thì bỏ khỏi nháp; đã upload thì mở hộp thoại xóa trên CVAT (chỉ ID trong sổ của tool). */

@@ -11,7 +11,10 @@ export interface GroundFrameIn {
   z: number; // tâm box (z tuyệt đối)
   sz: number; // chiều cao box
   raw: GroundResult | null; // phép đo của chính frame này (groundSnap)
+  footLowW?: number; // độ cao thấp nhất đáng tin của điểm trong chân box (w, tâm box = 0; footprintLow) để kiểm chứng kết quả "chìm"
 }
+/** Chìm bao nhiêu thì còn bị điểm thật trong chân box bác bỏ: có điểm thấp hơn mặt đường này quá mức đó. */
+const FOOT_CONTRADICT = 0.08;
 export interface RefineConfig {
   window: number; // chỉ dùng frame lân cận trong ±window frame
   minNeighbors: number; // số frame lân cận tối thiểu để dám bác bỏ phép đo của frame này
@@ -51,11 +54,14 @@ export function refineGround(frames: GroundFrameIn[], cfg: RefineConfig = DEFAUL
     const pred = neighbors.length >= (own === undefined ? cfg.minPred : cfg.minNeighbors) ? predictGround(neighbors, x.f, cfg) : null;
     let gz: number | null = null, source: 'measured' | 'predicted' = 'measured';
     if (own !== undefined) {
-      if (pred !== null && Math.abs(own - pred) > cfg.tol) { gz = pred; source = 'predicted'; } else gz = own;
+      // Phép đo cục bộ đáng tin (mặt đường sát chân vật, khớp mặt phẳng tốt) thì giữ: mặt đường của từng vật thể có thể đổi đột ngột (vỉa, dốc, ổ gà), dự đoán theo frame không đại diện được.
+      if (!x.raw?.reliable && pred !== null && Math.abs(own - pred) > cfg.tol) { gz = pred; source = 'predicted'; } else gz = own;
     } else if (pred !== null) { gz = pred; source = 'predicted'; }
     if (gz === null) { out.set(x.f, null); continue; }
     const groundW = gz - x.z, dz = groundW + x.sz / 2;
     if (Math.abs(dz) > cfg.maxShift) { out.set(x.f, null); continue; }
+    // Báo "chìm" mà lại có điểm thật nằm dưới mặt đường đó trong chân box → mặt đường sai, không gợi ý.
+    if (dz > 0 && x.footLowW !== undefined && x.footLowW < groundW - FOOT_CONTRADICT) { out.set(x.f, null); continue; }
     out.set(x.f, source === 'measured' && x.raw ? { ...x.raw, source } : {
       groundW, dz, n: 0, flat: true, method: 'plane', slopeDeg: x.raw?.slopeDeg, source,
     });

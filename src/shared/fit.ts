@@ -24,6 +24,30 @@ export interface FitReport {
 }
 
 /**
+ * Như fitReport nhưng nhận thẳng point cloud (xyz xen kẽ, hệ ego) và box; chỉ gom điểm quanh box nên không cấp phát theo cả frame.
+ * Dùng khi cần kiểm hàng loạt (mọi object × mọi frame).
+ */
+export function fitReportAt(
+  xyz: Float32Array, count: number, c: { x: number; y: number; z: number; yaw: number; sx: number; sy: number; sz: number }, cfg: FitConfig = DEFAULT_FIT,
+): FitReport {
+  const hu = c.sx / 2 + cfg.margin, hv = c.sy / 2 + cfg.margin, hw = c.sz / 2;
+  const cos = Math.cos(c.yaw), sin = Math.sin(c.yaw), r = Math.hypot(hu, hv);
+  const us: number[] = [], vs: number[] = [], ws: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const dx = xyz[i * 3]! - c.x;
+    if (dx > r || dx < -r) continue;
+    const dy = xyz[i * 3 + 1]! - c.y;
+    if (dy > r || dy < -r) continue;
+    const dz = xyz[i * 3 + 2]! - c.z;
+    if (dz > hw + cfg.margin || dz < -hw - 1) continue;
+    const u = dx * cos + dy * sin, v = -dx * sin + dy * cos;
+    if (u > hu || u < -hu || v > hv || v < -hv) continue;
+    us.push(u); vs.push(v); ws.push(dz);
+  }
+  return fitReport({ u: Float32Array.from(us), v: Float32Array.from(vs), w: Float32Array.from(ws), n: us.length }, c.sx, c.sy, c.sz, cfg);
+}
+
+/**
  * Kiểm tra box có bao đúng cụm điểm không. Không dùng "tâm cụm lệch tâm box" vì lidar thường chỉ thấy
  * một phía của vật (che khuất) nên tâm cụm lệch là bình thường; thay vào đó đếm điểm nằm NGOÀI box
  * ngay sát mặt box (box thiếu / dời sai) so với điểm nằm trong.

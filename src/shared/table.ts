@@ -19,6 +19,8 @@ export interface ObjectRow {
   made: 'draft' | 'server' | null; // do tool tạo: 'draft' = mới tạo trong nháp (chưa upload), 'server' = đã upload, có trong sổ của tool
   issuesByKind: Record<string, number>; // số frame vi phạm theo mã (S K Z H D, cộng T trôi box ở App)
   issues: number; // số (frame, loại) vi phạm luật QC S/K/Z/H/D (không tính cái đã bỏ qua)
+  drift: number; // số frame trôi box (tính chéo giữa các frame ở App; buildRows để 0)
+  driftFrames: number[]; // các frame trôi box, cho tooltip
 }
 
 export function buildRows(
@@ -46,7 +48,7 @@ export function buildRows(
     rows.push({
       num: index + 1, id: t.id ?? 0, made: typeof t.id !== 'number' ? 'draft' : madeIds.has(t.id) ? 'server' : null, labelId: t.label_id, label: names.get(t.label_id) ?? `#${t.label_id}`,
       assigned, outside, missing: missingOutsideKeyframes(t, stop).length, first, last,
-      keyframes: t.shapes.length, jumps, issues, issuesByKind,
+      keyframes: t.shapes.length, jumps, issues, issuesByKind, drift: 0, driftFrames: [],
     });
   }
   return rows.sort((a, b) => a.num - b.num);

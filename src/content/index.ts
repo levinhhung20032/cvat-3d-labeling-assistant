@@ -373,6 +373,7 @@ function main() {
     else if (m.type === 'reloadCvat') { try { void api.runtime.sendMessage({ type: 'cvla-reload' }); } catch { /* bỏ qua */ } }
     else if (m.type === 'toggleWindow') toggleWindow();
     else if (m.type === 'hotkeys') toggleCombos = m.toggle;
+    else if (m.type === 'dblOpen') dblOpen = m.on;
     else if (m.type === 'cvatFocus') void focusInCvat(m.num, m.frame, !!m.zoom, !!m.minimize);
     else if (m.type === 'upload') void rpcUpload(m.reqId, () => runUpload(uploadDeps, m.req));
     else if (m.type === 'deleteOwn') void rpcUpload(m.reqId, () => runDelete(uploadDeps, m.req));
@@ -388,8 +389,9 @@ function main() {
   // Bấm đúp vào object trong CVAT (khung 3D hoặc danh sách object) → mở rộng tool và hiện object đó.
   // Chọn đơn (một cú bấm) không tự mở rộng.
   const FOCUS_TARGETS = '.cvat-canvas3d-perspective, .cvat-canvas3d-orthographic-view, .cvat-objects-sidebar-state-item';
+  let dblOpen = true; // panel báo theo ô "CVAT → tool"
   const onDblClick = (e: MouseEvent) => {
-      if (!host || !(e.target instanceof Element) || host.contains(e.target) || !e.target.closest(FOCUS_TARGETS)) return;
+      if (!dblOpen || !host || !(e.target instanceof Element) || host.contains(e.target) || !e.target.closest(FOCUS_TARGETS)) return;
       // CVAT kích hoạt object ở cú bấm đầu; chờ giao diện cập nhật rồi đọc object đang kích hoạt.
       window.setTimeout(() => {
         const s = readCvatState();

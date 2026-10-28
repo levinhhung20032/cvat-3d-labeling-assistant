@@ -3,9 +3,9 @@ import type { ObjectRow } from '../shared/table';
 import { ISSUE_NAMES } from '../shared/qcrules';
 import { fmtIou, type OverlapPair } from '../shared/overlap';
 
-type SortKey = 'num' | 'assigned' | 'outside' | 'missing' | 'jumps' | 'issues' | 'hints' | 'overlap';
+type SortKey = 'num' | 'assigned' | 'outside' | 'missing' | 'jumps' | 'issues' | 'drift' | 'hints' | 'overlap';
 
-const KIND_NAMES: Record<string, string> = { ...ISSUE_NAMES, T: 'Trôi box' };
+const KIND_NAMES: Record<string, string> = { ...ISSUE_NAMES, P: 'Ít điểm (dưới 6 điểm trong box, chỉ các frame đã tải point cloud)' };
 /** Tooltip cột luật QC: số frame lỗi theo từng mã. */
 const issueTip = (by: Record<string, number>) => {
   const lines = Object.entries(by).filter(([, n]) => n > 0).map(([k, n]) => `${k} — ${KIND_NAMES[k] ?? k}: ${n} frame`);
@@ -46,7 +46,7 @@ export function ObjectTable({ rows, hints, overlapFrames, overlapPairs, onOpen, 
       </div>
       <table style={{ borderCollapse: 'collapse', width: '100%' }}>
         <thead>
-          <tr>{th('num', 'ID')}<th style={{ textAlign: 'left' }}>Nhãn</th>{th('assigned', 'Được gán')}{th('outside', 'Outside')}{th('missing', 'Outside thiếu KF')}{th('jumps', '⚠ đi xa')}{th('issues', '⚠ luật QC')}{th('hints', '💡 thuộc tính')}{th('overlap', '⚠ chồng lấn')}<th style={{ textAlign: 'left' }}>Khoảng frame</th><th>KF</th><th /></tr>
+          <tr>{th('num', 'ID')}<th style={{ textAlign: 'left' }}>Nhãn</th>{th('assigned', 'Được gán')}{th('outside', 'Outside')}{th('missing', 'Outside thiếu KF')}{th('jumps', '⚠ đi xa')}{th('issues', '⚠ luật QC')}{th('drift', '⚠ trôi box')}{th('hints', '💡 thuộc tính')}{th('overlap', '⚠ chồng lấn')}<th style={{ textAlign: 'left' }}>Khoảng frame</th><th>KF</th><th /></tr>
         </thead>
         <tbody>
           {shown.map((r) => (
@@ -55,6 +55,7 @@ export function ObjectTable({ rows, hints, overlapFrames, overlapPairs, onOpen, 
               <td style={{ color: r.missing ? '#b00' : undefined, fontWeight: r.missing ? 700 : 400 }}>{r.missing}</td>
               <td style={{ color: r.jumps ? '#a05a00' : undefined, fontWeight: r.jumps ? 700 : 400 }}>{r.jumps}</td>
               <td style={{ color: r.issues ? '#a0006e' : undefined, fontWeight: r.issues ? 700 : 400 }} title={issueTip(r.issuesByKind)}>{r.issues}</td>
+              <td style={{ color: r.drift ? '#a0006e' : undefined, fontWeight: r.drift ? 700 : 400 }} title={r.drift ? `Vật đứng yên mà box nhích (đã bù chuyển động của xe), frame ${r.driftFrames.join(', ')}` : 'Không có trôi box'}>{r.drift}</td>
               <td style={{ color: h(r) ? '#006b7a' : undefined, fontWeight: h(r) ? 700 : 400 }}>{h(r)}</td>
               <td style={{ color: ov(r) ? '#b45a00' : undefined, fontWeight: ov(r) ? 700 : 400 }} title={overlapPairs.filter((p) => p.a === r.num || p.b === r.num).map((p) => `#${p.a}–#${p.b}: frame ${p.frames.join(', ')} (tối đa ${fmtIou(p.max)})`).join('\n')}>{ov(r)}</td>
               <td>{r.first === null ? '—' : `${r.first}–${r.last}`}</td><td>{r.keyframes}</td>

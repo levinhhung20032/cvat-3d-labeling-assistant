@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fitReport, type LocalPoints } from '../src/shared/fit';
+import { fitReport, fitReportAt, type LocalPoints } from '../src/shared/fit';
 
 const pts = (list: [number, number, number][]): LocalPoints => ({
   u: Float32Array.from(list.map((p) => p[0])),
@@ -46,3 +46,18 @@ describe('fitReport', () => {
   });
 });
 
+
+describe('fitReportAt (point cloud thô, box có yaw và tâm bất kỳ)', () => {
+  const box = { x: 20, y: -5, z: 0.8, yaw: 0.6, sx: 4, sy: 2, sz: 1.5 };
+  const world = (u: number, v: number, w: number): [number, number, number] => [
+    box.x + u * Math.cos(box.yaw) - v * Math.sin(box.yaw), box.y + u * Math.sin(box.yaw) + v * Math.cos(box.yaw), box.z + w,
+  ];
+  const xyz = (pts: [number, number, number][]) => Float32Array.from(pts.flatMap(([u, v, w]) => world(u, v, w)));
+  it('3 điểm trong box → ít điểm · 20 điểm trong box → ok · kết quả giống fitReport trên điểm đã chuyển về hệ box', () => {
+    const few = list(3, (i) => [i * 0.3, 0, 0.2] as [number, number, number]);
+    const many = list(20, (i) => [-1.5 + i * 0.15, 0, 0.2] as [number, number, number]);
+    expect(fitReportAt(xyz(few), few.length, box).level).toBe('sparse');
+    expect(fitReportAt(xyz(many), many.length, box).level).toBe('ok');
+    expect(fitReportAt(xyz(many), many.length, box).inside).toBe(fitReport(pts(many), 4, 2, 1.5).inside);
+  });
+});

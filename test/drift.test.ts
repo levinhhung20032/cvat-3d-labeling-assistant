@@ -49,12 +49,22 @@ describe('cảnh báo trôi box', () => {
     const info = r.get(statics.length + 1)!;
     expect(info).toBeDefined();
     const fs = info.frames.map((x) => x.f);
-    expect(fs).toContain(0); expect(fs).toContain(29); // hai đầu lệch xa vị trí đứng yên
-    expect(fs).not.toContain(15); // giữa chừng gần vị trí trung vị
+    expect(fs).toContain(29); // neo = vị trí 5 frame đầu; cuối track đã lệch ~1,35 m
+    expect(fs).not.toContain(0); expect(fs).not.toContain(5); // các frame đầu và gần neo không bị báo
     expect(r.size).toBe(1);
   }
   });
-  it("box đứng yên nhưng nhảy một nhịp 0,6 m thì bị báo từ lúc nhảy · object quá ngắn (dưới minSteps) không xét", () => {
+  it("vật đứng yên rồi bắt đầu chạy thật (lệch tới departDist) thì không báo trôi · vật chuyển động ngay từ 5 frame đầu không xét", () => {
+    {
+    const departs = mk((f) => [22 + (f >= 10 ? (f - 10) * 0.5 : 0), 4]); // đứng 10 frame rồi chạy 0,5 m/frame
+    expect(findDrift(scene([departs]), frames).size).toBe(0);
+  }
+    {
+    const movingFirst = mk((f) => [22 + f * 0.3, 4]);
+    expect(findDrift(scene([movingFirst]), frames).size).toBe(0);
+  }
+  });
+  it("box đứng yên nhưng nhảy một nhịp 0,6 m thì bị báo từ lúc nhảy · object quá ngắn (dưới decideFrames) không xét", () => {
     {
     const jump = mk((f) => [22 + (f >= 20 ? 0.6 : 0), 4]);
     const info = findDrift(scene([jump]), frames).get(statics.length + 1)!;

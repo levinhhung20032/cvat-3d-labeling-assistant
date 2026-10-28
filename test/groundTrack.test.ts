@@ -35,6 +35,19 @@ describe('refineGround', () => {
     expect(r.get(6)!.dz).toBeCloseTo(0.24, 6);
   }
   });
+  it("phép đo cục bộ đáng tin (reliable) không bị dự đoán từ frame khác ghi đè, dù lệch hơn dung sai", () => {
+    const fs = frames((f) => (f === 5 ? 0.45 : 0.0));
+    fs[5]!.raw!.reliable = true;
+    const r = refineGround(fs);
+    expect(r.get(5)!.source).toBe('measured');
+    expect(r.get(5)!.dz).toBeCloseTo(0.45, 6);
+  });
+  it("báo chìm nhưng có điểm thật trong chân box nằm thấp hơn mặt đường → bỏ gợi ý · điểm thấp ngang mặt đường thì giữ", () => {
+    // đáy box ở 0,0 (Z - SZ/2); mặt đường dự đoán gz = 0,17 ⇒ chìm 0,17 (groundW = gz - Z)
+    const withFoot = (w: number) => frames((f) => (f === 5 ? null : 0.17)).map((x) => (x.f === 5 ? { ...x, footLowW: w } : x));
+    expect(refineGround(withFoot(-SZ / 2)).get(5)).toBeNull(); // frame 5 không đo được, dự đoán chìm 0,17 nhưng có điểm ngay đáy box (0,0) → bác bỏ
+    expect(refineGround(withFoot(0.17 - Z)).get(5)!.dz).toBeCloseTo(0.17, 6); // điểm thấp nhất đúng ở mặt đường → giữ
+  });
   it("phép đo khớp dự đoán trong dung sai thì giữ nguyên phép đo (không bị làm mượt) · quá ít frame lân cận: giữ phép đo gốc, không bác bỏ; không đo được thì null", () => {
     {
     const r = refineGround(frames((f) => 0.03 * (f % 2)));

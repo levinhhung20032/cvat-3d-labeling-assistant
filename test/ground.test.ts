@@ -81,6 +81,11 @@ describe('groundSnap trên mặt đường dốc', () => {
     return out;
   };
   const t10 = Math.tan((10 * Math.PI) / 180);
+  it("mặt đường sạch sát chân vật → reliable · mặt đường nhiễu (ổ gà / vỉa lẫn vào) → không reliable", () => {
+    expect(groundSnap(pts(big(() => -1.0)), 4, 2, 1.5)!.reliable).toBe(true);
+    const bumpy = big((u, v) => -1.0 + 0.12 * Math.sin(u * 7) * Math.cos(v * 5));
+    expect(groundSnap(pts(bumpy), 4, 2, 1.5)?.reliable ?? false).toBe(false);
+  });
   it("mặt phẳng ngang: khớp mặt phẳng, kết quả như phương pháp cũ · dốc 10° dọc theo xe: đo đúng độ dốc, đáy chạm phía cao nhưng góc nào cũng chỉ chìm ≤ 5 cm", () => {
     {
     const r = groundSnap(pts(big(() => -1.0)), 4, 2, 1.5)!;

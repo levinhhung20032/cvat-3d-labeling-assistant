@@ -12,12 +12,13 @@ export interface DriftConfig {
   tol: number; // m: sai số để một object được coi là khớp với chuyển động ego khi ước lượng
   minPairDist: number; // m: hai object dùng để dựng phép biến đổi phải cách nhau tối thiểu (ổn định góc)
   minInliers: number; // số object khớp tối thiểu để chấp nhận ước lượng ego của một bước
-  staticStep: number; // m: object đứng yên nếu bước nhích trung vị giữa hai frame liền nhau ≤ mức này
-  minSteps: number; // số bước tối thiểu để xét một object
-  warnDist: number; // m: lệch so với vị trí đứng yên vượt mức này thì cảnh báo
+  decideFrames: number; // số frame đầu (kể từ keyframe đầu của đoạn) dùng để quyết định vật đứng yên hay không; đoạn ngắn hơn thì không xét
+  staticSpread: number; // m: trong `decideFrames` frame đầu, mọi vị trí thế giới lệch trung vị không quá mức này thì vật đứng yên
+  warnDist: number; // m: lệch so với vị trí đứng yên (neo từ các frame đầu) vượt mức này thì cảnh báo
+  departDist: number; // m: chuỗi lệch đạt tới mức này coi là vật bắt đầu chạy thật, không phải trôi box
   maxRansac: number; // số cặp thử tối đa mỗi bước
 }
-export const DEFAULT_DRIFT: DriftConfig = { tol: 0.25, minPairDist: 3, minInliers: 3, staticStep: 0.08, minSteps: 5, warnDist: 0.4, maxRansac: 4000 };
+export const DEFAULT_DRIFT: DriftConfig = { tol: 0.25, minPairDist: 3, minInliers: 3, decideFrames: 5, staticSpread: 0.2, warnDist: 0.4, departDist: 1.5, maxRansac: 4000 };
 
 interface Xf { th: number; tx: number; ty: number } // p' = R(th)·p + t
 const rot = (th: number, x: number, y: number): [number, number] => [Math.cos(th) * x - Math.sin(th) * y, Math.sin(th) * x + Math.cos(th) * y];
@@ -126,12 +127,22 @@ export function findDrift(tracks: CvatTrack[], frames: number[], cfg: DriftConfi
     let steps = 0;
     const allSteps: number[] = [];
     for (const list of bySeg.values()) {
-      const st: number[] = [];
-      for (let k = 1; k < list.length; k++) if (list[k]!.f - list[k - 1]!.f === 1) st.push(Math.hypot(list[k]!.w[0] - list[k - 1]!.w[0], list[k]!.w[1] - list[k - 1]!.w[1]));
-      steps += st.length; allSteps.push(...st);
-      if (st.length < cfg.minSteps || median(st) > cfg.staticStep) continue;
-      const ax = median(list.map((q) => q.w[0])), ay = median(list.map((q) => q.w[1]));
-      for (const q of list) { const d = Math.hypot(q.w[0] - ax, q.w[1] - ay); if (d > cfg.warnDist) warn.push({ f: q.f, dist: d }); }
+      for (let k = 1; k < list.length; k++) allSteps.push(Math.hypot(list[k]!.w[0] - list[k - 1]!.w[0], list[k]!.w[1] - list[k - 1]!.w[1]));
+      steps += Math.max(0, list.length - 1);
+      // Quyết định đứng yên hay không CHỈ từ `decideFrames` frame đầu kể từ keyframe đầu của đoạn: nếu cả cụm nằm trong `staticSpread`
+      // quanh vị trí trung vị của nó thì vật đứng yên, và vị trí trung vị đó là điểm neo để đo trôi ở các frame sau.
+      if (list.length < cfg.decideFrames) continue;
+      const head = list.slice(0, cfg.decideFrames);
+      const ax = median(head.map((q) => q.w[0])), ay = median(head.map((q) => q.w[1]));
+      if (Math.max(...head.map((q) => Math.hypot(q.w[0] - ax, q.w[1] - ay))) > cfg.staticSpread) continue; // đang chuyển động ngay từ đầu
+      // Các frame sau neo: chuỗi lệch liên tục quá warnDist mà đạt tới departDist là vật BẮT ĐẦU chạy thật (không báo); chưa tới thì là trôi box.
+      let run: DriftFrame[] = [];
+      const flush = () => { if (run.length && Math.max(...run.map((r) => r.dist)) < cfg.departDist) warn.push(...run); run = []; };
+      for (const q of list.slice(cfg.decideFrames)) {
+        const d = Math.hypot(q.w[0] - ax, q.w[1] - ay);
+        if (d > cfg.warnDist) run.push({ f: q.f, dist: d }); else flush();
+      }
+      flush();
     }
     if (warn.length) out.set(i + 1, { num: i + 1, frames: warn.sort((x, y) => x.f - y.f), steps, medianStep: median(allSteps) });
   });

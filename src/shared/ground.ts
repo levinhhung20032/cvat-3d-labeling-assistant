@@ -16,7 +16,7 @@ export interface GroundConfig {
 }
 
 export const DEFAULT_GROUND: GroundConfig = { maxShift: 1.0, tolerance: 0.03,
-  ringTiers: [3, 6, 10], maxNearest: 4, minExtent: 1.5, cell: 0.5, planeTol: 0.1, minCells: 6, maxSlopeDeg: 25, maxSink: 0.05, steepWarnDeg: 8,
+  ringTiers: [2, 4, 7], maxNearest: 3, minExtent: 1.5, cell: 0.5, planeTol: 0.1, minCells: 6, maxSlopeDeg: 25, maxSink: 0.05, steepWarnDeg: 8,
 };
 
 export interface GroundResult {
@@ -30,6 +30,7 @@ export interface GroundResult {
   steep?: boolean; // dốc lớn: đáy box (phẳng) chỉ chạm một phía
   plane?: { a: number; b: number; c: number }; // mặt đường w = a·u + b·v + c trong hệ toạ độ của box (u theo yaw)
   dzTilt?: number; // độ dời z nếu box được NGHIÊNG song song mặt đường (tâm đáy chạm mặt dốc)
+  reliable?: boolean; // phép đo cục bộ đáng tin: mặt đường sát chân vật, gần như mọi ô nằm trên mặt phẳng, phần dư nhỏ → không bị dự đoán từ frame khác ghi đè
 }
 
 /**
@@ -41,6 +42,25 @@ export function tiltFromPlane(a: number, b: number, yaw: number): { rx: number; 
   const n = Math.hypot(gx, gy, 1);
   const nx = -gx / n, ny = -gy / n, nz = 1 / n;
   return { rx: Math.atan2(-ny, nz), ry: Math.asin(Math.max(-1, Math.min(1, nx))) };
+}
+
+/**
+ * Độ cao thấp nhất đáng tin của các điểm TRONG chân box (mở rộng 0,2 m), theo w (tâm box = 0): phân vị 10% để bỏ vài điểm nhiễu.
+ * Dùng kiểm chứng mặt đường dự đoán từ frame khác: nếu có điểm thật thấp hơn mặt đường dự đoán thì dự đoán sai (đáy box không thể chìm
+ * dưới mặt đường mà vẫn có điểm ở dưới đáy). undefined khi có quá ít điểm.
+ */
+export function footprintLow(p: LocalPoints, sx: number, sy: number, sz: number, minPts = 8): number | undefined {
+  const hu = sx / 2 + 0.2, hv = sy / 2 + 0.2, hw = sz / 2;
+  const ws: number[] = [];
+  for (let i = 0; i < p.n; i++) {
+    if (Math.abs(p.u[i]!) > hu || Math.abs(p.v[i]!) > hv) continue;
+    const w = p.w[i]!;
+    if (w < -hw - 1 || w > hw) continue;
+    ws.push(w);
+  }
+  if (ws.length < minPts) return undefined;
+  ws.sort((a, b) => a - b);
+  return ws[Math.floor(0.1 * (ws.length - 1))];
 }
 
 interface Plane { a: number; b: number; c: number } // w = a·u + b·v + c
@@ -59,7 +79,7 @@ function fitPlane(pts: [number, number, number][]): Plane | null {
 }
 
 /** RANSAC (bộ sinh số giả ngẫu nhiên cố định → kết quả lặp lại được) rồi khớp lại trên tập nội điểm. */
-function ransacPlane(pts: [number, number, number][], tol: number, maxSlopeDeg: number): { plane: Plane; inliers: number } | null {
+function ransacPlane(pts: [number, number, number][], tol: number, maxSlopeDeg: number): { plane: Plane; inliers: number; rms: number } | null {
   if (pts.length < 3) return null;
   let seed = 12345;
   const rnd = (m: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % m; };
@@ -82,7 +102,9 @@ function ransacPlane(pts: [number, number, number][], tol: number, maxSlopeDeg: 
     if (!refit || Math.hypot(refit.a, refit.b) > maxG) break;
     cur = refit;
   }
-  return { plane: cur, inliers: inliersOf(cur).length };
+  const fin = inliersOf(cur);
+  const rms = Math.sqrt(fin.reduce((s, [u, v, w]) => s + (w - (cur.a * u + cur.b * v + cur.c)) ** 2, 0) / Math.max(1, fin.length));
+  return { plane: cur, inliers: fin.length, rms };
 }
 
 /**
@@ -138,6 +160,7 @@ export function groundSnap(
     return {
       groundW: target + at.cw, dz, n: fit.inliers, flat: slopeDeg < 3, method: 'plane', slopeDeg, steep: slopeDeg > cfg.steepWarnDeg,
       plane: { a, b, c }, dzTilt: c + hw * Math.hypot(1, a, b), // tâm đáy nằm trên mặt dốc khi box nghiêng song song
+      reliable: road[0]!.d <= 1.5 && fit.inliers >= 0.8 * pts.length && fit.rms <= 0.03,
     };
   }
   return null; // hết các bán kính mà vẫn chưa đủ dữ kiện → không gợi ý
