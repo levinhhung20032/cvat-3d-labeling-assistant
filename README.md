@@ -68,7 +68,7 @@ Hoặc `about:debugging` → *This Firefox* → **Load Temporary Add-on** → ch
 
 ## Cập nhật
 
-Phiên bản hiện tại là **v1.0.0**. Tool không tự kiểm tra bản mới. Để cập nhật: lấy gói `cvat-3d-labeling-assistant-<phiên bản>.zip` ở trang Releases (hoặc `npm run build`), giải nén **đè vào đúng thư mục đang Load unpacked** (giữ ID extension), bấm **Reload** ở `edge://extensions`, rồi F5 tab CVAT.
+Phiên bản hiện tại là **v1.1.0**. Tool không tự kiểm tra bản mới. Để cập nhật: lấy gói `cvat-3d-labeling-assistant-<phiên bản>.zip` ở trang Releases (hoặc `npm run build`), giải nén **đè vào đúng thư mục đang Load unpacked** (giữ ID extension), bấm **Reload** ở `edge://extensions`, rồi F5 tab CVAT.
 
 ## Sử dụng nhanh
 

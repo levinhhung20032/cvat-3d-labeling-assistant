@@ -2,6 +2,37 @@
 setlocal
 cd /d "%~dp0"
 
+rem --- Kiem tra ban cap nhat tren GitHub (chi keo khi an toan: co git, la repo git, khong co thay doi cuc bo) ---
+where git >nul 2>nul
+if errorlevel 1 goto :noupdate
+if not exist ".git" goto :noupdate
+echo Dang kiem tra ban cap nhat tren GitHub...
+git fetch --quiet
+if errorlevel 1 (
+    echo Khong ket noi duoc GitHub, bo qua buoc cap nhat.
+    goto :noupdate
+)
+set "BEHIND=0"
+for /f %%i in ('git rev-list --count HEAD..@{u} 2^>nul') do set "BEHIND=%%i"
+if "%BEHIND%"=="0" (
+    echo Dang la ban moi nhat.
+    goto :noupdate
+)
+echo Co %BEHIND% commit moi tren GitHub.
+set "DIRTY="
+for /f %%i in ('git status --porcelain --untracked-files=no') do set "DIRTY=1"
+if defined DIRTY (
+    echo Ban dang co thay doi chua commit, KHONG tu dong pull de tranh mat code. Hay commit hoac stash roi chay lai.
+    goto :noupdate
+)
+git pull --ff-only
+if errorlevel 1 (
+    echo Pull that bai ^(nhanh da tach khoi GitHub^). Bo qua, build ban hien tai.
+) else (
+    echo Da cap nhat len ban moi nhat.
+)
+:noupdate
+
 where node >nul 2>nul
 if errorlevel 1 (
     echo Node.js chua duoc cai. Dang cai dat Node.js LTS...

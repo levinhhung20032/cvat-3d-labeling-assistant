@@ -110,6 +110,7 @@ function ZoomImage({ url }: { url: string }) {
         />
         {lens && cur && (
           <div
+            className="cvla-lens" // ảnh nền của kính lúp cũng phải được đảo ngược lại ở giao diện tối / xám, như thẻ img
             style={{
               position: 'absolute', left: lx, top: ly, width: LENS, height: LENS, borderRadius: '50%',
               border: '3px solid #fff', boxShadow: '0 0 0 1px #000, 0 2px 8px rgba(0,0,0,.6)', pointerEvents: 'none',
