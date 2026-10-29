@@ -27,6 +27,7 @@ import { qcStore, useQcMode, useQcNotes } from './qcStore';
 import { qcKey } from '../shared/qc';
 import { onAction } from './actions';
 import { DEFAULT_FIT, fitGroundOf, fitReport, type FitReport } from '../shared/fit';
+import { useThresholdVersion } from './thresholdStore';
 import { findLongOutsideGaps, SPLIT_OUTSIDE_FRAMES, type OutsideGap } from '../shared/splitId';
 import { confirmSnap, DEFAULT_GROUND, groundSnap, tiltFromPlane, type GroundResult, type GroundSector } from '../shared/ground';
 import { motionJump, type MotionWarning } from '../shared/motion';
@@ -281,15 +282,16 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
   };
   // Mặt đường riêng của object ở frame này, đo độc lập với công tắc "dò mặt đất": để khi đếm điểm của vật (ít điểm / lệch / gợi ý)
   // bỏ đúng lớp mặt đường thật thay vì một lớp cố định tính từ đáy box (box chìm / lơ lửng sẽ đếm sai).
+  const thrVer = useThresholdVersion();
   const fitGround = useMemo(
     () => (warn && loc && st.cuboid ? fitGroundOf(groundSnap(loc, st.cuboid.sx, st.cuboid.sy, st.cuboid.sz, { cu: 0, cv: 0, cw: 0, range: Math.hypot(st.cuboid.x, st.cuboid.y) })) : null),
-    [warn, loc, st.cuboid],
+    [warn, loc, st.cuboid, thrVer],
   );
   // Tắt "gợi ý kích thước box" thì bỏ luôn cảnh báo lệch (lệch chỉ có ý nghĩa đi kèm gợi ý); ít điểm vẫn báo.
   const fit = useMemo(() => {
     const r = warn && loc && st.cuboid ? fitReport(loc, st.cuboid.sx, st.cuboid.sy, st.cuboid.sz, DEFAULT_FIT, fitGround) : null;
     return r && r.level === 'misfit' && !suggestOn ? null : r;
-  }, [warn, loc, st.cuboid, suggestOn, fitGround]);
+  }, [warn, loc, st.cuboid, suggestOn, fitGround, thrVer]);
   // Gợi ý sửa box khi cảnh báo lệch; hiện nét đứt trên 3 view, chấp nhận bằng nút / phím A.
   const sug = useMemo(
     () => (suggestOn && !ignored && fit?.level === 'misfit' && loc && st.cuboid ? suggestBox(loc, st.cuboid.sx, st.cuboid.sy, st.cuboid.sz, fixed, DEFAULT_FIT, fitGround) : null),
@@ -491,6 +493,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
 }) {
   const { start_frame: start, stop_frame: stop } = job;
   const [prefs, setPrefs] = useState(loadPrefs);
+  const thrVer = useThresholdVersion(); // ngưỡng cảnh báo chỉnh tay (tab Threshold) đổi thì tính lại cảnh báo
   const max = ann.tracks.length;
   const num = selectedNum ?? 1;
   const track = ann.tracks[num - 1] ?? null;
@@ -629,13 +632,13 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
 
   // Luật QC (S K Z H D) tính trên cả job để so mốc kích thước và frame liền trước đúng.
   const rawIssueMap = useMemo(() => {
-    const m = track ? trackIssues(track, row?.label ?? '', Array.from({ length: stop - start + 1 }, (_, i) => start + i)) : new Map<number, FrameIssue[]>();
+    const m = track ? trackIssues(track, row?.label ?? '', Array.from({ length: stop - start + 1 }, (_, i) => start + i), undefined, num) : new Map<number, FrameIssue[]>();
     // Trôi box (đứng yên mà box nhích): tính chéo giữa các frame ở App, gộp vào cùng danh sách cảnh báo của frame.
     for (const d of drift.get(num) ?? []) {
       m.set(d.f, [...(m.get(d.f) ?? []), { kind: 'T', message: `trôi box: toạ độ theo ego không đổi trong khi xe đã đi ${d.dist.toFixed(1)} m (box đi theo xe thay vì ở lại chỗ vật đứng yên); bỏ qua nếu vật thật sự chạy cùng vận tốc với xe` }]);
     }
     return m;
-  }, [track, row?.label, start, stop, drift, num]);
+  }, [track, row?.label, start, stop, drift, num, thrVer]);
   // Flag từ file QC đã nạp cho object này, theo frame; "đã hết" = tool không còn thấy lỗi (ở dữ liệu hiện tại, kể cả nháp).
   const qcImports = useQcImports();
   const flagMarks = useFlagMarks();
@@ -685,7 +688,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     const far: number[] = [];
     if (track) for (let f = start; f <= stop; f++) if (!ign.has(motionKey(job.id, num, f)) && motionJump(track, f, row?.label ?? '')) far.push(f);
     return { byKind: [...byKind].sort(([a], [b]) => a.localeCompare(b)), far };
-  }, [issueMap, ign, job.id, num, track, row?.label, start, stop]);
+  }, [issueMap, ign, job.id, num, track, row?.label, start, stop, thrVer]);
   const goFrame = (f: number) => { setK(Math.min(nWin - 1, pageOf(list, f, prefs.perWin, overlap))); setSelFrame(f); };
   const cols = useMemo(
     () => frames.map((f) => ({
@@ -694,7 +697,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
       ref: track ? referenceCuboid(track, f, stop) : null,
       mot: track ? motionJump(track, f, row?.label ?? '') : null,
     })),
-    [track, framesKey, stop, row?.label],
+    [track, framesKey, stop, row?.label, thrVer],
   );
 
   // Kế hoạch tải: cửa sổ đang xem trước, rồi các frame phía sau (gần trước), rồi phía trước; tối đa 60 frame.
@@ -899,7 +902,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
       if (live) { setSeries(prefs.ground ? grounds : new Map()); setFitSeries({ fits, checked }); }
     }, 300);
     return () => { live = false; window.clearTimeout(timer); };
-  }, [track, prefs.ground, warn, cloudTick, start, stop]);
+  }, [track, prefs.ground, warn, cloudTick, start, stop, thrVer]);
   // Tất cả lỗi đang có của object (cả track): lệch / ít điểm, đáy lơ lửng / chìm, chồng lấn; bỏ các frame đã bỏ qua.
   const allWarn = useMemo(() => {
     const misfit: number[] = [], sparse: number[] = [], ground: number[] = [], overl: number[] = [];

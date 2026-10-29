@@ -7,18 +7,17 @@ interface Manifest {
   options_ui?: { page: string; open_in_tab?: boolean };
   background: { service_worker?: string; scripts?: string[] };
   content_scripts?: unknown;
-  web_accessible_resources: { resources: string[]; matches: string[] }[];
+  web_accessible_resources?: { resources: string[]; matches: string[] }[];
   content_security_policy: { extension_pages: string };
   browser_specific_settings?: { gecko?: { id: string; strict_min_version: string; data_collection_permissions?: { required: string[] } } };
 }
 const load = (f: string) => JSON.parse(readFileSync(f, 'utf8')) as Manifest;
 const chromium = load('public/manifest.json');
 const firefox = load('public/manifest.firefox.json');
-const HOST = 'https://cvat-a.example.com/*';
 
 describe.each([['Edge / Chrome', chromium], ['Firefox', firefox]] as const)('manifest %s — luật quyền riêng tư', (_n, m) => {
-  it('chỉ có host của CVAT, không xin quyền cookies / tabs / history / webRequest', () => {
-    expect(m.host_permissions).toEqual([HOST]);
+  it('không có host mặc định, không xin quyền cookies / tabs / history / webRequest', () => {
+    expect(m.host_permissions).toEqual([]); // chủ dự án bỏ host mặc định cvat-a 2026-10-29: mọi máy chủ do người dùng tự thêm
     // Máy chủ CVAT khác: người dùng tự thêm ở trang Cài đặt (chủ dự án duyệt 2026-10-28). Chỉ là quyền TÙY CHỌN https —
     // không tên miền nào được cấp sẵn, trình duyệt hỏi người dùng cho từng tên miền.
     expect(m.optional_host_permissions).toEqual(['https://*/*']);
@@ -31,8 +30,8 @@ describe.each([['Edge / Chrome', chromium], ['Firefox', firefox]] as const)('man
   it('không tự chèn script (chỉ chèn khi người dùng bấm biểu tượng)', () => {
     expect(m.content_scripts).toBeUndefined();
   });
-  it('trang của extension chỉ truy cập được từ host của CVAT, CSP chặt', () => {
-    expect(m.web_accessible_resources.every((r) => r.matches.length === 1 && r.matches[0] === HOST)).toBe(true);
+  it('trang của extension không truy cập được từ trang web nào (không web_accessible_resources), CSP chặt', () => {
+    expect(m.web_accessible_resources).toBeUndefined();
     expect(m.content_security_policy.extension_pages).toBe("script-src 'self'; object-src 'self'");
   });
   it('MV3', () => expect(m.manifest_version).toBe(3));

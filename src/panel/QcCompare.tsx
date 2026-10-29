@@ -3,6 +3,7 @@ import { ISSUE_KINDS, ISSUE_NAMES, type IssueKind } from '../shared/qcrules';
 import { detectAll, flagKey, flagState, parseQcMatrix, type FlagState, type QcFlag } from '../shared/qcimport';
 import type { CvatTrack } from '../shared/types';
 import { qcFlagStore, useFlagMarks, useQcImports } from './qcFlagStore';
+import { useThresholdVersion } from './thresholdStore';
 
 const STATE_LABEL: Record<FlagState, string> = { open: 'còn lỗi', cleared: 'đã hết (tool)', ignore: 'bỏ qua', fixed: 'đã sửa' };
 const STATE_COLOR: Record<FlagState, string> = { open: '#b00', cleared: '#060', ignore: '#666', fixed: '#06c' };
@@ -42,7 +43,8 @@ export function QcCompare({ jobId, tracks, labels, start, stop, onOpen }: {
   const [open, setOpen] = useState<Set<number>>(new Set());
   const [picked, setPicked] = useState<Set<number>>(new Set());
 
-  const detected = useMemo(() => (imp ? detectAll(tracks, labels, start, stop) : new Map<string, string>()), [imp, tracks, labels, start, stop]);
+  const thrVer = useThresholdVersion(); // ngưỡng chỉnh tay đổi thì dò lại
+  const detected = useMemo(() => (imp ? detectAll(tracks, labels, start, stop) : new Map<string, string>()), [imp, tracks, labels, start, stop, thrVer]);
   const rows = useMemo<Row[]>(() => (imp ? imp.flags.map((f) => {
     const msg = detected.get(`${f.num}:${f.frame}:${f.kind}`);
     return { f, msg, state: flagState(marks[flagKey(jobId, f)], msg !== undefined) };

@@ -118,7 +118,7 @@ export function detectAll(tracks: CvatTrack[], labels: string[], start: number, 
   const out = new Map<string, string>();
   const frames = Array.from({ length: stop - start + 1 }, (_, i) => start + i);
   tracks.forEach((t, i) => {
-    for (const [f, list] of trackIssues(t, labels[i] ?? '', frames)) for (const it of list) out.set(`${i + 1}:${f}:${it.kind}`, it.message);
+    for (const [f, list] of trackIssues(t, labels[i] ?? '', frames, undefined, i + 1)) for (const it of list) out.set(`${i + 1}:${f}:${it.kind}`, it.message);
   });
   for (const o of findOverlaps(tracks, frames, labels)) {
     out.set(`${o.a}:${o.frame}:O`, `chồng với #${o.b} (IoU ${fmtIou(o.ratio)})`);

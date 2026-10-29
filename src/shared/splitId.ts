@@ -4,6 +4,8 @@ import type { CvatTrack } from './types';
 
 /** Outside liên tục từ ngần này frame trở lên rồi xuất hiện lại thì nên tách ID (guideline); dưới mức này giữ ID và đánh outside. */
 export const SPLIT_OUTSIDE_FRAMES = 6;
+/** Ngưỡng đang dùng (tab Threshold chỉnh được); mặc định = SPLIT_OUTSIDE_FRAMES. */
+export const splitConfig = { minFrames: SPLIT_OUTSIDE_FRAMES };
 
 export interface OutsideGap {
   from: number; // frame outside đầu tiên của đoạn
@@ -16,7 +18,7 @@ export interface OutsideGap {
  * Các đoạn outside liên tục ≥ minLen frame nằm GIỮA hai đoạn có box của track (có box trước đó và có box lại sau đó).
  * Đoạn outside ở đầu track hoặc kéo tới cuối job không có phần "sau" để tách nên không tính.
  */
-export function findLongOutsideGaps(track: CvatTrack, start: number, stop: number, minLen = SPLIT_OUTSIDE_FRAMES): OutsideGap[] {
+export function findLongOutsideGaps(track: CvatTrack, start: number, stop: number, minLen = splitConfig.minFrames): OutsideGap[] {
   const out: OutsideGap[] = [];
   let seen = false;
   let from: number | null = null;

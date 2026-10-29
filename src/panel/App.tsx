@@ -18,6 +18,9 @@ import { KeysPanel } from './KeysPanel';
 import { UploadDialog } from './UploadDialog';
 import { QcPanel } from './QcPanel';
 import { DynSizePanel } from './DynSizePanel';
+import { ThresholdPanel } from './ThresholdPanel';
+import { thresholdStore, useThresholdVersion } from './thresholdStore';
+import { backgroundConfigKey } from '../shared/thresholds';
 import { Help, PENDING_STYLE } from './ui';
 import { pointClouds } from './stores';
 import { ShiftBadge, ShiftBanner } from './ShiftBar';
@@ -148,7 +151,7 @@ try { VERSION = api.runtime.getManifest().version; } catch { /* extension vừa 
 const EMPTY: Draft = { work: null, edited: new Set<string>(), undo: [], redo: [] };
 
 type State = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ok'; data: Data };
-type Tab = 'objects' | 'review' | 'shift' | 'qc' | 'dyn' | 'keys' | 'job';
+type Tab = 'objects' | 'review' | 'shift' | 'qc' | 'dyn' | 'thr' | 'keys' | 'job';
 /** Tải ưu tiên ngần này frame đầu; tải xong là mở được Batch Review (job ngắn hơn: cả job), phần còn lại tải và tính ngầm. */
 const UNLOCK_FRAMES = 6;
 
@@ -412,6 +415,9 @@ export function App() {
     post({ type: 'cvatFocus', num, frame });
   };
   const ignAll = useIgnored();
+  // Ngưỡng cảnh báo chỉnh tay (tab Threshold): mỗi lần đổi, các phép tính dùng ngưỡng tính lại; ngưỡng riêng theo object nạp theo job.
+  const thrVer = useThresholdVersion();
+  useEffect(() => { if (data) thresholdStore.setJob(data.job.id); }, [data?.job.id]);
   // Số gợi ý thuộc tính theo object (tính ở frame có box đầu tiên), không tính gợi ý đã bỏ qua.
   const attrHints = useMemo(() => {
     const m = new Map<number, number>();
@@ -439,7 +445,7 @@ export function App() {
     const frames: number[] = [];
     for (let f = data.job.start_frame; f <= data.job.stop_frame; f++) frames.push(f);
     return findOverlaps(work.tracks, frames, work.tracks.map((t) => labelNames.get(t.label_id) ?? '')).filter((o) => !ignAll.has(overlapKey(data.job.id, o.a, o.b)));
-  }, [data, work, ignAll, labelNames]);
+  }, [data, work, ignAll, labelNames, thrVer]);
   const overlapFrames = useMemo(() => {
     const m = new Map<number, number>();
     for (const o of overlaps) { m.set(o.a, (m.get(o.a) ?? 0) + 1); m.set(o.b, (m.get(o.b) ?? 0) + 1); }
@@ -452,6 +458,14 @@ export function App() {
   // Kết quả vòng tính nền (ít điểm, số điểm trong box) theo frame → số thứ tự object; khai báo ở đây vì cảnh báo trôi box cũng dùng.
   const passRes = useRef(new Map<number, Map<number, PassEntry>>());
   const [passTick, setPassTick] = useState(0);
+  const bgKey = useRef(backgroundConfigKey());
+  useEffect(() => {
+    const k = backgroundConfigKey();
+    if (k === bgKey.current) return;
+    bgKey.current = k;
+    passRes.current = new Map(); // ngưỡng lệch / ít điểm / mặt đường đổi: kết quả đã tính không còn đúng, tính lại cho mọi frame
+    setPassTick((x) => x + 1);
+  }, [thrVer]);
   const passKey = data ? `cvla-pass:${data.job.id}` : null;
   const restored = useMemo(() => { passRes.current = passKey ? loadPass(passKey) : new Map(); return passKey; }, [passKey]);
   const driftAll = useMemo(() => {
@@ -464,7 +478,7 @@ export function App() {
       .map(([num, d]) => [num, dropSupported(d.frames, (f) => passRes.current.get(f)?.get(num)?.n)] as const)
       .filter(([, fs]) => fs.length)
       .map(([num, fs]) => [num, fs] as [number, { f: number; dist: number }[]]));
-  }, [data, work, passTick, restored]);
+  }, [data, work, passTick, restored, thrVer]);
   const drift = useMemo(() => {
     const m = new Map<number, { f: number; dist: number }[]>();
     if (!data) return m;
@@ -652,7 +666,7 @@ export function App() {
         return { ...r, drift: dr.length, driftFrames: dr.map((x) => x.f), issues: r.issues + sn, issuesByKind: { ...r.issuesByKind, ...(sn ? { P: sn } : {}) } };
       })
       : []),
-    [data, work, ignAll, madeIds, drift, sparseAll],
+    [data, work, ignAll, madeIds, drift, sparseAll, thrVer],
   );
 
   /** Xóa object do tool tạo: trong nháp thì bỏ khỏi nháp; đã upload thì mở hộp thoại xóa trên CVAT (chỉ ID trong sổ của tool). */
@@ -712,6 +726,7 @@ export function App() {
         {tabBtn('shift', 'Ca / KPI')}
         {tabBtn('qc', 'QC')}
         {tabBtn('dyn', 'Dynamic size')}
+        {tabBtn('thr', 'Threshold')}
         {tabBtn('keys', 'Phím tắt')}
         {tabBtn('job', 'Thông tin job')}
         {data && (reloadMenu ? (
@@ -878,6 +893,7 @@ export function App() {
         />
       )}
       {data && work && tab === 'dyn' && <DynSizePanel jobId={data.job.id} labels={data.labels} tracks={work.tracks} />}
+      {data && work && tab === 'thr' && <ThresholdPanel jobId={data.job.id} labels={data.labels} tracks={work.tracks} />}
       {tab === 'shift' && <ShiftPanel />}
       {tab === 'keys' && <KeysPanel map={keymap} setMap={setKeymap} />}
       {data && tab === 'job' && <JobInfo s={summarize(data.job, data.labels, data.ann)} />}

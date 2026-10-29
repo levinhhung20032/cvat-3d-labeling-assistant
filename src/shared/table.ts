@@ -42,7 +42,7 @@ export function buildRows(
     }
     let issues = 0;
     const issuesByKind: Record<string, number> = {};
-    for (const [f, list] of trackIssues(t, labelName, Array.from({ length: stop - start + 1 }, (_, i) => start + i))) {
+    for (const [f, list] of trackIssues(t, labelName, Array.from({ length: stop - start + 1 }, (_, i) => start + i), undefined, index + 1)) {
       for (const i of list) if (!isIssueIgnored(index + 1, f, i.kind)) { issues++; issuesByKind[i.kind] = (issuesByKind[i.kind] ?? 0) + 1; }
     }
     rows.push({

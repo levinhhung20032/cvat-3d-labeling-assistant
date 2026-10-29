@@ -8,9 +8,7 @@
     "scripting",
     "storage"
   ],
-  "host_permissions": [
-    "https://cvat-a.example.com/*"
-  ],
+  "host_permissions": [],
   "optional_host_permissions": [
     "https://*/*"
   ],
@@ -28,17 +26,6 @@
       "32": "icons/icon-32.png"
     }
   },
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "panel.html",
-        "assets/*"
-      ],
-      "matches": [
-        "https://cvat-a.example.com/*"
-      ]
-    }
-  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
   },
