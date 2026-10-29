@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampPan, NO_PAN, panBy, panOffset, pointVisible, type Scene } from '../src/panel/render';
+import { clampPan, egoPlaneW, NO_PAN, panBy, panOffset, pointVisible, type EgoPlane, type Scene } from '../src/panel/render';
 
 const scene: Scene = { zClip: 5, slab: 2.5, colorHalf: 5 };
 const grid: [number, number, number][] = [];
@@ -52,5 +52,19 @@ describe('dời khung nhìn (giữ chuột phải kéo)', () => {
   it('không dời ra ngoài vùng điểm đã lọc', () => {
     expect(clampPan({ u: 9, v: -9, w: 1 }, 4)).toEqual({ u: 4, v: -4, w: 1 });
     expect(clampPan({ u: 9, v: -9, w: 1 }, 0)).toEqual({ u: 0, v: 0, w: 0 });
+  });
+});
+
+describe('mặt đường ego (mặt phẳng Oxy, z = 0)', () => {
+  it('box không nghiêng: vạch ngang ở w = −z của box, ở cả view Bên và Trước', () => {
+    const p: EgoPlane = [0, 0, 1, -1.5];
+    for (const s of [-8, 0, 3]) { expect(egoPlaneW(p, 'side', s)).toBeCloseTo(-1.5); expect(egoPlaneW(p, 'front', s)).toBeCloseTo(-1.5); }
+  });
+  it('box nghiêng: vạch nghiêng đúng theo mặt phẳng (điểm trên vạch thoả nu·u + nv·v + nw·w = d)', () => {
+    const p: EgoPlane = [0.2, -0.1, Math.sqrt(1 - 0.05), -2];
+    for (const s of [-3, 0, 4]) {
+      expect(p[0] * s + p[2] * egoPlaneW(p, 'side', s)).toBeCloseTo(p[3]);
+      expect(p[1] * s + p[2] * egoPlaneW(p, 'front', s)).toBeCloseTo(p[3]);
+    }
   });
 });

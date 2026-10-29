@@ -21,7 +21,7 @@ import { DynSizePanel } from './DynSizePanel';
 import { Help, PENDING_STYLE } from './ui';
 import { pointClouds } from './stores';
 import { ShiftBadge, ShiftBanner } from './ShiftBar';
-import { findDrift } from '../shared/drift';
+import { dropSupported, findDrift } from '../shared/drift';
 import { fitReportAt } from '../shared/fit';
 import { loadPass, savePass, sigOf, type PassEntry } from './passStore';
 import { DEFAULT_GROUND } from '../shared/ground';
@@ -448,13 +448,23 @@ export function App() {
   const overlapPairs = useMemo(() => groupPairs(overlaps), [overlaps]);
   const madeIds = useMadeIds(data?.job.id ?? 0);
   const [deleting, setDeleting] = useState<number[] | null>(null);
-  // Trôi box: vật đứng yên mà box nhích (đã bù chuyển động của xe), tính trên cả job, bỏ các frame đã bỏ qua.
+  // Trôi box: toạ độ ego của box không đổi trong khi xe chạy (box đi theo xe), tính trên cả job, bỏ các frame đã bỏ qua.
+  // Kết quả vòng tính nền (ít điểm, số điểm trong box) theo frame → số thứ tự object; khai báo ở đây vì cảnh báo trôi box cũng dùng.
+  const passRes = useRef(new Map<number, Map<number, PassEntry>>());
+  const [passTick, setPassTick] = useState(0);
+  const passKey = data ? `cvla-pass:${data.job.id}` : null;
+  const restored = useMemo(() => { passRes.current = passKey ? loadPass(passKey) : new Map(); return passKey; }, [passKey]);
   const driftAll = useMemo(() => {
     if (!data || !work) return new Map<number, { f: number; dist: number }[]>();
     const frames: number[] = [];
     for (let f = data.job.start_frame; f <= data.job.stop_frame; f++) frames.push(f);
-    return new Map([...findDrift(work.tracks, frames)].map(([num, d]) => [num, d.frames]));
-  }, [data, work]);
+    // Bỏ các frame đầu của chuỗi mà box vẫn còn đủ điểm (vật chạy cùng vận tốc với xe): cần số điểm từ vòng tính nền (passRes);
+    // chưa tính tới thì giữ nguyên cảnh báo, tính xong tự gỡ.
+    return new Map([...findDrift(work.tracks, frames)]
+      .map(([num, d]) => [num, dropSupported(d.frames, (f) => passRes.current.get(f)?.get(num)?.n)] as const)
+      .filter(([, fs]) => fs.length)
+      .map(([num, fs]) => [num, fs] as [number, { f: number; dist: number }[]]));
+  }, [data, work, passTick, restored]);
   const drift = useMemo(() => {
     const m = new Map<number, { f: number; dist: number }[]>();
     if (!data) return m;
@@ -479,10 +489,6 @@ export function App() {
     const t = window.setInterval(() => setSecTick((x) => x + 1), 1000);
     return () => window.clearInterval(t);
   }, [reloading]);
-  const passRes = useRef(new Map<number, Map<number, PassEntry>>());
-  const passKey = data ? `cvla-pass:${data.job.id}` : null;
-  const restored = useMemo(() => { passRes.current = passKey ? loadPass(passKey) : new Map(); return passKey; }, [passKey]);
-  const [passTick, setPassTick] = useState(0);
   const computed = useRef(0); // số frame thực sự đã tính trong phiên này (khôi phục từ kho thì không tính)
   // Frame chờ: tính ngay trong lần vẽ (không trong effect), để tiến độ / mở khoá không bao giờ đọc một tập rỗng cũ.
   const pending = useMemo(() => {
@@ -523,7 +529,8 @@ export function App() {
           const c = stateAt(tracks[i]!, f).cuboid;
           if (!c) continue;
           const sig = sigOf(c), prev = old?.get(i + 1);
-          r.set(i + 1, prev && prev.sig === sig ? prev : { sig, sparse: fitReportAt(pc.xyz, pc.count, c).level === 'sparse' });
+          if (prev && prev.sig === sig) r.set(i + 1, prev);
+          else { const rep = fitReportAt(pc.xyz, pc.count, c); r.set(i + 1, { sig, sparse: rep.level === 'sparse', n: rep.inside }); }
           if (++n % 40 === 0) await new Promise((res) => window.setTimeout(res, 0));
         }
         if (!live) return; // bị ngắt giữa chừng thì không ghi frame đó, lần sau tính lại

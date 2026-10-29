@@ -2,149 +2,105 @@ import { stateAt } from './interp';
 import type { CvatTrack } from './types';
 
 /**
- * Cảnh báo "trôi box": vật ĐỨNG YÊN theo thế giới nhưng box nhích. Toạ độ trong từng frame là theo ego (xe chạy nên vật đứng yên cũng
- * đổi toạ độ), vì vậy trước hết ước lượng chuyển động của ego giữa hai frame liền nhau từ chính các object (RANSAC trên phép biến
- * đổi cứng 2D: vật đứng yên chiếm đa số nên khớp với nhau, vật chuyển động bị loại như ngoại lai), cộng dồn thành toạ độ "thế giới"
- * của từng đoạn, rồi với mỗi object đứng yên (bước nhích giữa hai frame rất nhỏ) báo các frame mà box lệch quá ngưỡng so với vị trí
- * đứng yên của nó (trung vị).
+ * Cảnh báo "trôi box": box ĐỨNG YÊN THEO EGO trong khi xe đang chạy, tức là box đi theo xe thay vì ở lại chỗ vật đứng yên.
+ * Toạ độ trong từng frame là theo ego nên vật đứng yên ngoài đường đổi toạ độ đúng bằng quãng xe đi; toạ độ của một box mà không đổi
+ * (giữ nguyên giữa hai keyframe trùng nhau, hoặc "giữ" sau keyframe cuối) khi xe đang chạy nghĩa là box không bám vật.
+ * Chỉ so toạ độ ego của hai frame liền nhau, không ước lượng chuyển động ego rồi quy về toạ độ thế giới (không RANSAC, không cộng dồn):
+ * mỗi cặp frame chỉ tính trung vị bước nhích của các object khác để biết xe có đang chạy không.
+ * Không bắt được box nhích chậm quanh vị trí đúng (cần biết chính xác chuyển động ego). Box "không đổi" phải trùng khớp hoàn toàn (x, y, z, yaw):
+ * trôi thật là box bị giữ nguyên (sau keyframe cuối hoặc trước keyframe outside) nên các số y hệt nhau.
+ * Vật chạy cùng vận tốc với xe (xe đi cùng chiều, giữ khoảng cách) thì box giữ nguyên vẫn bám vật: `dropSupported` bỏ các frame đầu của
+ * chuỗi khi trong box còn đủ điểm (đếm điểm do bước kiểm tra "ít điểm" của tool làm sẵn cho mọi object × frame).
  */
 export interface DriftConfig {
-  tol: number; // m: sai số để một object được coi là khớp với chuyển động ego khi ước lượng
-  minPairDist: number; // m: hai object dùng để dựng phép biến đổi phải cách nhau tối thiểu (ổn định góc)
-  minInliers: number; // số object khớp tối thiểu để chấp nhận ước lượng ego của một bước
-  decideFrames: number; // số frame đầu (kể từ keyframe đầu của đoạn) dùng để quyết định vật đứng yên hay không; đoạn ngắn hơn thì không xét
-  staticSpread: number; // m: trong `decideFrames` frame đầu, mọi vị trí thế giới lệch trung vị không quá mức này thì vật đứng yên
-  warnDist: number; // m: lệch so với vị trí đứng yên (neo từ các frame đầu) vượt mức này thì cảnh báo
-  departDist: number; // m: chuỗi lệch đạt tới mức này coi là vật bắt đầu chạy thật, không phải trôi box
-  maxRansac: number; // số cặp thử tối đa mỗi bước
+  holdTol: number; // m: bước (x, y) và độ cao z giữa hai frame liền nhau không quá mức này thì coi là toạ độ không đổi
+  holdYaw: number; // rad: góc yaw đổi không quá mức này thì coi là không đổi
+  egoMin: number; // m: xe coi là đang chạy ở một cặp frame khi bước trung vị của các object đang nhích ≥ mức này
+  minMovers: number; // số object đang nhích (bước > holdTol) tối thiểu ở cặp frame đó để tin ước lượng xe đang chạy
+  minHold: number; // số frame liên tiếp (kể cả frame đầu) toạ độ không đổi tối thiểu để báo
+  supportMin: number; // số điểm trong box tối thiểu (và tối thiểu supportRatio × số điểm ở frame neo) để coi box còn bám vật
+  supportRatio: number;
 }
-export const DEFAULT_DRIFT: DriftConfig = { tol: 0.25, minPairDist: 3, minInliers: 3, decideFrames: 5, staticSpread: 0.2, warnDist: 0.4, departDist: 1.5, maxRansac: 4000 };
+export const DEFAULT_DRIFT: DriftConfig = { holdTol: 0.005, holdYaw: 0.01, egoMin: 0.3, minMovers: 3, minHold: 3, supportMin: 6, supportRatio: 0.5 };
 
-interface Xf { th: number; tx: number; ty: number } // p' = R(th)·p + t
-const rot = (th: number, x: number, y: number): [number, number] => [Math.cos(th) * x - Math.sin(th) * y, Math.sin(th) * x + Math.cos(th) * y];
-const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
-
-/** Phép biến đổi cứng 2D khớp a → b theo bình phương tối thiểu (Kabsch 2D). */
-function fitRigid(a: [number, number][], b: [number, number][]): Xf {
-  const n = a.length;
-  let cax = 0, cay = 0, cbx = 0, cby = 0;
-  for (let i = 0; i < n; i++) { cax += a[i]![0]; cay += a[i]![1]; cbx += b[i]![0]; cby += b[i]![1]; }
-  cax /= n; cay /= n; cbx /= n; cby /= n;
-  let dot = 0, cross = 0;
-  for (let i = 0; i < n; i++) {
-    const ax = a[i]![0] - cax, ay = a[i]![1] - cay, bx = b[i]![0] - cbx, by = b[i]![1] - cby;
-    dot += ax * bx + ay * by; cross += ax * by - ay * bx;
-  }
-  const th = Math.atan2(cross, dot);
-  const [rx, ry] = rot(th, cax, cay);
-  return { th, tx: cbx - rx, ty: cby - ry };
-}
-
-/** Chuyển động ego giữa hai frame: phép biến đổi T với p(frame sau) = T(p(frame trước)) cho vật đứng yên; null nếu không đủ cơ sở. */
-export function estimateEgo(a: [number, number][], b: [number, number][], cfg: DriftConfig = DEFAULT_DRIFT): Xf | null {
-  const n = a.length;
-  if (n < cfg.minInliers) return null;
-  const err = (t: Xf, i: number) => { const [x, y] = rot(t.th, a[i]![0], a[i]![1]); return Math.hypot(x + t.tx - b[i]![0], y + t.ty - b[i]![1]); };
-  let best: number[] = [], bestSum = Infinity;
-  let tried = 0;
-  for (let i = 0; i < n && tried < cfg.maxRansac; i++) {
-    for (let j = i + 1; j < n && tried < cfg.maxRansac; j++) {
-      const da = Math.hypot(a[j]![0] - a[i]![0], a[j]![1] - a[i]![1]), db = Math.hypot(b[j]![0] - b[i]![0], b[j]![1] - b[i]![1]);
-      if (da < cfg.minPairDist || Math.abs(da - db) > cfg.tol) continue; // khoảng cách hai vật phải giữ nguyên nếu cùng đứng yên
-      tried++;
-      const th = wrap(Math.atan2(b[j]![1] - b[i]![1], b[j]![0] - b[i]![0]) - Math.atan2(a[j]![1] - a[i]![1], a[j]![0] - a[i]![0]));
-      const [rx, ry] = rot(th, a[i]![0], a[i]![1]);
-      const t: Xf = { th, tx: b[i]![0] - rx, ty: b[i]![1] - ry };
-      const inl: number[] = [];
-      let sum = 0;
-      for (let k = 0; k < n; k++) { const e = err(t, k); if (e <= cfg.tol) { inl.push(k); sum += e; } }
-      if (inl.length > best.length || (inl.length === best.length && sum < bestSum)) { best = inl; bestSum = sum; }
-    }
-  }
-  if (best.length < cfg.minInliers) return null;
-  // tinh chỉnh bằng bình phương tối thiểu trên các object khớp, rồi chọn lại tập khớp một lần
-  let t = fitRigid(best.map((k) => a[k]!), best.map((k) => b[k]!));
-  const inl2 = a.map((_, k) => k).filter((k) => err(t, k) <= cfg.tol);
-  if (inl2.length >= cfg.minInliers) t = fitRigid(inl2.map((k) => a[k]!), inl2.map((k) => b[k]!));
-  return t;
-}
-
-export interface DriftFrame { f: number; dist: number } // dist: m lệch so với vị trí đứng yên
-export interface DriftInfo { num: number; frames: DriftFrame[]; steps: number; medianStep: number }
+/** dist: quãng xe đã đi (m, tích lũy từ lúc box bắt đầu đứng yên theo ego) tới frame f; from: frame neo của chuỗi (frame cuối còn nhích). */
+export interface DriftFrame { f: number; dist: number; from: number }
+export interface DriftInfo { num: number; frames: DriftFrame[] }
 
 const median = (v: number[]) => { const s = [...v].sort((x, y) => x - y); return s.length ? (s.length % 2 ? s[s.length >> 1]! : (s[s.length / 2 - 1]! + s[s.length / 2]!) / 2) : 0; };
 
 /**
- * Với mỗi object đứng yên (≥ minSteps bước, bước nhích trung vị ≤ staticStep trong cùng một đoạn liên tục) trả các frame mà box lệch
- * quá warnDist so với vị trí đứng yên (trung vị) của nó. Object đang chuyển động bình thường không bị xét.
+ * Với mỗi object trả các frame mà toạ độ ego của box không đổi (≤ holdTol) so với frame liền trước trong khi xe đang chạy, nếu chuỗi
+ * như vậy dài ≥ minHold frame (frame đầu chuỗi là điểm box còn nhích, không bị báo). Chuỗi đứt khi box vắng mặt, khi frame không liền
+ * nhau hoặc khi box nhích trở lại.
  */
 export function findDrift(tracks: CvatTrack[], frames: number[], cfg: DriftConfig = DEFAULT_DRIFT): Map<number, DriftInfo> {
   const sorted = [...frames].sort((x, y) => x - y);
-  // toạ độ tâm (x, y) của mọi object ở mọi frame
-  const pos = new Map<number, Map<number, [number, number]>>();
-  for (const f of sorted) {
-    const m = new Map<number, [number, number]>();
-    tracks.forEach((t, i) => { const c = stateAt(t, f).cuboid; if (c) m.set(i, [c.x, c.y]); });
-    pos.set(f, m);
-  }
-  // chuyển động ego từng bước và toạ độ thế giới (so với frame đầu của đoạn)
-  const cum = new Map<number, { th: number; tx: number; ty: number; seg: number }>();
-  let seg = 0;
-  let cur: { th: number; tx: number; ty: number } | null = null;
-  for (let k = 0; k < sorted.length; k++) {
-    const f = sorted[k]!;
-    if (k === 0) { cur = { th: 0, tx: 0, ty: 0 }; cum.set(f, { ...cur, seg }); continue; }
-    const prev = sorted[k - 1]!;
-    const pa = pos.get(prev)!, pb = pos.get(f)!;
-    const ids = [...pb.keys()].filter((i) => pa.has(i));
-    const T = f - prev === 1 ? estimateEgo(ids.map((i) => pa.get(i)!), ids.map((i) => pb.get(i)!), cfg) : null;
-    if (!T || !cur) { seg++; cur = { th: 0, tx: 0, ty: 0 }; cum.set(f, { ...cur, seg }); continue; } // không ước lượng được → đoạn mới
-    // C_f(p) = C_{f-1}(T^-1 p): R' = Rc·R(-th), t' = tc − R'·t
-    const th2 = wrap(cur.th - T.th);
-    const [rtx, rty] = rot(th2, T.tx, T.ty);
-    cur = { th: th2, tx: cur.tx - rtx, ty: cur.ty - rty };
-    cum.set(f, { ...cur, seg });
-  }
-  const world = (f: number, p: [number, number]): [number, number] => { const c = cum.get(f)!; const [x, y] = rot(c.th, p[0], p[1]); return [x + c.tx, y + c.ty]; };
-
   const out = new Map<number, DriftInfo>();
-  tracks.forEach((_, i) => {
-    // chuỗi vị trí thế giới theo từng đoạn liên tục
-    const bySeg = new Map<number, { f: number; w: [number, number] }[]>();
-    // đoạn = chuỗi frame liền nhau có box trong cùng một đoạn ego (khoảng trống, ví dụ outside, cắt đoạn)
-    let run = 0, lastF = -2;
-    for (const f of sorted) {
-      const p = pos.get(f)!.get(i);
-      if (!p) continue;
-      if (f !== lastF + 1) run++;
-      lastF = f;
-      const s = cum.get(f)!.seg * 100000 + run;
-      const l = bySeg.get(s) ?? [];
-      l.push({ f, w: world(f, p) });
-      bySeg.set(s, l);
-    }
-    const warn: DriftFrame[] = [];
-    let steps = 0;
-    const allSteps: number[] = [];
-    for (const list of bySeg.values()) {
-      for (let k = 1; k < list.length; k++) allSteps.push(Math.hypot(list[k]!.w[0] - list[k - 1]!.w[0], list[k]!.w[1] - list[k - 1]!.w[1]));
-      steps += Math.max(0, list.length - 1);
-      // Quyết định đứng yên hay không CHỈ từ `decideFrames` frame đầu kể từ keyframe đầu của đoạn: nếu cả cụm nằm trong `staticSpread`
-      // quanh vị trí trung vị của nó thì vật đứng yên, và vị trí trung vị đó là điểm neo để đo trôi ở các frame sau.
-      if (list.length < cfg.decideFrames) continue;
-      const head = list.slice(0, cfg.decideFrames);
-      const ax = median(head.map((q) => q.w[0])), ay = median(head.map((q) => q.w[1]));
-      if (Math.max(...head.map((q) => Math.hypot(q.w[0] - ax, q.w[1] - ay))) > cfg.staticSpread) continue; // đang chuyển động ngay từ đầu
-      // Các frame sau neo: chuỗi lệch liên tục quá warnDist mà đạt tới departDist là vật BẮT ĐẦU chạy thật (không báo); chưa tới thì là trôi box.
-      let run: DriftFrame[] = [];
-      const flush = () => { if (run.length && Math.max(...run.map((r) => r.dist)) < cfg.departDist) warn.push(...run); run = []; };
-      for (const q of list.slice(cfg.decideFrames)) {
-        const d = Math.hypot(q.w[0] - ax, q.w[1] - ay);
-        if (d > cfg.warnDist) run.push({ f: q.f, dist: d }); else flush();
+  const open = new Map<number, { f: number; dist: number; from: number }[]>(); // object → chuỗi đang chạy (phần tử đầu = frame neo, dist 0)
+  const warn = new Map<number, DriftFrame[]>();
+  const flush = (i: number) => {
+    const run = open.get(i);
+    open.delete(i);
+    if (run && run.length >= cfg.minHold) warn.set(i, [...(warn.get(i) ?? []), ...run.slice(1)]);
+  };
+  let prev: Map<number, [number, number, number, number]> | null = null;
+  let prevF = -Infinity;
+  for (const f of sorted) {
+    const cur = new Map<number, [number, number, number, number]>();
+    tracks.forEach((t, i) => { const c = stateAt(t, f).cuboid; if (c) cur.set(i, [c.x, c.y, c.z, c.yaw]); });
+    if (!prev || f !== prevF + 1) {
+      for (const i of [...open.keys()]) flush(i);
+    } else {
+      // bước nhích của từng object giữa hai frame liền nhau; xe đang chạy nếu các object đang nhích có bước trung vị đủ lớn
+      const step = new Map<number, number>(), same = new Set<number>();
+      for (const [i, p] of cur) {
+        const q = prev.get(i);
+        if (!q) continue;
+        const d = Math.hypot(p[0] - q[0], p[1] - q[1]);
+        step.set(i, d);
+        const dyaw = Math.abs(Math.atan2(Math.sin(p[3] - q[3]), Math.cos(p[3] - q[3])));
+        if (d <= cfg.holdTol && Math.abs(p[2] - q[2]) <= cfg.holdTol && dyaw <= cfg.holdYaw) same.add(i);
       }
-      flush();
+      const movers = [...step.values()].filter((d) => d > cfg.holdTol);
+      const egoStep = movers.length >= cfg.minMovers ? median(movers) : 0;
+      const egoMoves = egoStep >= cfg.egoMin;
+      for (const i of tracks.keys()) {
+        const frozen = same.has(i) && egoMoves;
+        const run = open.get(i);
+        if (frozen) {
+          if (run) run.push({ f, dist: run[run.length - 1]!.dist + egoStep, from: run[0]!.f });
+          else open.set(i, [{ f: prevF, dist: 0, from: prevF }, { f, dist: egoStep, from: prevF }]);
+        } else if (run) flush(i);
+      }
     }
-    if (warn.length) out.set(i + 1, { num: i + 1, frames: warn.sort((x, y) => x.f - y.f), steps, medianStep: median(allSteps) });
-  });
+    prev = cur;
+    prevF = f;
+  }
+  for (const i of [...open.keys()]) flush(i);
+  for (const [i, fs] of warn) if (fs.length) out.set(i + 1, { num: i + 1, frames: fs.sort((x, y) => x.f - y.f) });
   return out;
+}
+
+/**
+ * Bỏ các frame ĐẦU của mỗi chuỗi trôi mà box vẫn còn bám vật: ở frame neo box có ≥ supportMin điểm (vật nhìn thấy rõ) và ở các frame
+ * bị giữ vẫn còn ≥ max(supportMin, supportRatio × điểm ở neo) điểm, tức vật chạy cùng vận tốc với xe nên toạ độ ego không đổi là đúng.
+ * Dừng bỏ ở frame đầu tiên không đủ điểm (hoặc chưa có số điểm); từ đó trở đi vẫn báo. Frame neo ít điểm (vật xa / thưa) thì không đủ
+ * cơ sở để bỏ, giữ nguyên. `insideAt(f)`: số điểm trong box của object ở frame f (undefined: chưa tính).
+ */
+export function dropSupported(frames: DriftFrame[], insideAt: (f: number) => number | undefined, cfg: DriftConfig = DEFAULT_DRIFT): DriftFrame[] {
+  const byFrom = new Map<number, DriftFrame[]>();
+  for (const x of frames) byFrom.set(x.from, [...(byFrom.get(x.from) ?? []), x]);
+  const out: DriftFrame[] = [];
+  for (const [from, list] of byFrom) {
+    list.sort((a, b) => a.f - b.f);
+    const na = insideAt(from);
+    let k = 0;
+    if (na !== undefined && na >= cfg.supportMin) {
+      const need = Math.max(cfg.supportMin, cfg.supportRatio * na);
+      while (k < list.length) { const n = insideAt(list[k]!.f); if (n === undefined || n < need) break; k++; }
+    }
+    out.push(...list.slice(k));
+  }
+  return out.sort((a, b) => a.f - b.f);
 }

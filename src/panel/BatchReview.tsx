@@ -19,7 +19,7 @@ import { parseLabelSpecs } from '../shared/attributes';
 import { AttributePanel } from './AttributePanel';
 import { gpuActive } from './gpu';
 import { Help, PENDING_STYLE, Pill, Slider } from './ui';
-import { clampPan, drawView, localize, NO_PAN, panBy, panOffset, rotateLocal, STATUS_COLOR, type Local, type Pan, type Scene, type View } from './render';
+import { clampPan, drawView, type EgoPlane, localize, NO_PAN, panBy, panOffset, rotateLocal, STATUS_COLOR, type Local, type Pan, type Scene, type View } from './render';
 import { Cancelled, pointClouds } from './stores';
 import { issueKey, ignoreKey, ignoreStore, motionKey, overlapKey, shiftStore, useIgnored } from './shiftStore';
 import { CameraPanel } from './CameraPanel';
@@ -48,15 +48,15 @@ const ZOOM_MIN = 0.5, ZOOM_MAX = 8;
 const CELL_MIN = 110, CELL_MAX = 520;
 
 // --- tùy chọn hiển thị, nhớ theo từng người dùng (chỉ là tiện ích, không quan trọng nếu mất) ---
-interface Prefs { auto: boolean; size: number; slabMargin: number; perWin: number; keyOnly: boolean; tilt: boolean; gap: number; ground: boolean; suggest: boolean }
-const PREFS_DEFAULT: Prefs = { auto: true, size: 200, slabMargin: 0.5, perWin: 6, keyOnly: false, tilt: true, gap: 28, ground: true, suggest: true };
+interface Prefs { auto: boolean; size: number; slabMargin: number; perWin: number; keyOnly: boolean; tilt: boolean; gap: number; ground: boolean; suggest: boolean; egoPlane: boolean }
+const PREFS_DEFAULT: Prefs = { auto: true, size: 200, slabMargin: 0.5, perWin: 6, keyOnly: false, tilt: true, gap: 28, ground: true, suggest: true, egoPlane: false };
 const loadPrefs = (): Prefs => {
   try {
     const p = JSON.parse(kv.get('cvla-prefs') ?? '{}') as Partial<Prefs>;
     const num = (v: unknown, d: number, lo: number, hi: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
     return {
       auto: p.auto ?? true, size: num(p.size, 200, CELL_MIN, CELL_MAX), slabMargin: num(p.slabMargin, 0.5, 0, 3),
-      perWin: Math.round(num(p.perWin, 6, 2, 30)), keyOnly: p.keyOnly === true, tilt: p.tilt !== false, gap: Math.round(num(p.gap, 28, 4, 80)), ground: p.ground !== false, suggest: p.suggest !== false,
+      perWin: Math.round(num(p.perWin, 6, 2, 30)), keyOnly: p.keyOnly === true, tilt: p.tilt !== false, gap: Math.round(num(p.gap, 28, 4, 80)), ground: p.ground !== false, suggest: p.suggest !== false, egoPlane: p.egoPlane === true,
     };
   } catch { return { ...PREFS_DEFAULT }; }
 };
@@ -79,7 +79,8 @@ function cursorFor(view: View, hit: Hit, alt = false): string {
 
 interface DragState { hit: NonNullable<Hit>; x0: number; y0: number; base: LocalBox; moved: boolean }
 
-function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, mark, scene, overlays, tiltOn, autoSnap, onPreview, onCommit, onZoom, pan, onPan }: {
+function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, tiltOn, autoSnap, onPreview, onCommit, onZoom, pan, onPan }: {
+  egoPlane: EgoPlane | null; // mặt phẳng Oxy của ego trong hệ của khung nhìn (null: công tắc tắt)
   scene: Scene; overlays: LocalBox[]; tiltOn: boolean; frame: Mat3 | null; // frame: khung nhìn căn theo box nghiêng (null nếu box không nghiêng)
   mark: { u: number; v: number; w: number } | null;
   ground: number | null; autoSnap: boolean;
@@ -98,8 +99,8 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
     const ctx = ref.current?.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawView(ctx, size, view, loc, box, half, st.status, !!drag.current, misfit, ghost, ground, mark, scene, overlays, st.cuboid, groundMarks, contactW, pan);
-  }, [view, size, dpr, loc, st.status, st.cuboid, half, box, misfit, ghost, ground, groundMarks, contactW, mark, scene, overlays, pan]);
+    drawView(ctx, size, view, loc, box, half, st.status, !!drag.current, misfit, ghost, ground, mark, scene, overlays, st.cuboid, groundMarks, contactW, pan, egoPlane);
+  }, [view, size, dpr, loc, st.status, st.cuboid, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, pan]);
 
   // Cuộn chuột trên ô = phóng to/thu nhỏ mọi frame (listener gốc để chặn cuộn trang).
   const zoomRef = useRef(onZoom);
@@ -223,7 +224,7 @@ const CHIP_BTN: React.CSSProperties = { padding: '0 3px', lineHeight: 1, height:
 interface FileFlag { kind: IssueKind; state: FlagState; msg?: string; det: boolean }
 const NO_FLAGS: FileFlag[] = [];
 
-function Column({ groundOv, groundOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan }: {
+function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan }: {
   onFocusFrame: (f: number) => void;
   pan: Pan; onPan: (p: Pan) => void;
   fileFlags: FileFlag[]; onMarkFlag: (f: number, kind: IssueKind, mark: FlagMark | null) => void;
@@ -235,7 +236,7 @@ function Column({ groundOv, groundOn, suggestOn, f, size, st, refCub, half, locH
   motion: MotionWarning | null; motionIgnored: boolean; onIgnoreMotion: (f: number, on: boolean) => void;
   autoSnap: boolean; onSnap: (f: number, g: GroundResult | null) => void; onGround: (f: number) => void;
   suggestOn: boolean; // công tắc gợi ý sửa box (kích thước / vị trí) khi lệch
-  groundOv: GroundResult | null; groundOn: boolean; // mặt đường đã tinh chỉnh theo các frame khác của object (BatchReview tính); groundOn: công tắc dò mặt đất
+  groundOv: GroundResult | null; egoOn: boolean; groundOn: boolean; // egoOn: công tắc hiện mặt đường ego (Oxy); mặt đường đã tinh chỉnh theo các frame khác của object (BatchReview tính); groundOn: công tắc dò mặt đất
   ignored: boolean; onIgnore: (f: number, on: boolean) => void;
   fixed: boolean; onSuggest: (f: number, s: Suggestion | null) => void; onAccept: (f: number, s: Suggestion) => void;
   warn: boolean; onFit: (f: number, r: FitReport | null) => void;
@@ -268,6 +269,11 @@ function Column({ groundOv, groundOn, suggestOn, f, size, st, refCub, half, locH
   // Khung nhìn căn theo box: box nghiêng thì điểm, box gợi ý, vật khác... đều quay sang khung riêng của box để mọi view thấy box thẳng.
   const M = useMemo(() => (st.cuboid ? viewFrame(st.cuboid) : null), [st.cuboid]);
   const locView = useMemo(() => (loc && M ? rotateLocal(loc, M) : loc), [loc, M]);
+  // Mặt phẳng Oxy của ego (z = 0 thế giới) trong hệ của khung nhìn, tính theo z của box ở đúng frame này.
+  const egoPlane = useMemo<EgoPlane | null>(
+    () => (egoOn && st.cuboid ? (M ? [M[2], M[5], M[8], -st.cuboid.z] : [0, 0, 1, -st.cuboid.z]) : null),
+    [egoOn, st.cuboid, M],
+  );
   const boxV = <T extends LocalBox | null>(b: T): T => {
     if (!b || !M) return b;
     const [cu, cv, cw] = apply(M, [b.cu, b.cv, b.cw]);
@@ -359,7 +365,7 @@ function Column({ groundOv, groundOn, suggestOn, f, size, st, refCub, half, locH
         {snap?.warn && <span style={{ ...CHIP, background: '#eaf6d8', color: '#2d5a00' }} title={groundTip(snap)}>⏬ {groundAction(snap)}</span>}
       </div>
       {VIEWS.map((v) => (
-        <Cell key={v} frame={M} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} pan={pan} onPan={onPan} />
+        <Cell key={v} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} pan={pan} onPan={onPan} />
       ))}
       {!pc && (
         <div style={{ fontSize: 11, padding: 2 }}>
@@ -626,7 +632,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     const m = track ? trackIssues(track, row?.label ?? '', Array.from({ length: stop - start + 1 }, (_, i) => start + i)) : new Map<number, FrameIssue[]>();
     // Trôi box (đứng yên mà box nhích): tính chéo giữa các frame ở App, gộp vào cùng danh sách cảnh báo của frame.
     for (const d of drift.get(num) ?? []) {
-      m.set(d.f, [...(m.get(d.f) ?? []), { kind: 'T', message: `trôi box: lệch ${d.dist.toFixed(2)} m so với vị trí đứng yên của object (đã bù chuyển động của xe); vật đứng yên mà box nhích` }]);
+      m.set(d.f, [...(m.get(d.f) ?? []), { kind: 'T', message: `trôi box: toạ độ theo ego không đổi trong khi xe đã đi ${d.dist.toFixed(1)} m (box đi theo xe thay vì ở lại chỗ vật đứng yên); bỏ qua nếu vật thật sự chạy cùng vận tốc với xe` }]);
     }
     return m;
   }, [track, row?.label, start, stop, drift, num]);
@@ -1112,6 +1118,9 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
         <label title="Gợi ý box: khi box lệch cụm điểm, đề xuất box mới (nét đứt xanh lơ, nút ✔ nhận, phím A) kèm cảnh báo ⚠ lệch. Tắt: không có gợi ý và không có cảnh báo lệch (⚠ ít điểm vẫn hiện)." style={{ fontWeight: 600 }}>
           <input type="checkbox" checked={prefs.suggest} onChange={(e) => updatePrefs({ ...prefs, suggest: e.target.checked })} /> gợi ý kích thước box
         </label>
+        <label title="Mặt đường của ego: mặt phẳng Oxy (z = 0, mặt đường dưới xe) vẽ bằng vạch vàng chấm ở view Bên / Trước của MỌI frame, theo z của box ở frame đó (box nghiêng thì vạch nghiêng theo). Để so box với mặt đường chung của cả cảnh; không ảnh hưởng cảnh báo hay dữ liệu.">
+          <input type="checkbox" checked={prefs.egoPlane} onChange={(e) => updatePrefs({ ...prefs, egoPlane: e.target.checked })} /> hiện mặt đường ego (Oxy)
+        </label>
         <label title={`Dò mặt đất: đo mặt đường riêng cho object ở đúng frame đang xét (lớp thấp nhất có mật độ ở 8 cung quanh box + lớp tiếp xúc dưới gầm), không dự đoán từ frame khác. Báo khi đáy cao hơn mặt đường quá ${cm(DEFAULT_GROUND.floatTol)} cm hoặc thấp hơn quá ${cm(DEFAULT_GROUND.sinkTol)} cm và vượt độ bất định của phép đo. Tắt: không còn chip ⏬, không có Ground snap (G) và tự bám mặt đất.`} style={{ fontWeight: 600 }}>
           <input type="checkbox" checked={prefs.ground} onChange={(e) => updatePrefs({ ...prefs, ground: e.target.checked })} /> dò mặt đất
         </label>
@@ -1167,7 +1176,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
             onIgnore={(f, on) => ignoreFrames([f], on)}
             motion={c.mot} motionIgnored={ign.has(motionKey(job.id, num, c.f))}
             onIgnoreMotion={(f, on) => ignoreStore.set([motionKey(job.id, num, f)], on)}
-            autoSnap={autoSnap && prefs.ground} groundOv={series.get(c.f) ?? null} groundOn={prefs.ground} suggestOn={prefs.suggest} onGround={(f) => { if (!groundFrame(f)) setNote('Không snap được frame này.'); }}
+            autoSnap={autoSnap && prefs.ground} groundOv={series.get(c.f) ?? null} groundOn={prefs.ground} egoOn={prefs.egoPlane} suggestOn={prefs.suggest} onGround={(f) => { if (!groundFrame(f)) setNote('Không snap được frame này.'); }}
             onSnap={(f, g) => setSnaps((m) => (m.get(f) === g ? m : new Map(m).set(f, g)))}
             onSuggest={(f, s) => setSugs((m) => (m.get(f) === s ? m : new Map(m).set(f, s)))} onAccept={accept}
             onFit={(f, r) => setFits((m) => (m.get(f) === r ? m : new Map(m).set(f, r)))} onSelect={() => onPickSelect(c.f)}

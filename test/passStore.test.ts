@@ -27,11 +27,11 @@ describe('lưu kết quả tính của cả job (tab CVAT tải lại không ph�
   });
 
   it('lưu rồi đọc lại đúng từng (frame, object)', () => {
-    const res = new Map([[3, new Map([[1, { sig: P.sigOf(box), sparse: true }], [2, { sig: 'abc', sparse: false }]])]]);
+    const res = new Map([[3, new Map([[1, { sig: P.sigOf(box), sparse: true, n: 4 }], [2, { sig: 'abc', sparse: false, n: 31 }]])]]);
     P.savePass('cvla-pass:9999', res);
     const back = P.loadPass('cvla-pass:9999');
-    expect(back.get(3)?.get(1)).toEqual({ sig: P.sigOf(box), sparse: true });
-    expect(back.get(3)?.get(2)).toEqual({ sig: 'abc', sparse: false });
+    expect(back.get(3)?.get(1)).toEqual({ sig: P.sigOf(box), sparse: true, n: 4 });
+    expect(back.get(3)?.get(2)).toEqual({ sig: 'abc', sparse: false, n: 31 });
   });
 
   it('kết quả của phiên bản thuật toán khác (hoặc hỏng) thì bỏ, tính lại', () => {
@@ -42,7 +42,7 @@ describe('lưu kết quả tính của cả job (tab CVAT tải lại không ph�
   });
 
   it('chỉ giữ PASS_KEEP_JOBS (10) job gần nhất', () => {
-    const res = new Map([[0, new Map([[1, { sig: 's', sparse: false }]])]]);
+    const res = new Map([[0, new Map([[1, { sig: 's', sparse: false, n: 12 }]])]]);
     for (let j = 1; j <= P.PASS_KEEP_JOBS + 3; j++) P.savePass(`cvla-pass:${2000 + j}`, res);
     expect(S.kv.get('cvla-pass:2001')).toBeNull(); // cũ nhất đã bị xóa
     expect(S.kv.get(`cvla-pass:${2000 + P.PASS_KEEP_JOBS + 3}`)).not.toBeNull();

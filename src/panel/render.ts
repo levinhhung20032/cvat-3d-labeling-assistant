@@ -48,6 +48,14 @@ export const STATUS_COLOR: Record<Status, string> = {
 const BUCKETS = 8;
 const PALETTE = Array.from({ length: BUCKETS }, (_, i) => `hsl(${220 - (i * 200) / (BUCKETS - 1)} 80% 55%)`);
 
+/**
+ * Mặt phẳng Oxy của ego (z = 0 trong tọa độ thế giới, mặt đường dưới xe) viết trong hệ của khung nhìn: nu·u + nv·v + nw·w = d.
+ * Box không nghiêng: [0, 0, 1, −z của box]. Box nghiêng (khung nhìn quay bởi m): [m[2], m[5], m[8], −z của box].
+ */
+export type EgoPlane = [number, number, number, number];
+/** Độ cao w của mặt phẳng ego tại vị trí s trên trục ngang của ô (u ở view Bên, v ở view Trước; trục còn lại lấy 0, giữa lát cắt). */
+export const egoPlaneW = (p: EgoPlane, view: View, s: number): number => (p[3] - (view === 'side' ? p[0] : p[1]) * s) / p[2];
+
 /** Chiếu điểm (u, v, w) của object lên ô. */
 const project = (view: View, u: number, v: number, w: number, k: number, c: number): [number, number] =>
   view === 'top' ? [c - v * k, c - u * k] : view === 'side' ? [c + u * k, c - w * k] : [c + v * k, c - w * k];
@@ -112,7 +120,7 @@ export function drawView(
   ctx: CanvasRenderingContext2D, size: number, view: View, loc: Local | null,
   box: LocalBox | null, half: number, status: Status, active = false, misfit = false, ghost: LocalBox | null = null, ground: number | null = null, mark: { u: number; v: number; w: number } | null = null,
   scene: Scene = { zClip: half, slab: half * 0.5, colorHalf: half }, overlays: LocalBox[] = [], tiltBase: Pick<Cuboid, 'rx' | 'ry' | 'yaw'> | null = null,
-  groundMarks: { u: number; v: number; w: number; used: boolean }[] = [], contactW: number | null = null, pan: Pan = NO_PAN,
+  groundMarks: { u: number; v: number; w: number; used: boolean }[] = [], contactW: number | null = null, pan: Pan = NO_PAN, egoPlane: EgoPlane | null = null,
 ) {
   ctx.fillStyle = '#0b0f14';
   ctx.fillRect(0, 0, size, size);
@@ -170,6 +178,21 @@ export function drawView(
       ctx.beginPath();
       ctx.moveTo(mx - 6, my - 6); ctx.lineTo(mx + 6, my + 6); ctx.moveTo(mx - 6, my + 6); ctx.lineTo(mx + 6, my - 6);
       ctx.stroke();
+      ctx.restore();
+    }
+    if (egoPlane && view !== 'top') {
+      // mặt đường của ego (mặt phẳng Oxy, z = 0) kéo dài hết ô: vàng chấm; box ở trên / dưới vạch này bao nhiêu thì cao / thấp hơn mặt đường ego bấy nhiêu
+      const x0 = -ox, x1 = size - ox;
+      const yAt = (x: number) => c - egoPlaneW(egoPlane, view, (x - c) / k) * k;
+      ctx.save();
+      ctx.strokeStyle = '#ffd400';
+      ctx.fillStyle = '#ffd400';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([2, 4]);
+      ctx.beginPath(); ctx.moveTo(x0, yAt(x0)); ctx.lineTo(x1, yAt(x1)); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = `${Math.max(9, Math.round(size / 20))}px sans-serif`;
+      ctx.fillText('Oxy ego (z=0)', x0 + 4, yAt(x0) - 3);
       ctx.restore();
     }
     if (ground !== null && view !== 'top') {
