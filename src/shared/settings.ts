@@ -1,5 +1,6 @@
 import type { DynRule } from './dynrule';
 import { parseRules, type Rule } from './alertRules';
+import { parseCameraBank, type CameraBank } from './cameras';
 import { parseSymbols, type SymbolMap } from './symbols';
 
 /**
@@ -9,9 +10,38 @@ import { parseSymbols, type SymbolMap } from './symbols';
  * File không có toạ độ, kích thước object hay dữ liệu nhãn.
  */
 export interface DynSettings { classes: Record<string, boolean>; attrRules: Record<string, DynRule> }
-export interface SettingsFile { version: 2; params: Record<string, number>; rules: Rule[]; symbols: SymbolMap; dynamicSize: DynSettings }
+export interface SettingsFile { version: 2; params: Record<string, number>; rules: Rule[]; symbols: SymbolMap; dynamicSize: DynSettings; camera?: CameraBank }
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+const parseCameraOrNull = (v: unknown): CameraBank | null => { try { return parseCameraBank(v); } catch { return null; } };
+
+/** Các phần có thể xuất / nạp riêng: tham số + rule, ký hiệu lỗi, Dynamic size, camera. */
+export type SettingsPart = 'rules' | 'symbols' | 'dynamic' | 'camera';
+export const SETTINGS_PARTS: { id: SettingsPart; label: string }[] = [
+  { id: 'rules', label: 'Rule & tham số' },
+  { id: 'symbols', label: 'Ký hiệu lỗi' },
+  { id: 'dynamic', label: 'Dynamic size' },
+  { id: 'camera', label: 'Camera' },
+];
+/** Phần nào có mặt trong một file setting (đọc từ JSON thô: file xuất một phần chỉ có khoá của phần đó). */
+export function presentParts(raw: unknown): SettingsPart[] {
+  if (!isObj(raw)) return [];
+  const out: SettingsPart[] = [];
+  if ('params' in raw || 'rules' in raw) out.push('rules');
+  if ('symbols' in raw) out.push('symbols');
+  if ('dynamicSize' in raw) out.push('dynamic');
+  if (parseCameraOrNull(raw.camera)) out.push('camera');
+  return out;
+}
+/** Giữ lại đúng các phần được chọn của một setting đầy đủ (để xuất một phần). */
+export function pickParts(s: SettingsFile, parts: SettingsPart[]): Partial<SettingsFile> & { version: 2 } {
+  const out: Partial<SettingsFile> & { version: 2 } = { version: 2 };
+  if (parts.includes('rules')) { out.params = s.params; out.rules = s.rules; }
+  if (parts.includes('symbols')) out.symbols = s.symbols;
+  if (parts.includes('dynamic')) out.dynamicSize = s.dynamicSize;
+  if (parts.includes('camera') && s.camera) out.camera = s.camera;
+  return out;
+}
 
 /** Đọc setting, bỏ từng phần hỏng. Không bao giờ ném lỗi. */
 export function parseSettings(raw: unknown): SettingsFile {
@@ -25,6 +55,8 @@ export function parseSettings(raw: unknown): SettingsFile {
     if (isObj(d.classes)) for (const [k, v] of Object.entries(d.classes)) if (typeof v === 'boolean' && k.trim()) out.dynamicSize.classes[k] = v;
     if (isObj(d.attrRules)) for (const [k, v] of Object.entries(d.attrRules)) if ((v === 'dyn' || v === 'static') && k.includes('|')) out.dynamicSize.attrRules[k] = v;
   }
+  const cam = parseCameraOrNull(raw.camera);
+  if (cam) out.camera = cam;
   return out;
 }
 

@@ -19,6 +19,8 @@ import { UploadDialog } from './UploadDialog';
 import { QcPanel } from './QcPanel';
 import { DynSizePanel } from './DynSizePanel';
 import { ThresholdPanel } from './ThresholdPanel';
+import { CameraTab } from './CameraPanel';
+import { SettingsIO } from './SettingsIO';
 import { thresholdStore, useThresholdVersion } from './thresholdStore';
 import { backgroundConfigKey } from '../shared/thresholds';
 import { Help, PENDING_STYLE } from './ui';
@@ -153,7 +155,7 @@ try { VERSION = api.runtime.getManifest().version; } catch { /* extension vừa 
 const EMPTY: Draft = { work: null, edited: new Set<string>(), undo: [], redo: [] };
 
 type State = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ok'; data: Data };
-type Tab = 'objects' | 'review' | 'shift' | 'qc' | 'dyn' | 'thr' | 'keys' | 'job';
+type Tab = 'objects' | 'review' | 'shift' | 'qc' | 'dyn' | 'thr' | 'cam' | 'keys' | 'job';
 /** Tải ưu tiên ngần này frame đầu; tải xong là mở được Batch Review (job ngắn hơn: cả job), phần còn lại tải và tính ngầm. */
 const UNLOCK_FRAMES = 6;
 
@@ -736,6 +738,7 @@ export function App() {
           <button onClick={reload}>Tải lại</button>
         </span>
       </div>
+      {data && <SettingsIO jobId={data.job.id} labels={data.labels} />}
       <div style={{ margin: '6px 0 0', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4 }}>
         {tabBtn('objects', 'Bảng object')}
         {tabBtn('review', 'Batch Review')}
@@ -743,6 +746,7 @@ export function App() {
         {tabBtn('qc', 'QC')}
         {tabBtn('dyn', 'Dynamic size')}
         {tabBtn('thr', 'Threshold')}
+        {tabBtn('cam', 'Camera')}
         {tabBtn('keys', 'Phím tắt')}
         {tabBtn('job', 'Thông tin job')}
         {data && (reloadMenu ? (
@@ -910,6 +914,7 @@ export function App() {
       )}
       {data && work && tab === 'dyn' && <DynSizePanel jobId={data.job.id} labels={data.labels} tracks={work.tracks} />}
       {data && work && tab === 'thr' && <ThresholdPanel jobId={data.job.id} labels={data.labels} tracks={work.tracks} />}
+      {data && tab === 'cam' && <CameraTab start={data.job.start_frame} stop={data.job.stop_frame} />}
       {tab === 'shift' && <ShiftPanel />}
       {tab === 'keys' && <KeysPanel map={keymap} setMap={setKeymap} />}
       {data && tab === 'job' && <JobInfo s={summarize(data.job, data.labels, data.ann)} />}

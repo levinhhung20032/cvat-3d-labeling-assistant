@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { rankCameras } from '../shared/cameras';
+import { buildCameras, camDirs, materializeSetup, rankCameras, UNMAPPED, yawToUi } from '../shared/cameras';
+import type { CamCount, CamOverride, CameraSetup, MappedCamera } from '../shared/cameras';
+import { activeSetup, useCameraBank } from './cameraStore';
 import { cameraImages } from './stores';
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
@@ -128,11 +130,107 @@ function ZoomImage({ url }: { url: string }) {
   );
 }
 
+const num = { width: 56 } as const;
+
+/** Gán tên camera của job ↔ hướng, chọn bộ 6 / 8 camera, xem và sửa góc nhìn (yaw, ống kính, nửa FOV) được đề xuất cho mỗi camera. */
+function CameraSetupEditor({ files, setup, onChange, onCount }: { files: string[]; setup: CameraSetup; onChange: (s: CameraSetup) => void; onCount: (n: CamCount) => void }) {
+  const cams = buildCameras(files, setup);
+  const dirs = camDirs(setup.count);
+  const patchOver = (key: string, o: CamOverride) => onChange({ ...setup, over: { ...setup.over, [key]: { ...setup.over[key], ...o } } });
+  const used = new Map<string, number>();
+  for (const c of cams) if (c.dir) used.set(c.dir, (used.get(c.dir) ?? 0) + 1);
+  return (
+    <div style={{ border: '1px solid #bbb', borderRadius: 6, padding: 8, margin: '6px 0', fontSize: 12, textAlign: 'left', maxWidth: 'min(100%, 760px)' }}>
+      <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
+        <b>Bộ camera:</b>
+        {([6, 8] as const).map((n) => (
+          <label key={n}>
+            <input type="radio" checked={setup.count === n} onChange={() => onCount(n)} /> {n} camera
+          </label>
+        ))}
+        <button onClick={() => onChange({ count: setup.count, map: {}, over: {}, flip: setup.flip })} title="Bỏ mọi chỉnh tay: gán hướng và góc nhìn đề xuất lại theo tên file">Tự đề xuất lại</button>
+        <label title="Bật khi ảnh camera của job bị lật: object bên trái xe lại hiện ở camera bên phải. Đổi dấu mọi yaw cùng lúc.">
+          <input type="checkbox" checked={setup.flip} onChange={(e) => onChange({ ...setup, flip: e.target.checked })} /> Đảo trái ↔ phải
+        </label>
+        <span style={{ color: '#888' }}>Góc nhìn là ước lượng ±15°, chỉnh được.</span>
+      </div>
+      <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+        <thead>
+          <tr style={{ textAlign: 'left' }}><th>Tên camera trong job</th><th>Hướng</th><th title="Theo la bàn nhìn từ trên: dương = lệch phải, âm = lệch trái so với hướng trước xe">Yaw (°, + phải / − trái)</th><th>Ống kính</th><th>Nửa FOV (°)</th></tr>
+        </thead>
+        <tbody>
+          {cams.map((c, i) => (
+            <tr key={c.key}>
+              <td>{files[i]!.split('/').pop()}</td>
+              <td>
+                <select
+                  value={c.dir}
+                  onChange={(e) => onChange({ ...setup, map: { ...setup.map, [c.key]: e.target.value }, over: { ...setup.over, [c.key]: {} } })}
+                  style={{ borderColor: c.dir && (used.get(c.dir) ?? 0) > 1 ? '#d90' : undefined }}
+                >
+                  <option value={UNMAPPED}>— chưa gán —</option>
+                  {dirs.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+                {c.suggested && c.dir && <span title="Đề xuất theo tên file; chọn lại để chốt" style={{ color: '#888' }}> ✦</span>}
+              </td>
+              <td><input type="number" style={num} value={yawToUi(c.yaw)} min={-180} max={180} step={5} disabled={!c.dir} onChange={(e) => patchOver(c.key, { yaw: (setup.flip ? 1 : -1) * Number(e.target.value) || 0 })} /></td>
+              <td>
+                <select value={c.lens} disabled={!c.dir} onChange={(e) => patchOver(c.key, { lens: e.target.value as 'wide' | 'fisheye' })}>
+                  <option value="wide">góc rộng</option><option value="fisheye">fisheye</option>
+                </select>
+              </td>
+              <td><input type="number" style={num} value={c.halfFov} min={10} max={120} step={5} disabled={!c.dir} onChange={(e) => patchOver(c.key, { halfFov: Number(e.target.value) })} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {[...used].some(([, n]) => n > 1) && <p style={{ color: '#a60', margin: '4px 0 0' }}>⚠ Có hướng được gán cho nhiều hơn một camera.</p>}
+    </div>
+  );
+}
+
+/** Tab Camera: cấu hình ánh xạ camera. Tên file lấy từ ảnh của một frame do người dùng chọn (mọi frame cùng bộ camera). */
+export function CameraTab({ start, stop }: { start: number; stop: number }) {
+  const [bank, setBank] = useCameraBank();
+  const setup = activeSetup(bank);
+  const setSetup = (st: CameraSetup) => setBank({ ...bank, sets: { ...bank.sets, [bank.active]: st } });
+  const [frame, setFrame] = useState(start);
+  const [files, setFiles] = useState<string[] | null>(null);
+  // Ghi đầy đủ hướng / yaw / ống kính / FOV của mọi camera vào cấu hình (để xuất setting.json mang đủ giá trị đang dùng).
+  useEffect(() => {
+    if (!files?.length) return;
+    const full = materializeSetup(files, setup);
+    if (JSON.stringify(full) !== JSON.stringify(setup)) setSetup(full);
+  }, [files, setup]);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    let live = true;
+    setFiles(null); setErr('');
+    cameraImages.get(frame).then((m) => live && setFiles([...m.keys()])).catch((e) => live && setErr(String(e)));
+    return () => { live = false; };
+  }, [frame]);
+  return (
+    <div style={{ padding: '6px 0' }}>
+      <p style={{ margin: '4px 0' }}>
+        Gán tên camera trong job vào hướng của xe; tool tự đề xuất hướng và góc nhìn của từng camera, chỉnh tay được.
+        Danh sách camera lấy từ ảnh của frame{' '}
+        <input type="number" style={{ width: 64 }} min={start} max={stop} value={frame} onChange={(e) => setFrame(clamp(Math.round(Number(e.target.value) || start), start, stop))} />
+        {' '}(cấu hình áp cho mọi frame).
+      </p>
+      {err && <p style={{ color: '#b00' }}>Lỗi: {err}</p>}
+      {!files && !err && <p>đang tải ảnh…</p>}
+      {files && files.length === 0 && <p>Frame này không có ảnh camera.</p>}
+      {files && files.length > 0 && <CameraSetupEditor files={files} setup={setup} onChange={setSetup} onCount={(n) => setBank({ ...bank, active: n })} />}
+    </div>
+  );
+}
+
 /** Ảnh camera của frame để đối chiếu bằng mắt. Camera phù hợp nhất (theo phương vị của object) xếp đầu. */
 export function CameraPanel({ frame, azimuth }: { frame: number; azimuth: number | null }) {
-  const ranked = useMemo(() => rankCameras(azimuth ?? 0), [azimuth]);
-  const [pick, setPick] = useState<number | null>(null);
-  const [images, setImages] = useState<Map<number, Blob> | null>(null);
+  const [bank, setBank] = useCameraBank();
+  const setup0 = activeSetup(bank);
+  const [pick, setPick] = useState<string | null>(null);
+  const [images, setImages] = useState<Map<string, Blob> | null>(null);
   const [err, setErr] = useState('');
   useEffect(() => { setPick(null); }, [frame]);
   useEffect(() => {
@@ -141,29 +239,40 @@ export function CameraPanel({ frame, azimuth }: { frame: number; azimuth: number
     cameraImages.get(frame).then((m) => live && setImages(m)).catch((e) => live && setErr(String(e)));
     return () => { live = false; };
   }, [frame]);
-  const idx = pick ?? ranked[0]!.index;
+  const files = useMemo(() => [...(images?.keys() ?? [])], [images]);
+  const setup = useMemo(() => (files.length ? materializeSetup(files, setup0) : setup0), [files, setup0]);
+  useEffect(() => {
+    if (files.length && JSON.stringify(setup) !== JSON.stringify(setup0)) setBank({ ...bank, sets: { ...bank.sets, [bank.active]: setup } });
+  }, [setup, setup0, files.length]);
+  const cams = useMemo(() => buildCameras(files, setup), [files, setup]);
+  const ranked = useMemo(() => rankCameras<MappedCamera>(azimuth ?? 0, cams), [azimuth, cams]);
+  const cur = ranked.find((c) => c.key === pick) ?? ranked[0];
   const [url, setUrl] = useState('');
   useEffect(() => {
-    const b = images?.get(idx);
+    const b = cur ? images?.get(files[cur.index]!) : undefined;
     if (!b) { setUrl(''); return; }
     const u = URL.createObjectURL(b);
     setUrl(u);
     return () => URL.revokeObjectURL(u);
-  }, [images, idx]);
+  }, [images, files, cur?.key]);
   return (
     <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-      <b>Ảnh camera · frame {frame}</b>
-      {azimuth !== null && <> · phương vị object {azimuth.toFixed(0)}°</>}
+      <div>
+        <b>Ảnh camera · frame {frame}</b>
+        {azimuth !== null && <> · phương vị object {azimuth.toFixed(0)}°</>}
+        <span style={{ color: '#888' }}> · gán camera ↔ hướng ở tab Camera</span>
+      </div>
       <div style={{ margin: '4px 0', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 4 }}>
         {ranked.map((c, i) => (
-          <button key={c.index} onClick={() => setPick(c.index)} style={{ marginRight: 4, fontWeight: c.index === idx ? 700 : 400 }}>
-            image_{c.index} {c.name}{i === 0 ? ' ★' : ''}
+          <button key={c.key} onClick={() => setPick(c.key)} style={{ marginRight: 4, fontWeight: c.key === cur?.key ? 700 : 400 }}>
+            {files[c.index]!.split('/').pop()} {c.dir ? c.name : '(chưa gán)'}{i === 0 && c.dir ? ' ★' : ''}
           </button>
         ))}
       </div>
       {err && <p style={{ color: '#b00' }}>Lỗi: {err}</p>}
       {!images && !err && <p>đang tải ảnh…</p>}
-      {images && !url && <p>Không có image_{idx} trong frame này.</p>}
+      {images && images.size === 0 && <p>Frame này không có ảnh camera.</p>}
+      {images && images.size > 0 && !url && <p>Không đọc được ảnh đã chọn.</p>}
       {url && <ZoomImage url={url} />}
     </div>
   );

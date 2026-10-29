@@ -15,7 +15,7 @@ import { patternOrigin } from '../shared/hosts';
  * `ui@<origin>|<khóa>`. Tùy chọn cá nhân (giao diện, phím tắt, ca làm việc / KPI…) dùng chung mọi máy chủ.
  */
 const PREFIX = 'ui:';
-const PER_HOST = [/^cvla-(draft|made|dyn|bak|dynclass|dynattr|pass|throbj):/, /^cvla-(qc|ignore|qcimp|qcmarks|passidx|resume)$/];
+const PER_HOST = [/^cvla-(draft|made|dyn|bak|dynclass|dynattr|pass|throbj):/, /^cvla-(qc|ignore|qcimp|qcmarks|passidx|resume|camsetup)$/];
 const isPerHost = (key: string) => PER_HOST.some((r) => r.test(key));
 let scope = ''; // '' = máy chủ mặc định
 let mem: Map<string, string> | null = null;

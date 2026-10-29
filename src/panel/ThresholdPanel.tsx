@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { CvatLabel, CvatTrack } from '../shared/types';
 import {
-  fieldsOf, isChanged, resetAll, resetSection, SECTIONS, sectionChanged, setValue, applyPersisted, toPersisted, type Field, type SectionId,
+  fieldsOf, isChanged, resetAll, resetSection, SECTIONS, sectionChanged, setValue, type Field, type SectionId,
 } from '../shared/thresholds';
 import { metricsOf, METRIC_BY_ID, type MetricDef, type Op, type Rule, type SectionCode, type Target } from '../shared/alertRules';
-import { BUNDLED, dynForJob, mergeDynSettings, parseSettings, type SettingsFile } from '../shared/settings';
-import { defaultDyn, dynClassStore, dynRuleStore, useDynClasses, useDynRules } from './dynClassStore';
+import { defaultDyn, useDynClasses, useDynRules } from './dynClassStore';
 import { attrRuleKey } from '../shared/dynrule';
 import { SYMBOL_DEFAULTS, type SymbolKind } from '../shared/symbols';
 import { symbolStore, sym, useSymbols } from './symbolStore';
@@ -170,40 +169,8 @@ export function ThresholdPanel({ jobId, labels, tracks }: { jobId: number; label
   useThresholdVersion();
   useSymbols();
   const rules = useRules();
-  const labelNames = useMemo(() => labels.map((l) => l.name), [labels]);
   const dynMap = useDynClasses(jobId);
   const dynRules = useDynRules(jobId);
-  const [msg, setMsg] = useState('');
-
-  const exportSettings = () => {
-    const classOn = Object.fromEntries(labelNames.map((n) => [n, dynMap[n] ?? defaultDyn(n)]));
-    const file: SettingsFile = {
-      version: 2,
-      params: toPersisted().n,
-      rules: [...thresholdStore.rules()],
-      symbols: symbolStore.all(),
-      dynamicSize: mergeDynSettings(BUNDLED.dynamicSize, labelNames, classOn, dynRules),
-    };
-    const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2) + '\n'], { type: 'application/json' }));
-    const a = document.createElement('a');
-    a.href = url; a.download = 'setting.json'; a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setMsg(`Đã xuất setting.json (${file.rules.length} rule). File này của riêng bạn: không commit / đưa lên GitHub.`);
-  };
-  const importSettings = async (file: File | undefined) => {
-    if (!file) return;
-    try {
-      const s = parseSettings(JSON.parse(await file.text()));
-      applyPersisted({ n: s.params });
-      thresholdStore.setRules(s.rules);
-      symbolStore.replace(s.symbols);
-      const d = dynForJob(s.dynamicSize, labelNames);
-      for (const [n, on] of Object.entries(d.classes)) dynClassStore.set(jobId, n, on);
-      for (const [k, v] of Object.entries(d.attrRules)) dynRuleStore.set(jobId, k, v);
-      thresholdStore.changed();
-      setMsg(`Đã nạp setting: ${s.rules.length} rule, ${Object.keys(s.params).length} tham số, ${Object.keys(d.classes).length} class khớp job này.`);
-    } catch { setMsg('File setting không đọc được.'); }
-  };
 
   return (
     <>
@@ -212,15 +179,9 @@ export function ThresholdPanel({ jobId, labels, tracks }: { jobId: number; label
         Extension không kèm con số nào: <b>chưa có rule thì không báo lỗi</b>. Có hiệu lực ngay; lưu cục bộ, không gửi đi đâu.
       </p>
       <p style={{ margin: '4px 0' }}>
-        <button onClick={exportSettings}>Xuất setting.json</button>{' '}
-        <label style={{ cursor: 'pointer' }}>
-          <input type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={(e) => { void importSettings(e.target.files?.[0]); e.target.value = ''; }} />
-          <span style={{ border: '1px solid #888', borderRadius: 3, padding: '1px 6px' }}>Nạp setting.json…</span>
-        </label>{' '}
         <button disabled={!rules.length} onClick={() => { if (confirm(`Xoá TẤT CẢ ${rules.length} rule? (tham số, ký hiệu giữ nguyên)`)) thresholdStore.setRules([]); }}>Xoá tất cả rule</button>{' '}
         <button onClick={() => { resetAll(); thresholdStore.changed(); }} disabled={!SECTIONS.some((s) => sectionChanged(s.id))}>↺ Tham số</button>{' '}
         <button onClick={() => symbolStore.reset()} title="Về ký hiệu mặc định (đi xa bất thường = Y)">↺ Ký hiệu lỗi</button>
-        {msg && <span style={{ color: '#345', marginLeft: 8 }}>{msg}</span>}
       </p>
       <p style={{ margin: '2px 0', color: '#777', fontSize: 11 }}>Ô chữ đậm đầu mỗi mục = ký hiệu lỗi, sửa được. Tên class trong dropbox lấy từ nhãn của job này.</p>
       {SECTIONS.map((s) => (

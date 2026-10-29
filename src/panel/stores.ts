@@ -418,13 +418,16 @@ class Lru<V> {
   }
 }
 
-/** Ảnh camera của frame: index camera → Blob JPEG. Chỉ tải khi người dùng chọn một frame. */
-export const cameraImages = new Lru<Map<number, Blob>>(2, async (n) => {
+/** Ảnh camera của frame: tên file trong zip → Blob, xếp theo tên (số trong tên so theo giá trị). Chỉ tải khi người dùng chọn một frame. */
+export const cameraImages = new Lru<Map<string, Blob>>(2, async (n) => {
   const files = unzipSync(new Uint8Array(await fetchBinary('context', n)));
-  const out = new Map<number, Blob>();
-  for (const [name, data] of Object.entries(files)) {
-    const m = /image_(\d+)\.(?:jpe?g|png)$/i.exec(name);
-    if (m) out.set(Number(m[1]), new Blob([data as BlobPart], { type: 'image/jpeg' }));
+  const names = Object.keys(files)
+    .filter((name) => /\.(?:jpe?g|png|webp)$/i.test(name))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const out = new Map<string, Blob>();
+  for (const name of names) {
+    const type = /\.png$/i.test(name) ? 'image/png' : /\.webp$/i.test(name) ? 'image/webp' : 'image/jpeg';
+    out.set(name, new Blob([files[name] as BlobPart], { type }));
   }
   return out;
 });
