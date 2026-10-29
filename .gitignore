@@ -4,3 +4,12 @@ dist-firefox
 web-ext-artifacts
 backups
 *.log
+
+# File setting riêng của người dùng, không công khai
+settings/
+cvla-settings*.json
+setting.json
+
+# Tài liệu nội bộ, không đưa lên GitHub
+GUIDELINE.md
+NOTES.md

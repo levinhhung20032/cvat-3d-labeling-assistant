@@ -4,6 +4,7 @@ import type { CvatTrack } from '../shared/types';
 import { stateAt } from '../shared/interp';
 import { DEFAULT_GROUND } from '../shared/ground';
 import { ISSUE_NAMES } from '../shared/qcrules';
+import { sym, useSymbols } from './symbolStore';
 import { fmtIou, type OverlapPair } from '../shared/overlap';
 import { PENDING_STYLE } from './ui';
 
@@ -11,10 +12,10 @@ type SortKey = 'num' | 'assigned' | 'outside' | 'missing' | 'jumps' | 'issues' |
 /** Khoảng cách tâm box tới ego (gốc toạ độ, trên mặt phẳng ngang) và frame đo. */
 interface Dist { d: number; frame: number }
 
-const KIND_NAMES: Record<string, string> = { ...ISSUE_NAMES, P: 'Ít điểm (dưới 6 điểm trong box, chỉ các frame đã tải point cloud)' };
+const KIND_NAMES: Record<string, string> = { ...ISSUE_NAMES, P: 'Ít điểm trong box (theo ngưỡng ở tab Threshold, chỉ các frame đã tải point cloud)', T: 'Trôi box', M: 'Đi xa bất thường' };
 /** Tooltip cột luật QC: số frame lỗi theo từng mã. */
 const issueTip = (by: Record<string, number>) => {
-  const lines = Object.entries(by).filter(([, n]) => n > 0).map(([k, n]) => `${k} — ${KIND_NAMES[k] ?? k}: ${n} frame`);
+  const lines = Object.entries(by).filter(([, n]) => n > 0).map(([k, n]) => `${sym(k)} — ${KIND_NAMES[k] ?? k}: ${n} frame`);
   return lines.length ? lines.join(String.fromCharCode(10)) : 'Không có lỗi luật QC';
 };
 
@@ -24,6 +25,7 @@ export function ObjectTable({ rows, hints, overlapFrames, overlapPairs, onOpen, 
   tracks: CvatTrack[]; start: number; stop: number;
   cvatFrame: number | null; // frame đang mở trên CVAT (nếu biết): mặc định đo khoảng cách tại frame này
 }) {
+  useSymbols();
   const [label, setLabel] = useState('');
   const [sort, setSort] = useState<SortKey>('num');
   const [onlyMissing, setOnlyMissing] = useState(false);

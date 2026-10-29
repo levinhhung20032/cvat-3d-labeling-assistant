@@ -27,7 +27,8 @@ import { qcStore, useQcMode, useQcNotes } from './qcStore';
 import { qcKey } from '../shared/qc';
 import { onAction } from './actions';
 import { DEFAULT_FIT, fitGroundOf, fitReport, type FitReport } from '../shared/fit';
-import { useThresholdVersion } from './thresholdStore';
+import { thresholdStore, useThresholdVersion } from './thresholdStore';
+import { sym, useSymbols } from './symbolStore';
 import { findLongOutsideGaps, SPLIT_OUTSIDE_FRAMES, type OutsideGap } from '../shared/splitId';
 import { confirmSnap, DEFAULT_GROUND, groundSnap, tiltFromPlane, type GroundResult, type GroundSector } from '../shared/ground';
 import { motionJump, type MotionWarning } from '../shared/motion';
@@ -245,6 +246,7 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
   f: number; size: number; st: FrameState; refCub: Cuboid | null; half: number; locHalf: number; selected: boolean; edited: boolean;
   onSelect: () => void; onLoaded: (f: number) => void; onCommit: (f: number, c: Cuboid) => void; onZoom: (factor: number) => void;
 }) {
+  useSymbols(); // ký hiệu lỗi đổi thì vẽ lại
   const [pc, setPc] = useState<PointCloud | null>(() => pointClouds.peek(f) ?? null); // đã có trong kho (tải ở giao diện chính) thì dùng ngay
   const [err, setErr] = useState('');
   const [preview, setPreview] = useState<LocalBox | null>(null);
@@ -360,10 +362,10 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
         )}
         {bad && !sug && <span style={{ ...CHIP, background: '#ffe0f7', color: '#5a0040' }} title={bad.message}>⚠ {bad.level === 'misfit' ? 'lệch' : 'ít điểm'}</span>}
         {bad && sug && <span style={{ ...CHIP, background: '#ffe0f7', color: '#5a0040' }} title={bad.message}>⚠ lệch</span>}
-        {issues.filter((i) => !issueIgnored(i.kind)).map((i) => <span key={i.kind} style={{ ...CHIP, background: '#f9d4ee', color: '#5a0040' }} title={i.message}>⚠ {i.kind}</span>)}
+        {issues.filter((i) => !issueIgnored(i.kind)).map((i) => <span key={i.kind} style={{ ...CHIP, background: '#f9d4ee', color: '#5a0040' }} title={i.message}>⚠ {sym(i.kind)}</span>)}
         {overlap.map((o) => <span key={o.other} style={{ ...CHIP, background: '#ffd9a8', color: '#5a2d00' }} title={`Chồng với #${o.other} (IoU ${fmtIou(o.ratio)})`}>⚠ O #{o.other}</span>)}
         {fileFlags.filter((ff) => ff.state === 'open').map((ff) => <span key={ff.kind} style={{ ...CHIP, background: '#ffd6d6', color: '#600' }} title="Flag từ file QC mà tool không tự phát hiện">QC {ff.kind}</span>)}
-        {shownMotion && <span style={{ ...CHIP, background: '#ffe9c7', color: '#6b3a00' }} title={shownMotion.message}>⚠ đi xa</span>}
+        {shownMotion && <span style={{ ...CHIP, background: '#ffe9c7', color: '#6b3a00' }} title={shownMotion.message}>⚠ {sym('M')} đi xa</span>}
         {snap?.warn && <span style={{ ...CHIP, background: '#eaf6d8', color: '#2d5a00' }} title={groundTip(snap)}>⏬ {groundAction(snap)}</span>}
       </div>
       {VIEWS.map((v) => (
@@ -422,17 +424,17 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
       {issues.map((i) => (issueIgnored(i.kind)
         ? (
           <div key={i.kind} style={{ background: '#eee', color: '#555', fontSize: 11, padding: '1px 4px' }}>
-            đã bỏ qua {i.kind}{' '}<button onClick={(e) => { e.stopPropagation(); onIgnoreIssue(f, i.kind, false); }} style={{ padding: '0 4px' }}>hoàn lại</button>
+            đã bỏ qua {sym(i.kind)}{' '}<button onClick={(e) => { e.stopPropagation(); onIgnoreIssue(f, i.kind, false); }} style={{ padding: '0 4px' }}>hoàn lại</button>
           </div>
         ) : (
           <div key={i.kind} style={{ background: '#f9d4ee', color: '#5a0040', fontSize: 11, padding: '1px 4px' }} title={i.message}>
-            ⚠ <b>{i.kind}</b> {i.message}{' '}
+            ⚠ <b>{sym(i.kind)}</b> {i.message}{' '}
             <button onClick={(e) => { e.stopPropagation(); onIgnoreIssue(f, i.kind, true); }} style={{ padding: '0 4px' }}>✖ bỏ qua</button>
           </div>
         )))}
       {shownMotion && (
         <div style={{ background: '#ffe9c7', color: '#6b3a00', fontSize: 11, padding: '1px 4px' }} title={shownMotion.message}>
-          ⚠ {shownMotion.message}{' '}
+          ⚠ <b>{sym('M')}</b> {shownMotion.message}{' '}
           <button onClick={(e) => { e.stopPropagation(); onIgnoreMotion(f, true); }} style={{ padding: '0 4px' }}>✖ bỏ qua</button>
         </div>
       )}
@@ -530,6 +532,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   const [rangeFrom, setRangeFrom] = useState('');
   const [rangeTo, setRangeTo] = useState('');
   const vp = useViewport();
+  useSymbols();
   const row = rows.find((r) => r.num === num);
   // Dynamic size theo từng object (nhớ cục bộ). Mặc định: bật cho nhãn co giãn, tắt cho Vehicle / Obstacle.
   const dynClasses = useDynClasses(job.id);
@@ -541,8 +544,8 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   const own = (() => { try { const v = kv.get(dynKey); if (v === '1') return true; if (v === '0') return false; } catch { /* bỏ qua */ } return null; })();
   const auto = track ? resolveDyn(track, specs.get(track.label_id), dynClasses[row?.label ?? ''] ?? defaultDyn(row?.label ?? ''), dynRules) : { dyn: true, by: 'class' as const };
   const dyn = own ?? auto.dyn;
-  const setDyn = (v: boolean) => { try { kv.set(dynKey, v ? '1' : '0'); } catch { /* bỏ qua */ } bumpDyn((x) => x + 1); if (!v) unifySize(true); };
-  const clearOwnDyn = () => { try { kv.remove(dynKey); } catch { /* bỏ qua */ } bumpDyn((x) => x + 1); };
+  const setDyn = (v: boolean) => { try { kv.set(dynKey, v ? '1' : '0'); } catch { /* bỏ qua */ } bumpDyn((x) => x + 1); thresholdStore.changed(); if (!v) unifySize(true); };
+  const clearOwnDyn = () => { try { kv.remove(dynKey); } catch { /* bỏ qua */ } bumpDyn((x) => x + 1); thresholdStore.changed(); };
   const dynWhy = own !== null ? 'công tắc riêng của object này' : auto.by === 'attr' ? `theo attribute ${auto.attr} = ${auto.value}` : 'theo class';
   /** Ghi cuboid mới vào frame f. Dynamic size tắt mà kích thước đổi → áp kích thước mới cho mọi keyframe. */
   const commit = (f: number, cub: Cuboid) => {
@@ -1007,13 +1010,13 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
           <span style={{ color: '#666', fontSize: 11, ...PENDING_STYLE }} title="Lệch / ít điểm / đáy chỉ kiểm được ở frame đã tải point cloud; các frame còn lại đang tải ngầm, số liệu tự cập nhật">(đã kiểm {fitSeries.checked}/{row?.assigned ?? 0} frame có box)</span>
         )}
         {trackSummary.byKind.map(([kind, fr]) => (
-          <span key={kind} style={{ color: '#a0006e', fontWeight: 600 }} title="Cả track. S scale không đồng bộ, K kích thước ngoài ngưỡng, Z z ngoài ngưỡng, H đổi hướng đột ngột, D quá xa, T trôi box (vật đứng yên mà box nhích). Bấm một đoạn để nhảy tới frame đầu của đoạn.">
-            ⚠ {kind} ({fr.length}):{' '}
+          <span key={kind} style={{ color: '#a0006e', fontWeight: 600 }} title="Cả track (ký hiệu lỗi đặt ở tab Threshold). Bấm một đoạn để nhảy tới frame đầu của đoạn.">
+            ⚠ {sym(kind)} ({fr.length}):{' '}
             {toRanges(fr).map(([x, y]) => (
               <button key={x} onClick={() => goFrame(x)} style={{ padding: '0 3px', marginRight: 2, fontWeight: 600, color: '#a0006e' }}>{x === y ? x : `${x}–${y}`}</button>
             ))}
             <button
-              onClick={() => { ignoreStore.set(fr.map((f) => issueKey(job.id, num, f, kind)), true); setNote(`Đã bỏ qua ${fr.length} cảnh báo ${kind} của object #${num}.`); }}
+              onClick={() => { ignoreStore.set(fr.map((f) => issueKey(job.id, num, f, kind)), true); setNote(`Đã bỏ qua ${fr.length} cảnh báo ${sym(kind)} của object #${num}.`); }}
               style={{ padding: '0 3px', fontSize: 10 }} title={`Bỏ qua cả ${fr.length} frame ${kind} của object này (theo lô)`}
             >✖ bỏ qua tất cả</button>
           </span>
@@ -1197,16 +1200,16 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
         <div role="dialog" aria-modal="true" onClick={() => setBulk(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', color: '#111', border: '1px solid #888', borderRadius: 6, padding: 14, maxWidth: 420, boxShadow: '0 4px 18px rgba(0,0,0,.4)' }}>
             <p style={{ margin: '0 0 6px' }}>
-              Bạn vừa chọn <b>{bulk.verb}</b> lỗi <b>{bulk.kind}</b> của object #{num} ở frame {bulk.f}.
+              Bạn vừa chọn <b>{bulk.verb}</b> lỗi <b>{sym(bulk.kind)}</b> của object #{num} ở frame {bulk.f}.
             </p>
             <p style={{ margin: '0 0 10px' }}>
-              Object này còn <b>{bulk.others.length}</b> frame khác cùng lỗi {bulk.kind}: {bulk.others.slice(0, 14).join(', ')}{bulk.others.length > 14 ? ', …' : ''}.
+              Object này còn <b>{bulk.others.length}</b> frame khác cùng lỗi {sym(bulk.kind)}: {bulk.others.slice(0, 14).join(', ')}{bulk.others.length > 14 ? ', …' : ''}.
               Có muốn {bulk.verb} luôn cho các frame còn lại không?
             </p>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
               <button onClick={() => setBulk(null)}>Hủy</button>
               <button onClick={() => { bulk.run([bulk.f]); setBulk(null); }}>Chỉ frame {bulk.f}</button>
-              <button className="cvla-primary" autoFocus onClick={() => { bulk.run([bulk.f, ...bulk.others]); setNote(`Đã ${bulk.verb} lỗi ${bulk.kind} của object #${num} ở ${bulk.others.length + 1} frame.`); setBulk(null); }}>Tất cả {bulk.others.length + 1} frame</button>
+              <button className="cvla-primary" autoFocus onClick={() => { bulk.run([bulk.f, ...bulk.others]); setNote(`Đã ${bulk.verb} lỗi ${sym(bulk.kind)} của object #${num} ở ${bulk.others.length + 1} frame.`); setBulk(null); }}>Tất cả {bulk.others.length + 1} frame</button>
             </div>
           </div>
         </div>

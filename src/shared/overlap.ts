@@ -18,9 +18,12 @@ export const DEFAULT_OVERLAP: OverlapConfig = {
 
 /** Mức IoU cho phép của một nhãn (tên nhãn CVAT). */
 export function allowedIou(label: string, cfg: OverlapConfig = DEFAULT_OVERLAP): number {
+  return cfg.allowed[allowedKey(label)] ?? cfg.defaultAllowed;
+}
+/** Khoá nhóm của một nhãn trong `allowed`: nhóm luật nếu nhận ra, không thì tên nhãn (chữ thường). */
+export function allowedKey(label: string): string {
   const l = label.trim().toLowerCase();
-  const key = classKey(l) ?? l;
-  return cfg.allowed[key] ?? cfg.defaultAllowed;
+  return classKey(l) ?? l;
 }
 
 type P = [number, number];

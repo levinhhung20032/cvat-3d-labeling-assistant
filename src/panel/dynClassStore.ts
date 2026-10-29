@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { kv, whenStorageReady } from './storage';
-import { isFixedSize } from '../shared/suggest';
+import { dynDefaultFor, defaultAttrRules } from '../shared/settings';
 import type { DynRule } from '../shared/dynrule';
 
 /**
@@ -32,7 +32,8 @@ const write = (jobId: number, m: Record<string, boolean>) => {
   emit();
 };
 
-export const defaultDyn = (label: string) => !isFixedSize(label);
+/** Mặc định theo file setting (settings/cvla-settings.json) nếu job có nhãn trùng tên; không thì bật. Không giả định job có class nào. */
+export const defaultDyn = (label: string) => dynDefaultFor(label);
 const EMPTY: Record<string, boolean> = {};
 
 export const dynClassStore = {
@@ -58,7 +59,9 @@ function readRules(jobId: number): Record<string, DynRule> {
   if (hit) return hit;
   let m: Record<string, DynRule> = {};
   try {
-    const v = JSON.parse(kv.get(ruleKeyOf(jobId)) ?? 'null') as unknown;
+    const raw = kv.get(ruleKeyOf(jobId));
+    if (raw === null || raw === undefined) { ruleCache.set(jobId, defaultAttrRules()); return ruleCache.get(jobId)!; } // job chưa chỉnh: luật mặc định từ file setting
+    const v = JSON.parse(raw) as unknown;
     if (v && typeof v === 'object' && !Array.isArray(v)) m = Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([, x]) => x === 'dyn' || x === 'static')) as Record<string, DynRule>;
   } catch { /* bỏ qua */ }
   ruleCache.set(jobId, m);
@@ -77,6 +80,8 @@ export const dynRuleStore = {
     writeRules(jobId, next);
   },
   clear(jobId: number) { writeRules(jobId, {}); },
+  /** Về luật mặc định của file setting. */
+  reset(jobId: number) { try { kv.remove(ruleKeyOf(jobId)); } catch { /* bỏ qua */ } ruleCache.delete(jobId); emit(); },
 };
 export const useDynRules = (jobId: number) => useSyncExternalStore(subscribe, () => readRules(jobId));
 

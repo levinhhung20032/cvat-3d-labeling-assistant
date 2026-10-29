@@ -31,7 +31,9 @@ import { DEFAULT_GROUND } from '../shared/ground';
 import { splitTrack } from '../shared/splitId';
 import { DeleteDialog } from './DeleteDialog';
 import { madeStore, useMadeIds } from './madeStore';
-import { dynClassStore } from './dynClassStore';
+import { defaultDyn, dynClassStore, useDynClasses, useDynRules } from './dynClassStore';
+import { resolveDyn } from '../shared/dynrule';
+import { SIZE_SYNC } from '../shared/qcrules';
 import { ShiftPanel } from './ShiftPanel';
 import { attrKey, issueKey, motionKey, overlapKey, shiftStore, useIgnored, useShifts } from './shiftStore';
 import { parseLabelSpecs } from '../shared/attributes';
@@ -418,6 +420,20 @@ export function App() {
   // Ngưỡng cảnh báo chỉnh tay (tab Threshold): mỗi lần đổi, các phép tính dùng ngưỡng tính lại; ngưỡng riêng theo object nạp theo job.
   const thrVer = useThresholdVersion();
   useEffect(() => { if (data) thresholdStore.setJob(data.job.id); }, [data?.job.id]);
+  // Luật S (scale không đồng bộ) theo Dynamic size của chính job: object KHÔNG dynamic (theo công tắc riêng > attribute > class) thì phải cùng kích thước.
+  const dynJobId = data?.job.id ?? 0;
+  const dynMap = useDynClasses(dynJobId);
+  const dynRules = useDynRules(dynJobId);
+  useMemo(() => {
+    if (!data) { SIZE_SYNC.fn = null; return; }
+    const specs = parseLabelSpecs(data.labels);
+    SIZE_SYNC.fn = (track, label, num) => {
+      let own: boolean | null = null;
+      try { const v = num !== undefined ? kv.get(`cvla-dyn:${data.job.id}:${num}`) : null; if (v === '1') own = true; else if (v === '0') own = false; } catch { /* bỏ qua */ }
+      return !(own ?? resolveDyn(track, specs.get(track.label_id), dynMap[label] ?? defaultDyn(label), dynRules).dyn);
+    };
+  }, [data?.job.id, data?.labels, dynMap, dynRules]);
+  useEffect(() => { if (data) thresholdStore.changed(); }, [dynMap, dynRules]);
   // Số gợi ý thuộc tính theo object (tính ở frame có box đầu tiên), không tính gợi ý đã bỏ qua.
   const attrHints = useMemo(() => {
     const m = new Map<number, number>();

@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { CvatLabel, CvatTrack } from '../shared/types';
-import { classKey, type ClassSize } from '../shared/qcrules';
 import {
-  CLASS_KEYS, CLASS_NAMES, cloneClassSize, DIMS, DIM_NAMES, defaultSize, fieldsOf, getSize, isChanged, resetAll, resetSection, resetSize, SECTIONS,
-  sectionChanged, setSizeRange, setSync, setValue, sizeChanged, syncGroups, validRange, type Dim, type Field, type SectionId,
+  fieldsOf, isChanged, resetAll, resetSection, SECTIONS, sectionChanged, setValue, applyPersisted, toPersisted, type Field, type SectionId,
 } from '../shared/thresholds';
-import { thresholdStore, useThresholdVersion } from './thresholdStore';
+import { metricsOf, METRIC_BY_ID, type MetricDef, type Op, type Rule, type SectionCode, type Target } from '../shared/alertRules';
+import { BUNDLED, dynForJob, mergeDynSettings, parseSettings, type SettingsFile } from '../shared/settings';
+import { defaultDyn, dynClassStore, dynRuleStore, useDynClasses, useDynRules } from './dynClassStore';
+import { attrRuleKey } from '../shared/dynrule';
+import { SYMBOL_DEFAULTS, type SymbolKind } from '../shared/symbols';
+import { symbolStore, sym, useSymbols } from './symbolStore';
+import { thresholdStore, useRules, useThresholdVersion } from './thresholdStore';
 
-/** Ô nhập số: gõ tự do; chỉ ghi khi hợp lệ (`onCommit` trả false thì ô đỏ), rời ô mà còn sai thì về giá trị đang dùng. */
+/** Ô nhập số cho tham số kỹ thuật: gõ tự do; chỉ ghi khi hợp lệ (`onCommit` trả false thì ô đỏ), rời ô mà còn sai thì về giá trị đang dùng. */
 function NumField({ value, onCommit, step, width = 78, title }: { value: number; onCommit: (v: number) => boolean; step: number; width?: number; title?: string }) {
   const [text, setText] = useState(String(value));
   const [bad, setBad] = useState(false);
@@ -28,23 +32,6 @@ function NumField({ value, onCommit, step, width = 78, title }: { value: number;
   );
 }
 
-const WIDE: ClassSize = { length: [0.1, 12], width: [0.1, 4], height: [0.1, 4] };
-
-/** Một hàng khoảng kích thước dài / rộng / cao (min – max). */
-function SizeCells({ size, onRange }: { size: ClassSize; onRange: (d: Dim, lo: number, hi: number) => boolean }) {
-  return (
-    <>
-      {DIMS.map((d) => (
-        <td key={d} style={{ padding: '2px 8px', whiteSpace: 'nowrap' }}>
-          <NumField value={size[d][0]} step={0.05} width={62} title={`${DIM_NAMES[d]} nhỏ nhất (m)`} onCommit={(v) => onRange(d, v, size[d][1])} />
-          {' – '}
-          <NumField value={size[d][1]} step={0.05} width={62} title={`${DIM_NAMES[d]} lớn nhất (m)`} onCommit={(v) => onRange(d, size[d][0], v)} />
-        </td>
-      ))}
-    </>
-  );
-}
-
 function FieldRow({ f }: { f: Field }) {
   const changed = isChanged(f);
   return (
@@ -60,123 +47,201 @@ function FieldRow({ f }: { f: Field }) {
   );
 }
 
-function Section({ id, title, about, children }: { id: SectionId; title: string; about: string; children?: ReactNode }) {
+/** Ô sửa ký hiệu hiển thị của loại lỗi (1–3 ký tự, không trùng loại khác). */
+function SymbolInput({ kind }: { kind: SymbolKind }) {
+  const [text, setText] = useState(sym(kind));
+  const [bad, setBad] = useState(false);
+  useEffect(() => { setText(sym(kind)); setBad(false); }, [sym(kind)]);
+  return (
+    <input
+      value={text} maxLength={3} title={`Ký hiệu hiển thị của lỗi này (mặc định ${SYMBOL_DEFAULTS[kind]}); 1–3 ký tự, không trùng loại khác`}
+      style={{ width: 34, textAlign: 'center', fontWeight: 700, marginRight: 6, borderColor: bad ? '#b00' : undefined, background: bad ? '#fee' : undefined }}
+      onClick={(e) => e.preventDefault()} onKeyDown={(e) => e.stopPropagation()}
+      onChange={(e) => { const v = e.target.value; setText(v); setBad(v.trim() !== '' && !symbolStore.set(kind, v)); }}
+      onBlur={() => { setText(sym(kind)); setBad(false); }}
+    />
+  );
+}
+
+const targetKey = (t: Target) => (t.t === 'all' ? 'all' : t.t === 'class' ? `c:${t.name}` : `o:${t.num}`);
+
+/** Một rule: đối tượng, thuộc tính, quy tắc (>, >=, <, <=, =, !=), ngưỡng, nút xoá. Chọn bằng dropbox. */
+function RuleRow({ r, metrics, labels, tracks, jobId }: { r: Rule; metrics: MetricDef[]; labels: CvatLabel[]; tracks: CvatTrack[]; jobId: number }) {
+  const m = METRIC_BY_ID.get(r.metric)!;
+  const [text, setText] = useState(r.value === null ? '' : String(r.value));
+  const [bad, setBad] = useState(false);
+  useEffect(() => { setText(r.value === null ? '' : String(r.value)); setBad(false); }, [r.value, r.metric]);
+  const nameOf = (labelId: number) => labels.find((l) => l.id === labelId)?.name ?? '?';
+  const classNames = labels.map((l) => l.name);
+  const hasClass = r.target.t !== 'class' || classNames.some((n) => n.trim().toLowerCase() === (r.target as { name: string }).name.trim().toLowerCase());
+
+  const setMetric = (id: string) => {
+    const nm = METRIC_BY_ID.get(id as never);
+    if (!nm) return;
+    const keepValue = r.value !== null && r.value >= nm.min && r.value <= nm.max && (!nm.int || Number.isInteger(r.value));
+    thresholdStore.updateRule(r.id, {
+      metric: nm.id,
+      op: nm.ops.includes(r.op) ? r.op : nm.ops[0]!,
+      target: nm.targets.includes(r.target.t) ? r.target : { t: 'all' },
+      value: keepValue ? r.value : null,
+    });
+  };
+  const setTarget = (k: string) => {
+    if (k === 'all') thresholdStore.updateRule(r.id, { target: { t: 'all' } });
+    else if (k.startsWith('c:')) thresholdStore.updateRule(r.id, { target: { t: 'class', name: k.slice(2) } });
+    else thresholdStore.updateRule(r.id, { target: { t: 'object', job: jobId, num: Number(k.slice(2)) } });
+  };
+  return (
+    <tr style={{ background: r.value === null ? '#f3f3f3' : undefined }}>
+      <td><select value={targetKey(r.target)} onChange={(e) => setTarget(e.target.value)} title="Đối tượng áp dụng rule">
+        <option value="all">Tất cả object</option>
+        {!hasClass && r.target.t === 'class' && <option value={targetKey(r.target)}>Class: {r.target.name} (job này không có)</option>}
+        {m.targets.includes('class') && <optgroup label="Class của job">{classNames.map((n) => <option key={n} value={`c:${n}`}>Class: {n}</option>)}</optgroup>}
+        {m.targets.includes('object') && <optgroup label="Object">{tracks.map((t, i) => <option key={i} value={`o:${i + 1}`}>#{i + 1} · {nameOf(t.label_id)}</option>)}</optgroup>}
+      </select></td>
+      <td><select value={r.metric} onChange={(e) => setMetric(e.target.value)} title={m.help ?? 'Thuộc tính đo'}>
+        {metrics.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+      </select></td>
+      <td><select value={r.op} onChange={(e) => thresholdStore.updateRule(r.id, { op: e.target.value as Op })} title="Quy tắc xét: báo lỗi khi giá trị đo thoả quy tắc so với ngưỡng">
+        {m.ops.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select></td>
+      <td style={{ whiteSpace: 'nowrap' }}>
+        <input
+          type="number" step={m.step} value={text} placeholder="ngưỡng" style={{ width: 90, borderColor: bad ? '#b00' : undefined, background: bad ? '#fee' : undefined }}
+          onChange={(e) => {
+            const s = e.target.value;
+            setText(s);
+            if (s.trim() === '') { setBad(false); thresholdStore.updateRule(r.id, { value: null }); return; }
+            const v = Number(s);
+            setBad(!Number.isFinite(v) || !thresholdStore.updateRule(r.id, { value: v }));
+          }}
+          onBlur={() => { if (bad) { setText(r.value === null ? '' : String(r.value)); setBad(false); } }}
+        />{m.unit ? ` ${m.unit}` : ''}
+      </td>
+      <td><button onClick={() => thresholdStore.removeRule(r.id)} title="Xoá rule này">✕</button></td>
+      {r.value === null && <td style={{ color: '#777', fontSize: 11, paddingLeft: 6 }}>chưa nhập ngưỡng: chưa có hiệu lực</td>}
+    </tr>
+  );
+}
+
+function Section({ id, title, about, code, rules, labels, tracks, jobId, children }: {
+  id: SectionId; title: string; about: string; code?: SymbolKind; rules: readonly Rule[]; labels: CvatLabel[]; tracks: CvatTrack[]; jobId: number; children?: ReactNode;
+}) {
+  const metrics = metricsOf(id as SectionCode);
+  const mine = rules.filter((r) => METRIC_BY_ID.get(r.metric)?.section === id);
+  const shown = mine.filter((r) => r.target.t !== 'object' || r.target.job === jobId);
+  const hidden = mine.length - shown.length;
+  const params = fieldsOf(id);
   const changed = sectionChanged(id);
   return (
-    <details open={id === 'K' || changed} style={{ border: '1px solid #ccd', borderRadius: 4, margin: '6px 0', padding: '2px 8px' }}>
+    <details open={shown.length > 0 || changed} style={{ border: '1px solid #ccd', borderRadius: 4, margin: '6px 0', padding: '2px 8px' }}>
       <summary style={{ cursor: 'pointer', fontWeight: 700, padding: '3px 0' }}>
-        {title}{changed && <span style={{ color: '#a60', fontWeight: 600, marginLeft: 8 }}>● đã chỉnh</span>}
+        {code && <SymbolInput kind={code} />}{title}
+        <span style={{ color: shown.length ? '#a60' : '#999', fontWeight: 600, marginLeft: 8 }}>{shown.length ? `● ${shown.length} rule` : 'chưa có rule (không báo)'}</span>
       </summary>
       <p style={{ margin: '2px 0 4px', color: '#456', fontSize: 12 }}>{about}</p>
       {children}
-      {fieldsOf(id).length > 0 && (
+      {shown.length > 0 && (
         <table style={{ borderCollapse: 'collapse' }}>
-          <tbody>{fieldsOf(id).map((f) => <FieldRow key={f.key} f={f} />)}</tbody>
+          <thead><tr style={{ textAlign: 'left', fontSize: 11, color: '#666' }}><th>Đối tượng</th><th>Thuộc tính</th><th>Quy tắc</th><th>Ngưỡng</th><th /></tr></thead>
+          <tbody>{shown.map((r) => <RuleRow key={r.id} r={r} metrics={metrics} labels={labels} tracks={tracks} jobId={jobId} />)}</tbody>
         </table>
       )}
+      {hidden > 0 && <p style={{ margin: '2px 0', color: '#777', fontSize: 11 }}>{hidden} rule theo object của job khác (ẩn, giữ nguyên).</p>}
       <div style={{ margin: '4px 0' }}>
-        <button disabled={!changed} onClick={() => { resetSection(id); thresholdStore.changed(); }}>↺ Đặt lại mục này</button>
+        <button onClick={() => thresholdStore.addRule({ metric: metrics[0]!.id, target: { t: 'all' }, op: metrics[0]!.ops[0]! })}>＋ Thêm rule</button>
       </div>
+      {params.length > 0 && (
+        <details style={{ margin: '2px 0' }}>
+          <summary style={{ cursor: 'pointer', color: '#345' }}>Tham số thuật toán{changed ? ' ● đã chỉnh' : ''}</summary>
+          <table style={{ borderCollapse: 'collapse' }}><tbody>{params.map((f) => <FieldRow key={f.key} f={f} />)}</tbody></table>
+          <button disabled={!changed} onClick={() => { resetSection(id); thresholdStore.changed(); }}>↺ Đặt lại tham số mục này</button>
+        </details>
+      )}
     </details>
   );
 }
 
 /**
- * Tab "Threshold": chỉnh tay các ngưỡng cảnh báo, chia theo từng loại lỗi. Mục K cho chỉnh khoảng kích thước theo class (áp cho mọi object
- * của class, tức đồng bộ cả class) và đặt ngưỡng riêng cho từng object (ưu tiên hơn ngưỡng class; dùng được cả cho class chưa có ngưỡng).
+ * Tab "Threshold": mỗi loại lỗi là một mục gồm các RULE (đối tượng · thuộc tính · quy tắc · ngưỡng), thêm / xoá bằng nút, chọn bằng dropbox.
+ * Không có rule thì không báo lỗi đó. Có thể xuất toàn bộ cài đặt ra `setting.json` (file riêng của bạn, không đưa vào repo) và nạp lại.
  */
 export function ThresholdPanel({ jobId, labels, tracks }: { jobId: number; labels: CvatLabel[]; tracks: CvatTrack[] }) {
-  useThresholdVersion(); // vẽ lại mỗi khi ngưỡng đổi
-  const names = useMemo(() => new Map(labels.map((l) => [l.id, l.name])), [labels]);
-  const own = thresholdStore.objects();
-  const [pick, setPick] = useState('');
-  const nameOf = (num: number) => names.get(tracks[num - 1]?.label_id ?? -1) ?? '?';
-  const free = tracks.map((t, i) => i + 1).filter((n) => !own.has(n));
-  const addOwn = () => {
-    const num = Number(pick || free[0]);
-    if (!num || own.has(num)) return;
-    const ck = classKey(nameOf(num));
-    thresholdStore.setObject(num, cloneClassSize(ck ? getSize(ck) : WIDE));
-    setPick('');
+  useThresholdVersion();
+  useSymbols();
+  const rules = useRules();
+  const labelNames = useMemo(() => labels.map((l) => l.name), [labels]);
+  const dynMap = useDynClasses(jobId);
+  const dynRules = useDynRules(jobId);
+  const [msg, setMsg] = useState('');
+
+  const exportSettings = () => {
+    const classOn = Object.fromEntries(labelNames.map((n) => [n, dynMap[n] ?? defaultDyn(n)]));
+    const file: SettingsFile = {
+      version: 2,
+      params: toPersisted().n,
+      rules: [...thresholdStore.rules()],
+      symbols: symbolStore.all(),
+      dynamicSize: mergeDynSettings(BUNDLED.dynamicSize, labelNames, classOn, dynRules),
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2) + '\n'], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = 'setting.json'; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setMsg(`Đã xuất setting.json (${file.rules.length} rule). File này của riêng bạn: không commit / đưa lên GitHub.`);
   };
-  const range = (k: (typeof CLASS_KEYS)[number]) => (d: Dim, lo: number, hi: number) => {
-    const ok = setSizeRange(k, d, lo, hi);
-    if (ok) thresholdStore.changed();
-    return ok;
+  const importSettings = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const s = parseSettings(JSON.parse(await file.text()));
+      applyPersisted({ n: s.params });
+      thresholdStore.setRules(s.rules);
+      symbolStore.replace(s.symbols);
+      const d = dynForJob(s.dynamicSize, labelNames);
+      for (const [n, on] of Object.entries(d.classes)) dynClassStore.set(jobId, n, on);
+      for (const [k, v] of Object.entries(d.attrRules)) dynRuleStore.set(jobId, k, v);
+      thresholdStore.changed();
+      setMsg(`Đã nạp setting: ${s.rules.length} rule, ${Object.keys(s.params).length} tham số, ${Object.keys(d.classes).length} class khớp job này.`);
+    } catch { setMsg('File setting không đọc được.'); }
   };
 
   return (
     <>
       <p style={{ margin: '4px 0' }}>
-        <b>Threshold</b>: chỉnh tay ngưỡng cảnh báo theo từng loại lỗi. Có hiệu lực ngay cho bảng object, Batch Review, QC; ô vàng = khác mặc định.
-        Ngưỡng chung lưu cho mọi job; ngưỡng riêng theo object lưu theo job. Không gửi đi đâu.{' '}
-        <button
-          disabled={!SECTIONS.some((s) => sectionChanged(s.id))}
-          onClick={() => { if (confirm('Đặt lại TẤT CẢ ngưỡng chung về mặc định? (ngưỡng riêng theo object giữ nguyên)')) { resetAll(); thresholdStore.changed(); } }}
-        >↺ Đặt lại tất cả</button>
+        <b>Threshold</b>: mỗi lỗi là các <b>rule</b> do bạn đặt: chọn đối tượng, thuộc tính, quy tắc (&gt;, &gt;=, &lt;, &lt;=, =, !=) và ngưỡng.
+        Extension không kèm con số nào: <b>chưa có rule thì không báo lỗi</b>. Có hiệu lực ngay; lưu cục bộ, không gửi đi đâu.
       </p>
+      <p style={{ margin: '4px 0' }}>
+        <button onClick={exportSettings}>Xuất setting.json</button>{' '}
+        <label style={{ cursor: 'pointer' }}>
+          <input type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={(e) => { void importSettings(e.target.files?.[0]); e.target.value = ''; }} />
+          <span style={{ border: '1px solid #888', borderRadius: 3, padding: '1px 6px' }}>Nạp setting.json…</span>
+        </label>{' '}
+        <button disabled={!rules.length} onClick={() => { if (confirm(`Xoá TẤT CẢ ${rules.length} rule? (tham số, ký hiệu giữ nguyên)`)) thresholdStore.setRules([]); }}>Xoá tất cả rule</button>{' '}
+        <button onClick={() => { resetAll(); thresholdStore.changed(); }} disabled={!SECTIONS.some((s) => sectionChanged(s.id))}>↺ Tham số</button>{' '}
+        <button onClick={() => symbolStore.reset()} title="Về ký hiệu mặc định (đi xa bất thường = Y)">↺ Ký hiệu lỗi</button>
+        {msg && <span style={{ color: '#345', marginLeft: 8 }}>{msg}</span>}
+      </p>
+      <p style={{ margin: '2px 0', color: '#777', fontSize: 11 }}>Ô chữ đậm đầu mỗi mục = ký hiệu lỗi, sửa được. Tên class trong dropbox lấy từ nhãn của job này.</p>
       {SECTIONS.map((s) => (
-        <Section key={s.id} id={s.id} title={s.title} about={s.about}>
+        <Section key={s.id} id={s.id} code={s.code} title={s.title} about={s.about} rules={rules} labels={labels} tracks={tracks} jobId={jobId}>
           {s.id === 'S' && (
-            <p style={{ margin: '2px 0' }}>
-              Áp dụng cho:{' '}
-              {CLASS_KEYS.map((k) => (
-                <label key={k} style={{ marginRight: 10 }}>
-                  <input type="checkbox" checked={syncGroups().includes(k)} onChange={(e) => { setSync(k, e.target.checked); thresholdStore.changed(); }} /> {CLASS_NAMES[k]}
-                </label>
-              ))}
-              <span style={{ color: '#777', fontSize: 11 }}>(mặc định chỉ Vehicle: các class có dynamic size được đổi kích thước theo frame)</span>
-            </p>
-          )}
-          {s.id === 'K' && (
             <>
-              <p style={{ margin: '2px 0', fontWeight: 600 }}>Theo class (đồng bộ cho mọi object của class)</p>
-              <table style={{ borderCollapse: 'collapse' }}>
-                <thead><tr style={{ textAlign: 'left' }}><th>Class</th>{DIMS.map((d) => <th key={d} style={{ padding: '0 8px' }}>{DIM_NAMES[d]} (m)</th>)}<th /></tr></thead>
+              <p style={{ margin: '2px 0' }}>Chỉ xét object có <b>Dynamic size TẮT</b> (tab Dynamic size của job này: công tắc riêng của object &gt; luật attribute &gt; công tắc class).</p>
+              <table style={{ borderCollapse: 'collapse', marginBottom: 4 }}>
                 <tbody>
-                  {CLASS_KEYS.map((k) => (
-                    <tr key={k} style={{ borderTop: '1px solid #ddd', background: sizeChanged(k) ? '#fff8dc' : undefined }}>
-                      <td><b>{CLASS_NAMES[k]}</b></td>
-                      <SizeCells size={getSize(k)} onRange={range(k)} />
-                      <td style={{ whiteSpace: 'nowrap' }}>
-                        {sizeChanged(k) && <button onClick={() => { resetSize(k); thresholdStore.changed(); }} title={`Mặc định: ${DIMS.map((d) => `${defaultSize(k)[d][0]}–${defaultSize(k)[d][1]}`).join(' × ')}`}>↺</button>}
-                      </td>
-                    </tr>
-                  ))}
+                  {labels.map((l) => {
+                    const on = dynMap[l.name] ?? defaultDyn(l.name);
+                    const nr = Object.keys(dynRules).filter((k) => k.startsWith(attrRuleKey(l.name, '', '').split('|')[0] + '|')).length;
+                    return (
+                      <tr key={l.id}>
+                        <td style={{ padding: '1px 10px 1px 0' }}><b>{l.name}</b></td>
+                        <td style={{ color: on ? '#060' : '#a00' }}>{on ? 'Dynamic bật → không xét S' : 'Dynamic tắt → xét S'}{nr > 0 ? ` (+${nr} luật attribute)` : ''}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
-              <p style={{ margin: '6px 0 2px', fontWeight: 600 }}>Ngưỡng riêng theo object (ưu tiên hơn ngưỡng class)</p>
-              {own.size === 0 && <p style={{ margin: '2px 0', color: '#777' }}>Chưa có. Thêm khi một object cần khoảng kích thước khác class (xe bus / truck, Animal / Obstacle chưa có ngưỡng…).</p>}
-              {own.size > 0 && (
-                <table style={{ borderCollapse: 'collapse' }}>
-                  <thead><tr style={{ textAlign: 'left' }}><th>Object</th>{DIMS.map((d) => <th key={d} style={{ padding: '0 8px' }}>{DIM_NAMES[d]} (m)</th>)}<th /></tr></thead>
-                  <tbody>
-                    {[...own].sort((a, b) => a[0] - b[0]).map(([num, size]) => (
-                      <tr key={num} style={{ borderTop: '1px solid #ddd', background: '#fff8dc' }}>
-                        <td style={{ whiteSpace: 'nowrap' }}><b>#{num}</b> · {nameOf(num)}</td>
-                        <SizeCells
-                          size={size}
-                          onRange={(d, lo, hi) => {
-                            if (!validRange(lo, hi)) return false;
-                            thresholdStore.setObject(num, { ...size, [d]: [lo, hi] });
-                            return true;
-                          }}
-                        />
-                        <td><button onClick={() => thresholdStore.setObject(num, null)} title="Bỏ ngưỡng riêng, dùng ngưỡng của class">✕</button></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-              <p style={{ margin: '4px 0' }}>
-                Thêm ngưỡng riêng cho:{' '}
-                <select value={pick} onChange={(e) => setPick(e.target.value)} disabled={!free.length}>
-                  <option value="">— chọn object —</option>
-                  {free.map((n) => <option key={n} value={n}>#{n} · {nameOf(n)}</option>)}
-                </select>{' '}
-                <button disabled={!pick} onClick={addOwn}>+ Thêm</button>
-                <span style={{ color: '#777', fontSize: 11 }}> (bắt đầu từ ngưỡng của class; job {jobId})</span>
-              </p>
             </>
           )}
         </Section>

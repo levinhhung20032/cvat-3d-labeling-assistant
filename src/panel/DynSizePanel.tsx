@@ -27,7 +27,7 @@ export function DynSizePanel({ jobId, labels, tracks }: { jobId: number; labels:
     <>
       <p style={{ margin: '4px 0' }}>
         <b>Dynamic size theo class</b> (job {jobId}). <b>Bật</b>: kích thước nội suy giữa các keyframe. <b>Tắt</b>: đổi kích thước ở một frame thì áp cho mọi keyframe của object.
-        Danh sách class lấy từ job này (lần đầu mở job); mặc định tắt cho Vehicle / Obstacle, bật cho các class còn lại.
+        Danh sách class lấy từ job này (lần đầu mở job); mặc định lấy từ file setting (class có tên trùng), không có thì bật.
       </p>
       <table style={{ borderCollapse: 'collapse' }}>
         <thead><tr style={{ textAlign: 'left' }}><th>Class</th><th>Số object</th><th>Dynamic size</th></tr></thead>
@@ -86,7 +86,7 @@ export function DynSizePanel({ jobId, labels, tracks }: { jobId: number; labels:
         </tbody>
       </table>
       <p style={{ margin: '6px 0' }}>
-        <button onClick={() => { dynClassStore.reset(jobId, names); dynRuleStore.clear(jobId); tracks.forEach((_, i) => { try { kv.remove(`cvla-dyn:${jobId}:${i + 1}`); } catch { /* bỏ qua */ } }); }}>Đặt lại mặc định</button>{' '}
+        <button onClick={() => { dynClassStore.reset(jobId, names); dynRuleStore.reset(jobId); tracks.forEach((_, i) => { try { kv.remove(`cvla-dyn:${jobId}:${i + 1}`); } catch { /* bỏ qua */ } }); }}>Đặt lại mặc định</button>{' '}
         <span style={{ color: '#555' }}>Đổi công tắc class sẽ xóa công tắc riêng của các object thuộc class đó. Tắt dynamic size chỉ áp dụng cho lần sửa size tiếp theo (hoặc bấm "Đồng bộ size" trong Batch Review).</span>
       </p>
     </>

@@ -1,5 +1,6 @@
 import type { Cuboid } from './cuboid';
 import { stateAt } from './interp';
+import { ruleHits, type MetricId, type Rule } from './alertRules';
 import type { CvatTrack } from './types';
 
 /**
@@ -16,8 +17,16 @@ export const ISSUE_KINDS = Object.keys(ISSUE_NAMES) as IssueKind[];
 export type ClassKey = 'vehicle' | 'two_wheel' | 'pedestrian';
 export type Range = [number, number];
 export interface ClassSize { length: Range; width: Range; height: Range }
-/** Ngưỡng kích thước RIÊNG của từng object (số thứ tự object 1…), ưu tiên hơn ngưỡng theo class; tab Threshold đặt, theo job. */
-export const SIZE_OVERRIDES = new Map<number, ClassSize>();
+/**
+ * Rule cảnh báo do người dùng nhập (tab Threshold). Khác null thì `trackIssues` xét K Z H D S CHỈ theo rule này (không rule = không báo);
+ * null (test, chưa nạp tab) thì dùng cấu hình mặc định `DEFAULT_QC_RULES` bên dưới. `job` là job đang mở, để khớp rule theo object.
+ */
+export const RULESET: { rules: Rule[] | null; job: number } = { rules: null, job: 0 };
+/**
+ * Luật S theo Dynamic size: panel đặt hàm cho biết object có KHÔNG dynamic (một size cho cả object) hay không, theo class / attribute /
+ * công tắc riêng của JOB đang mở. Chưa đặt (test, chưa mở job) thì dùng `scaleSyncGroups`.
+ */
+export const SIZE_SYNC: { fn: ((track: CvatTrack, label: string, num?: number) => boolean) | null } = { fn: null };
 export interface QcRuleConfig {
   size: Record<ClassKey, ClassSize>;
   sizeEps: number;
@@ -75,22 +84,36 @@ function medianSize(boxes: Cuboid[]): { sx: number; sy: number; sz: number } | n
 /** Issue của từng frame của một track (trừ O, tính chéo giữa các object ở overlap.ts). */
 export function trackIssues(track: CvatTrack, label: string, frames: number[], cfg: QcRuleConfig = DEFAULT_QC_RULES, num?: number): Map<number, FrameIssue[]> {
   const out = new Map<number, FrameIssue[]>();
-  const add = (f: number, kind: IssueKind, message: string) => out.set(f, [...(out.get(f) ?? []), { kind, message }]);
+  const add = (f: number, kind: IssueKind, message: string) => {
+    const cur = out.get(f) ?? [];
+    const same = cur.find((i) => i.kind === kind);
+    if (same) { same.message += `; ${message}`; return; } // một mã lỗi mỗi frame, gộp thông báo
+    out.set(f, [...cur, { kind, message }]);
+  };
   const ck = classKey(label);
   const boxes = new Map<number, Cuboid>();
   for (const f of frames) { const c = stateAt(track, f).cuboid; if (c) boxes.set(f, c); }
 
-  const ref = ck && cfg.scaleSyncGroups.includes(ck) ? medianSize([...boxes.values()]) : null;
+  const syncOn = SIZE_SYNC.fn ? SIZE_SYNC.fn(track, label, num) : !RULESET.rules && !!ck && cfg.scaleSyncGroups.includes(ck);
+  const ref = syncOn ? medianSize([...boxes.values()]) : null;
   const tol = cfg.scaleSyncTol + 1e-9; // tránh sai số số thực (4.24 − 4.23 > 0.01)
   for (const [f, c] of boxes) {
-    const own = num !== undefined ? SIZE_OVERRIDES.get(num) : undefined; // ngưỡng riêng của object (kể cả class chưa có ngưỡng như Animal / Obstacle)
-    const lim = own ?? (ck ? cfg.size[ck] : null);
+    if (RULESET.rules) {
+      // Theo rule người dùng nhập: đo từng thuộc tính của box rồi để rule quyết định.
+      const v: Partial<Record<MetricId, number>> = { length: c.sx, width: c.sy, height: c.sz, z: c.z, distance: Math.hypot(c.x, c.y, c.z) };
+      const p = boxes.get(f - 1);
+      if (p) v.yawJump = Math.abs(wrapDeg(c.yaw - p.yaw));
+      if (ref) v.sizeDev = Math.max(Math.abs(c.sx - ref.sx), Math.abs(c.sy - ref.sy), Math.abs(c.sz - ref.sz));
+      for (const h of ruleHits(RULESET.rules, { job: RULESET.job, label, num }, v)) add(f, h.code as IssueKind, h.message);
+      continue;
+    }
+    const lim = ck ? cfg.size[ck] : null;
     if (lim) {
       const e = cfg.sizeEps;
       const bad: string[] = [];
       const chk = (name: string, v: number, r: Range) => { if (v < r[0] - e || v > r[1] + e) bad.push(`${name} ${v.toFixed(2)} (cho phép ${r[0]}–${r[1]})`); };
       chk('dài', c.sx, lim.length); chk('rộng', c.sy, lim.width); chk('cao', c.sz, lim.height);
-      if (bad.length) add(f, 'K', `kích thước ngoài ngưỡng${own ? ' riêng của object' : ''}: ${bad.join(', ')}${!own && ck === 'vehicle' && c.sx > lim.length[1] + e ? ' — có thể là xe bus/truck' : ''}`);
+      if (bad.length) add(f, 'K', `kích thước ngoài ngưỡng: ${bad.join(', ')}${ck === 'vehicle' && c.sx > lim.length[1] + e ? ' — có thể là xe bus/truck' : ''}`);
     }
     if (ref && (Math.abs(c.sx - ref.sx) > tol || Math.abs(c.sy - ref.sy) > tol || Math.abs(c.sz - ref.sz) > tol)) {
       add(f, 'S', `scale không đồng bộ: ${c.sx.toFixed(2)}×${c.sy.toFixed(2)}×${c.sz.toFixed(2)} so với ${ref.sx.toFixed(2)}×${ref.sy.toFixed(2)}×${ref.sz.toFixed(2)} (kích thước chuẩn = trung vị của object)`);

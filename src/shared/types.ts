@@ -1,4 +1,4 @@
-// Kiểu dữ liệu theo REST API CVAT 2.x. Bố cục `points` của cuboid 3D CHƯA xác minh (xem NOTES.md).
+// Kiểu dữ liệu theo REST API CVAT 2.x. Bố cục `points` của cuboid 3D CHƯA xác minh.
 
 /** Giá trị attribute trong REST: id đặc tả + giá trị (luôn là chuỗi; checkbox là 'true' / 'false'). */
 export interface AttrValue { spec_id: number; value: string }
