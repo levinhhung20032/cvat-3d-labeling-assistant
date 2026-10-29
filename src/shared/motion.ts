@@ -1,3 +1,4 @@
+import { getEgo, toFrame } from './egoCore';
 import { stateAt } from './interp';
 import type { CvatTrack } from './types';
 
@@ -51,13 +52,30 @@ export function motionJump(track: CvatTrack, f: number, label: string, cfg: Moti
   const span = last.g - first.g;
   const vx = (last.x - first.x) / span, vy = (last.y - first.y) / span, vz = (last.z - first.z) / span;
   const gap = f - last.g;
-  const pred = { x: last.x + vx * gap, y: last.y + vy * gap, z: last.z + vz * gap };
+  let pred = { x: last.x + vx * gap, y: last.y + vy * gap, z: last.z + vz * gap };
+  let typical = Math.hypot(vx, vy);
+  let ref = { x: last.x, y: last.y }; // vị trí frame cuối lịch sử, đưa về cùng hệ với frame f để đo "bước thực tế"
+  // Có chuyển động của xe (ego) cho các frame liên quan: dự đoán theo vận tốc so với MẶT ĐẤT rồi đưa về toạ độ frame f
+  // (vật đứng yên không bị báo khi xe tăng / giảm tốc hay đổi hướng). Thiếu ego ở frame nào thì dùng cách cũ trong hệ ego.
+  const ego = getEgo();
+  if (ego) {
+    const a0 = toFrame(ego, first.x, first.y, first.g, last.g);
+    const lastToF = toFrame(ego, last.x, last.y, last.g, f);
+    if (a0 && lastToF) {
+      const wvx = (last.x - a0.x) / span, wvy = (last.y - a0.y) / span; // vận tốc theo toạ độ frame cuối lịch sử
+      const moved = toFrame(ego, last.x + wvx * gap, last.y + wvy * gap, last.g, f);
+      if (moved) {
+        pred = { x: moved.x, y: moved.y, z: pred.z };
+        typical = Math.hypot(wvx, wvy);
+        ref = lastToF;
+      }
+    }
+  }
   const residual = Math.hypot(cur.x - pred.x, cur.y - pred.y);
-  const typical = Math.hypot(vx, vy);
   const base = cfg.base[label.trim().toLowerCase()] ?? cfg.defaultBase;
   const threshold = Math.max(base, cfg.rel * typical) * gap;
   if (residual <= threshold) return null;
-  const step = Math.hypot(cur.x - last.x, cur.y - last.y) / gap;
+  const step = Math.hypot(cur.x - ref.x, cur.y - ref.y) / gap;
   if (step <= typical) return null;
   return {
     residual, threshold, step, typical, frames: hist.length, pred,

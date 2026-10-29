@@ -1,4 +1,5 @@
 import { parseCuboid, type Cuboid } from './cuboid';
+import { getEgo, transform } from './egoCore';
 import type { CvatShape, CvatTrack } from './types';
 
 export type Status = 'key' | 'interp' | 'hold' | 'outside-key' | 'outside' | 'none';
@@ -44,6 +45,23 @@ export function stateAt(track: CvatTrack, f: number): FrameState {
   if (!next || next.outside) return { status: 'hold', cuboid: a };
   const b = parseCuboid(next.points);
   const t = (f - s.frame) / (next.frame - s.frame);
+  // Có chuyển động của xe (ego): nội suy theo MẶT ĐẤT rồi đưa về toạ độ frame f, thay vì tuyến tính trong hệ ego (xe đổi tốc độ / xoay thì
+  // vật đứng yên không đi đường thẳng trong hệ ego). Job 9999, bỏ một frame rồi dự đoán lại: sai số trung vị 0,27 / 1,02 / 1,87 m (tuyến tính,
+  // cách 1 / 2 / 3 frame) giảm còn 0,10 / 0,14 / 0,14 m. Thiếu bước ego nào giữa hai keyframe thì nội suy tuyến tính như cũ.
+  const ego = getEgo();
+  if (ego) {
+    const pa = transform(ego, a.x, a.y, a.yaw, s.frame, f), pb = transform(ego, b.x, b.y, b.yaw, next.frame, f);
+    if (pa && pb) {
+      return {
+        status: 'interp',
+        cuboid: {
+          x: lerp(pa.x, pb.x, t), y: lerp(pa.y, pb.y, t), z: lerp(a.z, b.z, t),
+          rx: lerp(a.rx, b.rx, t), ry: lerp(a.ry, b.ry, t), yaw: lerpAngle(pa.yaw, pb.yaw, t),
+          sx: lerp(a.sx, b.sx, t), sy: lerp(a.sy, b.sy, t), sz: lerp(a.sz, b.sz, t),
+        },
+      };
+    }
+  }
   return {
     status: 'interp',
     cuboid: {

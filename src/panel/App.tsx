@@ -7,6 +7,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { Cuboid } from '../shared/cuboid';
 import { upsertKeyframe } from '../shared/edit';
 import { actionFor, comboOf } from '../shared/keymap';
+import { estimateEgo, setEgo } from '../shared/ego';
 import { stateAt } from '../shared/interp';
 import type { ContentMessage } from '../shared/protocol';
 import { summarize } from '../shared/summary';
@@ -358,6 +359,12 @@ export function App() {
 
   const data = state.kind === 'ok' ? state.data : null;
   const work = draft.work;
+  // Chuyển động của xe (xoay + tịnh tiến mỗi frame) ước lượng từ các box của job lúc nạp; đặt trước mọi phép tính cảnh báo đi xa (Y).
+  useMemo(() => {
+    const e = data ? estimateEgo(data.ann.tracks, data.job.start_frame, data.job.stop_frame) : null;
+    setEgo(e);
+    return e;
+  }, [data]);
   // Lưu nháp chưa upload (chỉ các track đã sửa) để F5 không mất công; dừng lưu khi đang chờ người dùng quyết định khôi phục.
   useEffect(() => {
     if (!data || !draft.work) return;
@@ -824,11 +831,12 @@ export function App() {
       )}
       {data && passView.pending > 0 && (
         <div style={{ background: '#eef4ff', border: '1px solid #7aa2e3', padding: '4px 8px', margin: '6px 0', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <progress value={passView.total - passView.pending} max={passView.total} style={{ width: 160 }} />
+          <progress value={passView.loading > 0 ? passView.total - passView.loading - passView.failed : passView.total - passView.pending - passView.failed} max={Math.max(1, passView.total - passView.failed)} style={{ width: 160 }} />
           <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-            ⏳ {passView.loading > 0
-              ? <>Đang tải point cloud: còn <b>{passView.loading}</b> frame (mặt đường và ít điểm sẽ tính sau khi tải xong)</>
-              : <>{ready ? 'Đang tính phần còn lại' : 'Đang tính'}: đã tính xong <b>{passView.total - passView.pending - passView.failed}/{passView.total}</b> frame (mặt đường, ít điểm)</>}{passView.failed ? ` · ${passView.failed} frame tải lỗi, bỏ qua` : ''} · trôi box: đã tính.{' '}
+            ⏳ Đã tải <b>{passView.total - passView.loading - passView.failed}/{passView.total}</b> frame
+            {passView.loading > 0
+              ? <> (còn <b>{passView.loading}</b> đang tải; mặt đường và ít điểm tính sau khi tải xong)</>
+              : <> · {ready ? 'đang tính phần còn lại' : 'đang tính'}: đã tính xong <b>{passView.total - passView.pending - passView.failed}/{passView.total}</b> frame (mặt đường, ít điểm)</>}{passView.failed ? ` · ${passView.failed} frame tải lỗi, bỏ qua` : ''} · trôi box: đã tính.{' '}
             {ready ? <>Ô có <span style={PENDING_STYLE}>viền vàng</span>: số liệu chưa đủ, tự cập nhật khi tải xong.</> : `Batch Review mở được khi ${Math.min(UNLOCK_FRAMES, passView.total)} frame đầu tải xong.`}{' '}
             <button onClick={retryFailedNow} title="Tải lại các frame lỗi ngay (frame đang tải thì giữ nguyên)">↻ Tải lại</button>
           </span>
