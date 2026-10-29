@@ -15,7 +15,7 @@ import { patternOrigin } from '../shared/hosts';
  * `ui@<origin>|<khóa>`. Tùy chọn cá nhân (giao diện, phím tắt, ca làm việc / KPI…) dùng chung mọi máy chủ.
  */
 const PREFIX = 'ui:';
-const PER_HOST = [/^cvla-(draft|made|dyn|bak|dynclass|dynattr|pass|throbj):/, /^cvla-(qc|ignore|qcimp|qcmarks|passidx|resume|camsetup)$/];
+const PER_HOST = [/^cvla-(draft|made|dyn|bak|dynclass|dynattr|pass|throbj|seen):/, /^cvla-(qc|ignore|qcimp|qcmarks|passidx|resume|camsetup)$/];
 const isPerHost = (key: string) => PER_HOST.some((r) => r.test(key));
 let scope = ''; // '' = máy chủ mặc định
 let mem: Map<string, string> | null = null;
@@ -65,6 +65,87 @@ export async function useExtensionStorage(cvatOrigin?: string): Promise<void> {
     }
   } catch { /* localStorage bị chặn: bỏ qua */ }
   readyCbs.splice(0).forEach((cb) => cb());
+  watchStorage();
+}
+
+// ---------- tình trạng lưu (KPI / nháp mất khi cập nhật tool, 2026-10-30) ----------
+/**
+ * Lỗi ghi vào kho trước đây bị bỏ qua lặng lẽ, nên dữ liệu (ca / KPI, nháp…) chỉ còn trong bộ nhớ và mất khi tải lại:
+ * - `orphan`: extension vừa Reload / cập nhật trong khi cửa sổ tool cũ còn mở trên trang (chế độ nhúng): phiên cũ không còn ghi được gì;
+ * - `quota`: kho của extension đầy (đã tự xoá kết quả tính lưu sẵn, vẫn không đủ chỗ);
+ * - `error`: lỗi ghi khác.
+ */
+export type StorageHealth = { ok: true } | { ok: false; reason: 'orphan' | 'quota' | 'error'; detail: string };
+let health: StorageHealth = { ok: true };
+const healthCbs = new Set<() => void>();
+export const storageHealth = (): StorageHealth => health;
+export const onStorageHealth = (cb: () => void) => { healthCbs.add(cb); return () => { healthCbs.delete(cb); }; };
+const setHealth = (h: StorageHealth) => {
+  if (h.ok === health.ok && (h.ok || (!health.ok && h.reason === health.reason))) return;
+  if (!health.ok && health.reason === 'orphan') return; // phiên mồ côi không bao giờ hồi lại
+  health = h;
+  healthCbs.forEach((cb) => cb());
+};
+/** Còn kết nối với extension không (Reload / cập nhật extension làm phiên cũ mất `runtime.id`). */
+const alive = () => { try { return !!api.runtime?.id; } catch { return false; } };
+const orphaned = () => setHealth({ ok: false, reason: 'orphan', detail: 'extension vừa được Reload / cập nhật' });
+
+/** Kết quả tính lưu sẵn (tính lại được): xoá đầu tiên khi kho đầy. */
+const isCache = (key: string) => key.startsWith('cvla-pass:') || key === 'cvla-passidx';
+function persist(op: () => Promise<unknown> | void, retried = false): void {
+  if (!alive()) { orphaned(); return; }
+  const fail = (e: unknown) => {
+    const msg = String((e as Error)?.message ?? e);
+    if (!alive() || /context invalidated/i.test(msg)) { orphaned(); return; }
+    if (/quota/i.test(msg)) {
+      if (!retried && mem) {
+        const drop = [...mem.keys()].filter(isCache);
+        if (drop.length) {
+          for (const k of drop) mem.delete(k);
+          try { void api.storage.local.remove(drop.map((k) => storageKey(k)))?.catch?.(() => undefined); } catch { /* bỏ qua */ }
+          persist(op, true);
+          return;
+        }
+      }
+      setHealth({ ok: false, reason: 'quota', detail: msg });
+      return;
+    }
+    setHealth({ ok: false, reason: 'error', detail: msg });
+  };
+  try {
+    const p = op();
+    if (p && typeof (p as Promise<unknown>).then === 'function') (p as Promise<unknown>).then(() => { if (!health.ok && health.reason !== 'orphan') setHealth({ ok: true }); }, fail);
+  } catch (e) { fail(e); }
+}
+
+/** Đổi ở phiên khác (tab CVAT khác) của các khóa đang theo dõi: cập nhật bộ nhớ đệm rồi báo cho store. */
+const externalCbs = new Map<string, Set<() => void>>();
+export function onExternalChange(key: string, cb: () => void): () => void {
+  let set = externalCbs.get(key);
+  if (!set) externalCbs.set(key, (set = new Set()));
+  set.add(cb);
+  return () => { set!.delete(cb); };
+}
+let watching = false;
+function watchStorage() {
+  if (watching) return;
+  watching = true;
+  try {
+    api.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local' || !mem) return;
+      for (const key of externalCbs.keys()) {
+        const ch = changes[storageKey(key)];
+        if (!ch) continue;
+        const v = ch.newValue === undefined ? null : String(ch.newValue);
+        if (v === (mem.get(key) ?? null)) continue; // chính phiên này vừa ghi
+        if (v === null) mem.delete(key); else mem.set(key, v);
+        externalCbs.get(key)!.forEach((cb) => cb());
+      }
+    });
+  } catch { /* không theo dõi được: mỗi phiên vẫn gộp khi ghi */ }
+  if (typeof window !== 'undefined') {
+    const t = window.setInterval(() => { if (!alive()) { orphaned(); window.clearInterval(t); } }, 3000);
+  }
 }
 
 /** Chỉ khi chạy thử ngoài trình duyệt (kiểm thử): chưa khởi tạo thì dùng localStorage. Trong trang https (CVAT) thì không bao giờ. */
@@ -78,7 +159,7 @@ export const kv = {
   set(key: string, value: string): void {
     if (mem) {
       mem.set(key, value);
-      void api.storage.local.set({ [storageKey(key)]: value });
+      persist(() => api.storage.local.set({ [storageKey(key)]: value }));
     } else {
       try { testStore()?.setItem(key, value); } catch { /* bỏ qua */ }
     }
@@ -86,7 +167,7 @@ export const kv = {
   remove(key: string): void {
     if (mem) {
       mem.delete(key);
-      void api.storage.local.remove(storageKey(key));
+      persist(() => api.storage.local.remove(storageKey(key)));
     } else {
       try { testStore()?.removeItem(key); } catch { /* bỏ qua */ }
     }

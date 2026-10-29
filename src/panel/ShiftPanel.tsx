@@ -10,6 +10,7 @@ function KpiView({ k }: { k: Kpi }) {
       <table style={{ borderCollapse: 'collapse', margin: '4px 0' }}>
         <tbody>
           {[
+            ['KPI (frame)', `${t.kpi} = ${t.span} từ lúc ID xuất hiện (tính cả outside) + ${t.outsideLocked} KF outside đã khoá − ${t.dup} trùng`],
             ['Thời lượng', fmtDuration(k.durationMin)],
             ['Số lần upload', k.uploads],
             ['Object đã tác động (đã upload)', `${t.objects}${Object.keys(k.byLabel).length ? ' — ' + Object.entries(k.byLabel).map(([l, n]) => `${l} ${n}`).join(', ') : ''}`],
@@ -25,12 +26,12 @@ function KpiView({ k }: { k: Kpi }) {
       </table>
       {k.objects.length > 0 && (
         <table style={{ borderCollapse: 'collapse', fontSize: 12 }}>
-          <thead><tr style={{ textAlign: 'left' }}><th>ID</th><th>Nhãn</th><th>upload</th><th>frame đổi</th><th>+KF</th><th>−KF</th><th>~KF</th><th>khoá</th><th>outside</th><th>mới</th><th>trở lại</th></tr></thead>
+          <thead><tr style={{ textAlign: 'left' }}><th>ID</th><th>Nhãn</th><th title="span + KF outside khoá − trùng">KPI</th><th title="Số frame từ lúc ID xuất hiện tới hết job, tính cả outside">từ lúc xuất hiện</th><th title="Keyframe outside đã khoá trong ca (trừ phần trùng)">KF outside khoá</th><th>upload</th><th>frame đổi</th><th>+KF</th><th>−KF</th><th>~KF</th><th>khoá</th><th>outside</th><th>mới</th><th>trở lại</th></tr></thead>
           <tbody>
             {k.objects.map((o) => (
               <tr key={`${o.jobId}:${o.num}`} style={{ borderTop: '1px solid #eee' }}>
                 <td><b>{o.num}</b>{k.objects.some((x) => x.jobId !== o.jobId) ? <span style={{ color: '#999' }}> (job {o.jobId})</span> : ''}</td>
-                <td>{o.label}</td><td>{o.uploads}</td><td><b>{o.framesChanged}</b></td><td>{o.added}</td><td>{o.removed}</td><td>{o.modified}</td><td>{o.baked}</td>
+                <td>{o.label}</td><td><b>{o.kpi}</b></td><td>{o.span}</td><td>{o.outsideLocked}{o.dup ? <span style={{ color: '#999' }}> (−{o.dup})</span> : ''}</td><td>{o.uploads}</td><td>{o.framesChanged}</td><td>{o.added}</td><td>{o.removed}</td><td>{o.modified}</td><td>{o.baked}</td>
                 <td>{o.outsideNow}</td><td>{o.outsideNew}</td><td>{o.outsideRestored}</td>
               </tr>
             ))}
@@ -93,7 +94,7 @@ export function ShiftPanel() {
       <div key={s.name} style={{ border: '1px solid #ccc', margin: '6px 0', padding: 6 }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', cursor: 'pointer' }} onClick={() => setOpen(isOpen ? null : s.name)}>
           <b>{s.name}</b>
-          <span style={{ color: '#555' }}>{new Date(s.start).toLocaleString()} · {fmtDuration(k.durationMin)} · {k.totals.objects} object · {k.totals.outsideNow} frame outside</span>
+          <span style={{ color: '#555' }}>{new Date(s.start).toLocaleString()} · {fmtDuration(k.durationMin)} · KPI <b>{k.totals.kpi}</b> · {k.totals.objects} object · {k.totals.outsideNow} frame outside</span>
           {isOpen ? '▾' : '▸'}
         </div>
         {isOpen && (
@@ -112,7 +113,8 @@ export function ShiftPanel() {
   return (
     <>
       <p style={{ margin: '4px 0', color: '#555' }}>
-        KPI tính từ những gì đã <b>upload</b> lên CVAT trong ca (object nào được tác động, bao nhiêu frame outside, số keyframe). Dữ liệu chỉ lưu trong trình duyệt này.
+        KPI tính từ những gì đã <b>upload</b> lên CVAT trong ca: với mỗi ID đã upload, số frame từ lúc ID xuất hiện tới hết job (tính cả outside),
+        cộng số keyframe outside đã khoá trong ca, trừ frame trùng (keyframe outside nằm trong khoảng đã tính). Dữ liệu chỉ lưu trong trình duyệt này.
       </p>
       <ScheduleEditor />
       {active ? (

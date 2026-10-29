@@ -10,7 +10,7 @@ export type PanelMessage = Envelope<typeof PANEL_SOURCE> &
   (
     | { type: 'ready' | 'load' | 'close' }
     | { type: 'resize'; wide: boolean }
-    | { type: 'binary'; kind: 'frame' | 'context'; n: number; reqId: number }
+    | { type: 'binary'; kind: 'frame' | 'context' | 'probe'; n: number; reqId: number } // probe: frame n có trong bộ nhớ đệm HTTP không (1 byte: 1 / 0)
     // tải cả chunk point cloud (theo luồng, từng file gửi về bằng chunkFile); first / count: frame đầu và số frame dự kiến để đối chiếu
     | { type: 'abortLoads' } // huỷ mọi request tải point cloud (frame / chunk) đang chạy
     | { type: 'chunk'; index: number; first: number; count: number; reqId: number }

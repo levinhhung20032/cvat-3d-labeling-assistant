@@ -1,13 +1,15 @@
 import { propagateEdit, propagateSize } from '../shared/dynsize';
 import { findOverlaps, groupPairs } from '../shared/overlap';
 import { applyDraft, buildDraft, checkDraft, draftKey, type SavedDraft } from '../shared/draft';
-import { kv } from './storage';
+import { kv, onStorageHealth, storageHealth } from './storage';
+import { seenStore } from './seenStore';
 import { api } from '../shared/api';
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react';
 import type { Cuboid } from '../shared/cuboid';
 import { upsertKeyframe } from '../shared/edit';
 import { actionFor, comboOf } from '../shared/keymap';
 import { estimateEgo, setEgo } from '../shared/ego';
+import { configureLoading, LOAD_MODES, loadMode, setLoadMode, type LoadMode } from './loadMode';
 import { stateAt } from '../shared/interp';
 import type { ContentMessage } from '../shared/protocol';
 import { summarize } from '../shared/summary';
@@ -25,7 +27,7 @@ import { SettingsIO } from './SettingsIO';
 import { thresholdStore, useThresholdVersion } from './thresholdStore';
 import { backgroundConfigKey } from '../shared/thresholds';
 import { Help, PENDING_STYLE } from './ui';
-import { pointClouds } from './stores';
+import { pointClouds, type ChunkSource } from './stores';
 import { ShiftBadge, ShiftBanner } from './ShiftBar';
 import { dropSupported, findDrift } from '../shared/drift';
 import { fitReportAt } from '../shared/fit';
@@ -194,6 +196,8 @@ body { margin: 0; }
 .cvla-root button.cvla-shift-warn { background: #fde68a; border-color: #d97706; color: #7a4100; font-weight: 700; }
 .cvla-root label.cvla-filebtn { display: inline-flex; align-items: center; border: 1px solid #9aa4b2; border-radius: 4px; padding: 2px 8px; background: #fff; cursor: pointer; }
 .cvla-root label.cvla-filebtn input { display: none; }
+/* nhóm điều khiển của Batch Review: nút / công tắc xuống dòng nguyên khối, không gãy chữ giữa chừng */
+.cvla-root fieldset.cvla-group > label, .cvla-root fieldset.cvla-group > button, .cvla-root fieldset.cvla-group button { white-space: nowrap; }
 .cvla-badge { display: inline-block; min-width: 16px; padding: 0 5px; margin-left: 6px; border-radius: 9px; background: #fff; color: #1d4ed8; font-size: 11px; line-height: 16px; text-align: center; }
 .cvla-help { display: inline-block; width: 15px; height: 15px; border-radius: 50%; border: 1px solid #8a94a3; color: #5b6573; font-size: 10px; line-height: 14px; text-align: center; cursor: help; margin-left: 4px; font-weight: 700; user-select: none; }
 .cvla-root button.cvla-num { border: 0; background: transparent; padding: 0 2px; min-width: 40px; text-align: left; text-decoration: underline dotted; }
@@ -288,9 +292,11 @@ export function App() {
         // Point cloud tải theo chunk như giao diện CVAT (ít request, máy chủ không phải đọc lại chunk cho từng frame); không biết cỡ chunk
         // hoặc job không phải 3D thì chỉ tải từng frame.
         // Job ground truth chỉ gồm một số frame chọn lọc: thứ tự trong chunk khác dải start…stop → không dùng chunk.
-        pointClouds.setChunks(m.chunkSize && m.job.dimension !== '2d' && m.job['type'] !== 'ground_truth'
+        const chunkSrc: ChunkSource | null = m.chunkSize && m.job.dimension !== '2d' && m.job['type'] !== 'ground_truth'
           ? { start: m.job.start_frame, stop: m.job.stop_frame, size: m.chunkSize, stream: streamChunk }
-          : null);
+          : null;
+        chunkSrcRef.current = chunkSrc;
+        configureLoading(m.job.start_frame, m.job.stop_frame, chunkSrc);
       } else if (m.type === 'cvatDbl') {
         // Bấm đúp trong CVAT: chọn object đó và chuyển sang Batch Review; ô "CVAT → tool" tắt thì bỏ qua (content script cũng không gửi).
         if (syncRef.current && m.num >= 1 && m.num <= countRef.current) {
@@ -358,7 +364,16 @@ export function App() {
   }, []);
 
   const data = state.kind === 'ok' ? state.data : null;
+  const storeHealth = useSyncExternalStore(onStorageHealth, storageHealth); // lỗi ghi kho (extension vừa Reload, kho đầy): báo ngay, không mất lặng lẽ
+  const chunkSrcRef = useRef<ChunkSource | null>(null);
+  const [lmode, setLmode] = useState<LoadMode>(loadMode);
   const work = draft.work;
+  // Object mở xem trong Batch Review: ghi lại để bảng object gạch chân ID đã xem.
+  useEffect(() => {
+    if (tab !== 'review' || !data || !work || selectedNum === null) return;
+    const id = work.tracks[selectedNum - 1]?.id;
+    if (typeof id === 'number') seenStore.add(data.job.id, id);
+  }, [tab, selectedNum, data, work]);
   // Chuyển động của xe (xoay + tịnh tiến mỗi frame) ước lượng từ các box của job lúc nạp; đặt trước mọi phép tính cảnh báo đi xa (Y).
   useMemo(() => {
     const e = data ? estimateEgo(data.ann.tracks, data.job.start_frame, data.job.stop_frame) : null;
@@ -764,7 +779,16 @@ export function App() {
             <button onClick={() => setReloadMenu(false)} title="Đóng menu">✕</button>
           </span>
         ) : (
+          <>
+          <select
+            value={lmode} style={{ marginLeft: 8 }}
+            title={`Cách tải point cloud: ${LOAD_MODES.find((x) => x.id === lmode)?.title ?? ''} Đổi xong áp dụng cho các frame chưa tải.`}
+            onChange={(e) => { const v = e.target.value as LoadMode; setLmode(v); setLoadMode(v); if (data) configureLoading(data.job.start_frame, data.job.stop_frame, chunkSrcRef.current); }}
+          >
+            {LOAD_MODES.map((x) => <option key={x.id} value={x.id}>Tải: {x.label}</option>)}
+          </select>
           <button onClick={() => setReloadMenu(true)} style={{ marginLeft: 8 }} title="Tải lại point cloud: chọn chỉ frame lỗi hoặc tất cả">↻ Tải lại frame ▾{passView.failed ? <span className="cvla-badge">{passView.failed}</span> : null}</button>
+          </>
         ))}
         {data && (
           <span style={{ marginLeft: 12, padding: '2px 6px', background: draft.edited.size ? '#fff3cd' : '#eee' }}>
@@ -829,7 +853,16 @@ export function App() {
           </span>
         </div>
       )}
-      {data && passView.pending > 0 && (
+      {!storeHealth.ok && (
+        <div role="alert" style={{ background: '#ffe5e5', border: '2px solid #c00', color: '#900', padding: '6px 8px', margin: '6px 0', fontWeight: 600 }}>
+          ⚠ Tool KHÔNG lưu được dữ liệu ({storeHealth.reason === 'orphan' ? 'extension vừa được Reload / cập nhật trong khi cửa sổ tool này còn mở'
+            : storeHealth.reason === 'quota' ? 'kho của extension đã đầy' : storeHealth.detail}): ca / KPI, bản nháp, ghi chú QC… từ giờ sẽ mất khi tải lại.{' '}
+          {storeHealth.reason === 'orphan' ? 'Hãy tải lại tab CVAT (F5) rồi bấm lại biểu tượng extension trước khi làm tiếp.' : 'Hãy xoá bớt ca cũ ở tab Ca / KPI hoặc bản nháp không dùng, rồi tải lại tab.'}
+        </div>
+      )}
+      {/* Chỉ hiện ở lần tải / tính đầu của job (tải lại có thanh riêng ở trên): sau đó sửa box làm vài frame tính lại (kể cả phải tải lại
+          point cloud đã bị đẩy khỏi bộ nhớ) thì tính ngầm, ô chưa đủ có viền vàng; không chèn thêm dòng đẩy cả tool xuống rồi lùi lại (giật). */}
+      {data && passView.pending > 0 && doneJob !== data.job.id && (
         <div style={{ background: '#eef4ff', border: '1px solid #7aa2e3', padding: '4px 8px', margin: '6px 0', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <progress value={passView.loading > 0 ? passView.total - passView.loading - passView.failed : passView.total - passView.pending - passView.failed} max={Math.max(1, passView.total - passView.failed)} style={{ width: 160 }} />
           <span style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -881,7 +914,7 @@ export function App() {
       )}
       {data && work && tab === 'objects' && (
         <ObjectTable
-          onDelete={deleteMade} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs} incomplete={passView.incomplete}
+          jobId={data.job.id} onDelete={deleteMade} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs} incomplete={passView.incomplete}
           tracks={work.tracks} start={data.job.start_frame} stop={data.job.stop_frame} cvatFrame={focus?.frame ?? null}
           onOpen={(num, first) => {
             selectFromTool(num);

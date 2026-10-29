@@ -1,28 +1,46 @@
-import { kv, whenStorageReady } from './storage';
+import { kv, onExternalChange, whenStorageReady } from './storage';
 import { useSyncExternalStore } from 'react';
 import type { Shift, ShiftUpload } from '../shared/shift';
 import { DEFAULT_SCHEDULE, normalizeSchedule, type Schedule } from '../shared/schedule';
-import { recordActivity, syncShifts } from '../shared/shiftflow';
+import { MAX_REMOVED, mergeShiftState, removedKey, recordActivity, syncShifts } from '../shared/shiftflow';
 
 /** Ca làm việc và danh sách "bỏ qua gợi ý", lưu cục bộ trong trình duyệt (localStorage của extension, không rời máy). */
-interface State { active: Shift | null; history: Shift[] }
+interface State { active: Shift | null; history: Shift[]; removed?: string[] } // removed: dấu (removedKey) các ca đã xoá khỏi lịch sử
 const KEY = 'cvla-shifts';
 
-const load = (): State => {
+const parse = (raw: string | null): State | null => {
   try {
-    const raw = JSON.parse(kv.get(KEY) ?? 'null') as State | null;
-    if (raw && Array.isArray(raw.history)) return { active: raw.active ?? null, history: raw.history };
+    const o = JSON.parse(raw ?? 'null') as State | null;
+    if (o && Array.isArray(o.history)) return { active: o.active ?? null, history: o.history, removed: Array.isArray(o.removed) ? o.removed : [] };
   } catch { /* bỏ qua */ }
-  return { active: null, history: [] };
+  return null;
+};
+const load = (): State => parse(kv.get(KEY)) ?? { active: null, history: [], removed: [] };
+/** Gộp hai bản (của phiên này và của kho / phiên khác): không bản nào làm mất upload hay ca của bản kia. */
+const merge = (a: State, b: State): State => {
+  const removed = [...new Set([...(a.removed ?? []), ...(b.removed ?? [])])].slice(-MAX_REMOVED);
+  return { ...mergeShiftState(a, b, removed), removed };
 };
 
 let state: State = load();
+let written: string | null = kv.get(KEY); // bản phiên này ghi / đọc gần nhất: kho khác bản này nghĩa là phiên khác vừa ghi
 const listeners = new Set<() => void>();
 const commit = (next: State) => {
-  state = next;
-  try { kv.set(KEY, JSON.stringify(next)); } catch { /* bỏ qua */ }
+  // Hai tab CVAT (hoặc phiên cũ chưa đóng) cùng ghi một khóa: gộp với bản đang có trong kho trước khi ghi, thay vì ghi đè.
+  const disk = kv.get(KEY);
+  const other = disk !== written ? parse(disk) : null;
+  state = other ? merge(next, other) : next;
+  try { written = JSON.stringify(state); kv.set(KEY, written); } catch { /* bỏ qua */ }
   listeners.forEach((l) => l());
 };
+// Phiên khác vừa ghi: gộp vào trạng thái đang hiện (ghi xuống ở lần ghi kế tiếp).
+onExternalChange(KEY, () => {
+  const other = parse(kv.get(KEY));
+  if (!other) return;
+  state = merge(state, other);
+  written = kv.get(KEY);
+  listeners.forEach((l) => l());
+});
 const subscribe = (cb: () => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; };
 const snapshot = () => state;
 export const useShifts = () => useSyncExternalStore(subscribe, snapshot);
@@ -58,7 +76,7 @@ export const shiftStore = {
   },
   ignored() { withActive((s) => ({ ...s, ignored: s.ignored + 1 })); },
   upload(u: ShiftUpload) { withActive((s) => ({ ...s, uploads: [...s.uploads, u] })); },
-  remove(name: string) { commit({ ...state, history: state.history.filter((h) => h.name !== name) }); },
+  remove(name: string) { commit({ ...state, history: state.history.filter((h) => h.name !== name), removed: [...(state.removed ?? []), ...state.history.filter((h) => h.name === name).map(removedKey)] }); },
 };
 
 // ---------- bỏ qua gợi ý ----------
@@ -72,6 +90,7 @@ const ignListeners = new Set<() => void>();
 // không thì lần ghi đầu tiên sẽ ghi đè dữ liệu thật bằng trạng thái rỗng.
 whenStorageReady(() => {
   state = load();
+  written = kv.get(KEY);
   schedule = loadSchedule();
   ignored = loadIgnored();
   listeners.forEach((l) => l());

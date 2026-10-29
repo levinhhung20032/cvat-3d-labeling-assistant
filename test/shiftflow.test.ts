@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SCHEDULE } from '../src/shared/schedule';
-import { recordActivity, syncShifts, type ShiftState } from '../src/shared/shiftflow';
+import { mergeShiftState, recordActivity, syncShifts, type ShiftState } from '../src/shared/shiftflow';
 import type { Shift } from '../src/shared/shift';
 
 const t = (h: number, m = 0, day = 27) => new Date(2026, 9, day, h, m, 0, 0);
@@ -58,5 +58,29 @@ describe('vào / ra ca tự động', () => {
     st = recordActivity(st, t(18, 0), S, edit);
     expect(st.active!.name).toBe('Oct27OT#2');
     expect(st.history.map((h) => h.name)).toEqual(['Oct27PM', 'Oct27OT']);
+  });
+});
+
+describe('gộp ca giữa hai phiên tool (KPI không bị ghi đè)', () => {
+  const sh = (name: string, start: string, over: Partial<Shift> = {}): Shift => ({ name, start, end: null, uploads: [], accepted: 0, ignored: 0, edits: 0, touched: [], ...over });
+  const up = (time: string, jobId = 1) => ({ time, jobId, tracks: [] });
+  it('cùng ca ở hai phiên: hợp các lần upload và object đã sửa, bộ đếm lấy lớn hơn', () => {
+    const a: ShiftState = { active: sh('Oct30AM', '2026-10-30T01:30:00Z', { uploads: [up('t1'), up('t2')], edits: 5, touched: ['1:2'] }), history: [] };
+    const b: ShiftState = { active: sh('Oct30AM', '2026-10-30T01:30:00Z', { uploads: [up('t1'), up('t3')], edits: 2, touched: ['1:4'] }), history: [] };
+    const m = mergeShiftState(a, b);
+    expect(m.active!.uploads.map((u) => u.time)).toEqual(['t1', 't2', 't3']);
+    expect(m.active!.edits).toBe(5);
+    expect(m.active!.touched.sort()).toEqual(['1:2', '1:4']);
+    expect(m.history).toEqual([]);
+  });
+  it('phiên cũ chưa chuyển ca: ca cũ vào lịch sử (đã kết thúc), ca mới là ca đang chạy · lịch sử hai bên được giữ · ca đã xoá không quay lại', () => {
+    const old = sh('Oct29PM', '2026-10-29T06:30:00Z', { endAt: '2026-10-29T10:30:00Z', uploads: [up('p1')] });
+    const a: ShiftState = { active: old, history: [sh('Oct28AM', '2026-10-28T01:30:00Z', { end: '2026-10-28T05:30:00Z' })] };
+    const b: ShiftState = { active: sh('Oct30AM', '2026-10-30T01:30:00Z'), history: [{ ...old, end: '2026-10-29T10:30:00Z' }, sh('Oct27AM', '2026-10-27T01:30:00Z', { end: 'x' })] };
+    const m = mergeShiftState(a, b, ['Oct27AM|2026-10-27T01:30:00Z', 'Oct30AM|2026-10-01T00:00:00Z']); // dấu xoá của ca khác cùng tên không lọc nhầm
+    expect(m.active!.name).toBe('Oct30AM');
+    expect(m.history.map((s) => s.name)).toEqual(['Oct29PM', 'Oct28AM']);
+    expect(m.history[0]!.end).toBe('2026-10-29T10:30:00Z');
+    expect(m.history[0]!.uploads).toHaveLength(1);
   });
 });

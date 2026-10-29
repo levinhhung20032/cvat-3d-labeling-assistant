@@ -194,3 +194,37 @@ describe('tải point cloud theo chunk (như giao diện CVAT)', () => {
     expect([st.total, st.left]).toEqual([1, 1]);
   });
 });
+
+describe('frame đã có trong bộ nhớ đệm HTTP · tạm dừng khi kiểm tra', () => {
+  it('frame đã có trong bộ nhớ đệm tải từng frame (không chờ chunk), các frame còn lại vẫn theo chunk', async () => {
+    const s = setup();
+    s.loader.setCached(new Set([0, 1]));
+    const ps = [0, 1, 2, 3].map((n) => s.loader.get(n, 0));
+    await tick();
+    expect(s.perFrame.sort()).toEqual([0, 1]);
+    expect(s.streams.map((x) => [x.k, x.first, x.count])).toEqual([[0, 0, 4]]); // frame 2, 3 vẫn đợi chunk
+    await s.deliverAll(0);
+    expect((await Promise.all(ps)).map((p) => p.count)).toEqual([0, 1, 2, 3]);
+  });
+  it('đặt bộ nhớ đệm sau khi đã xếp hàng chờ chunk: frame có trong bộ nhớ đệm chuyển sang tải từng frame', async () => {
+    const s = setup();
+    const p0 = s.loader.get(0, 0);
+    s.loader.setCached(new Set([0]));
+    await tick();
+    expect((await p0).count).toBe(0);
+    expect(s.perFrame).toEqual([0]);
+  });
+  it('hold: không gửi request nào cho tới khi hold(false)', async () => {
+    const s = setup();
+    s.loader.hold(true);
+    const p = s.loader.get(5, 0);
+    await tick();
+    expect(s.perFrame).toEqual([]);
+    expect(s.streams).toEqual([]);
+    s.loader.setChunks(null);
+    s.loader.hold(false);
+    expect((await p).count).toBe(5);
+    expect(s.perFrame).toEqual([5]);
+  });
+});
+

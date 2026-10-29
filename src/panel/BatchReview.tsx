@@ -487,7 +487,7 @@ function Group({ id, title, bg, children }: { id: string; title: ReactNode; bg?:
   const [shut, setShut] = useState(() => !!loadCollapsed()[id]);
   const toggle = () => setShut((v) => { const next = !v; kv.set(GROUPS_KEY, JSON.stringify({ ...loadCollapsed(), [id]: next })); return next; });
   return (
-    <fieldset style={{ border: '1px solid #c5ccd6', margin: 0, padding: '1px 8px 4px', display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center', background: bg }}>
+    <fieldset className="cvla-group" style={{ border: '1px solid #c5ccd6', margin: 0, minWidth: 0, padding: '1px 8px 4px', display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center', alignContent: 'flex-start', background: bg }}>
       <legend style={{ fontSize: 11, fontWeight: 700, color: '#456', padding: '0 4px' }}>
         <span role="button" tabIndex={0} onClick={toggle} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggle(); }} style={{ cursor: 'pointer', userSelect: 'none' }} title={shut ? 'Mở rộng' : 'Thu nhỏ'}>{shut ? '▸' : '▾'} </span>
         {title}
@@ -864,7 +864,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   const snapWhy = useRef('');
   const groundFrame = (f: number): boolean => {
     snapWhy.current = '';
-    if (!prefs.ground) { snapWhy.current = 'dò mặt đất đang tắt'; return false; }
+    if (!prefs.ground) { snapWhy.current = 'dò mặt đất (sg gr) đang tắt'; return false; }
     const st = track ? stateAt(track, f) : null;
     const g = snaps.get(f);
     if (!st?.cuboid) { snapWhy.current = 'frame này không có box'; return false; }
@@ -1005,7 +1005,72 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
 
   return (
     <>
-      <div style={{ marginBottom: 6, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'stretch' }}>
+      {/* 3 hàng cố định (chủ dự án 2026-10-30): Keyframe & kích thước + Outside · Gợi ý & mặt đất + QC · Object & cửa sổ + Hiển thị.
+          Hai cột thẳng hàng ở mọi hàng; nội dung dài xuống dòng TRONG nhóm, không đẩy nhóm sang hàng khác. */}
+      <div style={{ marginBottom: 6, display: 'grid', gridTemplateColumns: 'minmax(0, 3fr) minmax(0, 2fr)', gap: 6, alignItems: 'stretch' }}>
+        <Group id="3" title={<>Keyframe & kích thước <Help text="🔒 / 🔓 trên tiêu đề cột hoặc phím K: khoá / mở khoá frame đang chọn. Alt+K: mở khoá keyframe ở giữa Phạm vi tác động." /></>} bg="#f4f4f4">
+        <label title={`Chỉ áp dụng cho object #${num} đang chọn, không đổi cả class. BẬT: kích thước nội suy giữa các keyframe. TẮT (static): đổi kích thước ở một frame thì áp cho mọi keyframe của object. Hiện đang ${dynWhy}. Mặc định theo class / attribute đặt ở tab Dynamic size.`} style={{ fontWeight: 600 }}>
+          <input type="checkbox" checked={dyn} onChange={(e) => setDyn(e.target.checked)} /> Dynamic size · #{num}
+        </label>
+        <span style={{ color: '#567', fontSize: 11 }} title="Nguồn quyết định dynamic size của object này">({dynWhy})</span>
+        {own !== null && <button onClick={clearOwnDyn} title="Bỏ công tắc riêng, quay về theo attribute / class (tab Dynamic size)">↺ theo class</button>}
+        {!dyn && <button disabled={selFrame === null} onClick={() => unifySize()} title="Lấy kích thước của frame đang chọn áp cho mọi keyframe của object (hoàn tác được)">Đồng bộ size theo frame {selFrame ?? '…'}</button>}
+        <span style={{ whiteSpace: 'nowrap' }}>
+        <b title="Khoảng frame mà các nút Keyframe và Outside bên cạnh tác động (khác với khoảng đang hiển thị ở nhóm Object & cửa sổ). Mặc định bằng cửa sổ đang xem.">Phạm vi tác động</b>{' '}
+        <span>
+          frame{' '}
+          <input value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} size={3} style={{ width: 44 }} /> →{' '}
+          <input value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} size={3} style={{ width: 44 }} />{' '}
+          <button onClick={() => { setRangeFrom(String(frames[0])); setRangeTo(String(frames[frames.length - 1])); }} title="Đặt phạm vi tác động bằng đúng cửa sổ đang hiển thị" style={{ padding: '0 5px' }}>= cửa sổ</button>
+        </span>
+        </span>
+        <button onClick={unlockInner} title="Gỡ mọi keyframe nằm hẳn bên trong khoảng, giữ hai đầu mút; frame về nội suy">🔓 Mở khoá KF giữa (Alt+K)</button>
+        <button onClick={() => lockAll(false)} title="Biến mọi frame có box trong khoảng thành keyframe (giá trị giữ nguyên)">🔒 Khoá tất cả thành KF</button>
+        <button onClick={() => lockAll(true)} title="Như trên nhưng cho cả track">🔒 Cả track</button>
+
+        </Group>
+        <Group id="4" title={<>Outside</>} bg="#fff4f4">
+        <button
+          disabled={selFrame === null}
+          onClick={() => selFrame !== null && toggleOutside(selFrame)}
+          title="Phím O. Outside từ frame đang chọn tới keyframe kế tiếp; nếu frame đang là outside thì đưa object trở lại. Chọn frame bằng cách bấm tiêu đề cột."
+        >① ⛔ Outside — frame {selFrame ?? '…'} (O)</button>
+        <button onClick={outsideRange} title="Đặt outside cho mọi frame có box trong cửa sổ đang hiển thị; frame ngay sau cửa sổ giữ nguyên trạng thái">② ⛔ Current window</button>
+        <button
+          onClick={() => { if (pick) { setPick(null); setNote('Đã hủy chọn khoảng.'); } else { setPick({ first: null }); setNote('Chọn khoảng: bấm tiêu đề cột ĐẦU khoảng (Esc để hủy).'); } }}
+          style={{ background: pick ? '#ffd9d9' : undefined, fontWeight: pick ? 700 : 400 }}
+          title="Select range: bấm nút rồi bấm tiêu đề hai cột (đầu và cuối khoảng, có thể ở hai cửa sổ khác nhau): mọi frame có box trong khoảng thành outside. Esc để hủy."
+        >{pick ? (pick.first === null ? '③ Bấm cột đầu…' : `③ Bấm cột cuối (từ ${pick.first})…`) : '③ ⛔ Select range'}</button>
+        </Group>
+        <Group id="5" title={<>Gợi ý & mặt đất</>} bg="#f0fbff">
+        <button
+          onClick={acceptSelectedOrAll}
+          disabled={![...sugs.values()].some(Boolean)}
+          style={{ fontWeight: 700, background: [...sugs.values()].some(Boolean) ? '#c9f3ff' : undefined }}
+          title="Áp box gợi ý (nét đứt xanh lơ) cho frame đang chọn; nếu chưa chọn frame thì cho mọi frame có gợi ý trong cửa sổ. Phím A."
+        >✔ Chấp nhận (A){[...sugs.entries()].filter(([f, s]) => s && frames.includes(f)).length ? ` · ${[...sugs.entries()].filter(([f, s]) => s && frames.includes(f)).length}` : ''}</button>
+        <button
+          onClick={ignoreSelectedOrAll}
+          disabled={![...sugs.values()].some(Boolean)}
+          title="Bỏ qua gợi ý (nét đứt xanh lơ) của frame đang chọn; nếu chưa chọn frame thì của mọi frame có gợi ý trong cửa sổ. Phím I."
+        >✖ Bỏ qua (I)</button>
+        <button
+          onClick={groundSelectedOrAll}
+          title="Ground snap: ước lượng mặt đường quanh chân box (đường xanh lá nét đứt ở view Bên/Trước) rồi hạ/nâng box cho đáy chạm đất. Frame đang chọn, hoặc cả cửa sổ nếu chưa chọn. Phím G."
+>⏬ Ground snap (G)</button>
+        <label title="sg size = gợi ý kích thước box: khi box lệch cụm điểm, đề xuất box mới (nét đứt xanh lơ, nút ✔ nhận, phím A) kèm cảnh báo ⚠ lệch. Tắt: không có gợi ý và không có cảnh báo lệch (⚠ ít điểm vẫn hiện)." style={{ fontWeight: 600 }}>
+          <input type="checkbox" checked={prefs.suggest} onChange={(e) => updatePrefs({ ...prefs, suggest: e.target.checked })} /> sg size
+        </label>
+        <label title="gr z=0 = hiện mặt đường ego (Oxy): mặt phẳng Oxy (z = 0, mặt đường dưới xe) vẽ bằng vạch vàng chấm ở view Bên / Trước của MỌI frame, theo z của box ở frame đó (box nghiêng thì vạch nghiêng theo). Để so box với mặt đường chung của cả cảnh; không ảnh hưởng cảnh báo hay dữ liệu.">
+          <input type="checkbox" checked={prefs.egoPlane} onChange={(e) => updatePrefs({ ...prefs, egoPlane: e.target.checked })} /> gr z=0
+        </label>
+        <label title={`sg gr = dò mặt đất: đo mặt đường riêng cho object ở đúng frame đang xét (lớp thấp nhất có mật độ ở 8 cung quanh box + lớp tiếp xúc dưới gầm), không dự đoán từ frame khác. Báo khi đáy cao hơn mặt đường quá ${cm(DEFAULT_GROUND.floatTol)} cm hoặc thấp hơn quá ${cm(DEFAULT_GROUND.sinkTol)} cm và vượt độ bất định của phép đo. Tắt: không còn chip ⏬, không có Ground snap (G) và tự bám mặt đất.`} style={{ fontWeight: 600 }}>
+          <input type="checkbox" checked={prefs.ground} onChange={(e) => updatePrefs({ ...prefs, ground: e.target.checked })} /> sg gr
+        </label>
+        <label title="gr lock = tự bám mặt đất khi kéo: sau mỗi lần dời / đổi cỡ box bằng chuột, tự đặt lại độ cao cho đáy chạm mặt đường tại vị trí mới">
+          <input type="checkbox" checked={autoSnap} disabled={!prefs.ground} onChange={(e) => setAutoSnap(e.target.checked)} /> gr lock
+        </label>
+        </Group>
         <Group id="1" title={<>QC & cảnh báo</>}>
         <label title="QC mode: hiện ô ghi chú ở mỗi cột frame (xuất Excel ở tab QC)" style={{ fontWeight: 600 }}><input type="checkbox" checked={qcOn} onChange={(e) => qcStore.setMode(e.target.checked)} /> QC</label>
         <label title="Cảnh báo box không bao đúng cụm điểm (điểm lọt ra ngoài box) hoặc dưới 6 điểm"><input type="checkbox" checked={warn} onChange={(e) => setWarn(e.target.checked)} /> cảnh báo lệch</label>
@@ -1063,6 +1128,24 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
           </span>
         )}
         </Group>
+        <Group id="6" title={<>Object & cửa sổ</>}>
+        <span><IdBox value={num} max={max} onCommit={setSelectedNum} /></span>
+        <span>
+          <button disabled={k === 0} onClick={() => setK(0)} title="Về cửa sổ đầu tiên">|&lt;</button>{' '}
+          <button disabled={k === 0} onClick={() => setK(k - 1)}>◀</button>{' '}
+          <span style={{ display: 'inline-block', minWidth: '6.5em', textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>Cửa sổ {k + 1}/{nWin}</span>{' '}
+          <button disabled={k >= nWin - 1} onClick={() => setK(k + 1)}>▶</button>{' '}
+          <button disabled={k >= nWin - 1} onClick={() => setK(nWin - 1)} title="Tới cửa sổ cuối cùng">&gt;|</button>
+        </span>
+        <span title="Cửa sổ đang hiện. Nhập a: bắt đầu cửa sổ từ frame a, b tự thành a + số frame - 1 (mặc định 6 frame). Sửa b: đổi số frame hiển thị (b - a + 1). Enter để áp dụng.">
+          Cửa sổ hiện{' '}
+          <input value={winA} onChange={(e) => setWinA(e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} onBlur={commitA} onFocus={(e) => e.target.select()} size={3} style={{ width: 44 }} /> →{' '}
+          <input value={winB} onChange={(e) => setWinB(e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} onBlur={commitB} onFocus={(e) => e.target.select()} size={3} style={{ width: 44 }} />{' '}
+          <span style={{ display: 'inline-block', minWidth: '4.6em', fontVariantNumeric: 'tabular-nums' }}>({frames.length} frame)</span>{' '}
+          <label><input type="checkbox" checked={prefs.keyOnly} onChange={(e) => updatePrefs({ ...prefs, keyOnly: e.target.checked })} /> chỉ keyframe</label>
+          {viewFrom !== '' && <button style={{ marginLeft: 4 }} onClick={() => { forceFirst.current = true; setViewFrom(''); }} title="Quay về đầu job">⟲ từ đầu</button>}
+        </span>
+        </Group>
         <Group id="2" title={<>Hiển thị</>}>
         <span>
           Zoom <button onClick={() => zoomBy(1 / 1.25)}>−</button> <b>{Math.round(zoom * 100)}%</b>{' '}
@@ -1083,85 +1166,6 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
           <Slider min={0} max={3} step={0.1} value={prefs.slabMargin} def={0.5} unit="m" decimals={1} onChange={(v) => updatePrefs({ ...prefs, slabMargin: v })} />
         </span>
         <label title="Cho box nghiêng (roll / pitch): giữ Alt rồi kéo ở view Bên (pitch) / view Trước (roll), và Ground snap (G) nghiêng box song song mặt đường dốc. Tắt: Alt+kéo ở các view này chỉ xoay yaw và G chỉ dời z."><input type="checkbox" checked={prefs.tilt} onChange={(e) => updatePrefs({ ...prefs, tilt: e.target.checked })} /> nghiêng theo mặt đường</label>
-        </Group>
-        <Group id="3" title={<>Keyframe & kích thước <Help text="🔒 / 🔓 trên tiêu đề cột hoặc phím K: khoá / mở khoá frame đang chọn. Alt+K: mở khoá keyframe ở giữa Phạm vi tác động." /></>} bg="#f4f4f4">
-        <label title={`Chỉ áp dụng cho object #${num} đang chọn, không đổi cả class. BẬT: kích thước nội suy giữa các keyframe. TẮT (static): đổi kích thước ở một frame thì áp cho mọi keyframe của object. Hiện đang ${dynWhy}. Mặc định theo class / attribute đặt ở tab Dynamic size.`} style={{ fontWeight: 600 }}>
-          <input type="checkbox" checked={dyn} onChange={(e) => setDyn(e.target.checked)} /> Dynamic size · #{num}
-        </label>
-        <span style={{ color: '#567', fontSize: 11 }} title="Nguồn quyết định dynamic size của object này">({dynWhy})</span>
-        {own !== null && <button onClick={clearOwnDyn} title="Bỏ công tắc riêng, quay về theo attribute / class (tab Dynamic size)">↺ theo class</button>}
-        {!dyn && <button disabled={selFrame === null} onClick={() => unifySize()} title="Lấy kích thước của frame đang chọn áp cho mọi keyframe của object (hoàn tác được)">Đồng bộ size theo frame {selFrame ?? '…'}</button>}
-        <span style={{ whiteSpace: 'nowrap' }}>
-        <b title="Khoảng frame mà các nút Keyframe và Outside bên cạnh tác động (khác với khoảng đang hiển thị ở nhóm Object & cửa sổ). Mặc định bằng cửa sổ đang xem.">Phạm vi tác động</b>{' '}
-        <span>
-          frame{' '}
-          <input value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} size={3} style={{ width: 44 }} /> →{' '}
-          <input value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} size={3} style={{ width: 44 }} />{' '}
-          <button onClick={() => { setRangeFrom(String(frames[0])); setRangeTo(String(frames[frames.length - 1])); }} title="Đặt phạm vi tác động bằng đúng cửa sổ đang hiển thị" style={{ padding: '0 5px' }}>= cửa sổ</button>
-        </span>
-        </span>
-        <button onClick={unlockInner} title="Gỡ mọi keyframe nằm hẳn bên trong khoảng, giữ hai đầu mút; frame về nội suy">🔓 Mở khoá KF giữa (Alt+K)</button>
-        <button onClick={() => lockAll(false)} title="Biến mọi frame có box trong khoảng thành keyframe (giá trị giữ nguyên)">🔒 Khoá tất cả thành KF</button>
-        <button onClick={() => lockAll(true)} title="Như trên nhưng cho cả track">🔒 Cả track</button>
-
-        </Group>
-        <Group id="4" title={<>Outside</>} bg="#fff4f4">
-        <button
-          disabled={selFrame === null}
-          onClick={() => selFrame !== null && toggleOutside(selFrame)}
-          title="Phím O. Outside từ frame đang chọn tới keyframe kế tiếp; nếu frame đang là outside thì đưa object trở lại. Chọn frame bằng cách bấm tiêu đề cột."
-        >① ⛔ Outside — frame {selFrame ?? '…'} (O)</button>
-        <button onClick={outsideRange} title="Đặt outside cho mọi frame có box trong cửa sổ đang hiển thị; frame ngay sau cửa sổ giữ nguyên trạng thái">② ⛔ Current window</button>
-        <button
-          onClick={() => { if (pick) { setPick(null); setNote('Đã hủy chọn khoảng.'); } else { setPick({ first: null }); setNote('Chọn khoảng: bấm tiêu đề cột ĐẦU khoảng (Esc để hủy).'); } }}
-          style={{ background: pick ? '#ffd9d9' : undefined, fontWeight: pick ? 700 : 400 }}
-          title="Select range: bấm nút rồi bấm tiêu đề hai cột (đầu và cuối khoảng, có thể ở hai cửa sổ khác nhau): mọi frame có box trong khoảng thành outside. Esc để hủy."
-        >{pick ? (pick.first === null ? '③ Bấm cột đầu…' : `③ Bấm cột cuối (từ ${pick.first})…`) : '③ ⛔ Select range'}</button>
-        </Group>
-        <Group id="5" title={<>Gợi ý & mặt đất</>} bg="#f0fbff">
-        <button
-          onClick={acceptSelectedOrAll}
-          disabled={![...sugs.values()].some(Boolean)}
-          style={{ fontWeight: 700, background: [...sugs.values()].some(Boolean) ? '#c9f3ff' : undefined }}
-          title="Áp box gợi ý (nét đứt xanh lơ) cho frame đang chọn; nếu chưa chọn frame thì cho mọi frame có gợi ý trong cửa sổ. Phím A."
-        >✔ Chấp nhận gợi ý (A){[...sugs.entries()].filter(([f, s]) => s && frames.includes(f)).length ? ` · ${[...sugs.entries()].filter(([f, s]) => s && frames.includes(f)).length}` : ''}</button>
-        <button
-          onClick={ignoreSelectedOrAll}
-          disabled={![...sugs.values()].some(Boolean)}
-          title="Bỏ qua gợi ý (nét đứt xanh lơ) của frame đang chọn; nếu chưa chọn frame thì của mọi frame có gợi ý trong cửa sổ. Phím I."
-        >✖ Bỏ qua gợi ý (I)</button>
-        <button
-          onClick={groundSelectedOrAll}
-          title="Ground snap: ước lượng mặt đường quanh chân box (đường xanh lá nét đứt ở view Bên/Trước) rồi hạ/nâng box cho đáy chạm đất. Frame đang chọn, hoặc cả cửa sổ nếu chưa chọn. Phím G."
->⏬ Ground snap (G)</button>
-        <label title="Gợi ý box: khi box lệch cụm điểm, đề xuất box mới (nét đứt xanh lơ, nút ✔ nhận, phím A) kèm cảnh báo ⚠ lệch. Tắt: không có gợi ý và không có cảnh báo lệch (⚠ ít điểm vẫn hiện)." style={{ fontWeight: 600 }}>
-          <input type="checkbox" checked={prefs.suggest} onChange={(e) => updatePrefs({ ...prefs, suggest: e.target.checked })} /> gợi ý kích thước box
-        </label>
-        <label title="Mặt đường của ego: mặt phẳng Oxy (z = 0, mặt đường dưới xe) vẽ bằng vạch vàng chấm ở view Bên / Trước của MỌI frame, theo z của box ở frame đó (box nghiêng thì vạch nghiêng theo). Để so box với mặt đường chung của cả cảnh; không ảnh hưởng cảnh báo hay dữ liệu.">
-          <input type="checkbox" checked={prefs.egoPlane} onChange={(e) => updatePrefs({ ...prefs, egoPlane: e.target.checked })} /> hiện mặt đường ego (Oxy)
-        </label>
-        <label title={`Dò mặt đất: đo mặt đường riêng cho object ở đúng frame đang xét (lớp thấp nhất có mật độ ở 8 cung quanh box + lớp tiếp xúc dưới gầm), không dự đoán từ frame khác. Báo khi đáy cao hơn mặt đường quá ${cm(DEFAULT_GROUND.floatTol)} cm hoặc thấp hơn quá ${cm(DEFAULT_GROUND.sinkTol)} cm và vượt độ bất định của phép đo. Tắt: không còn chip ⏬, không có Ground snap (G) và tự bám mặt đất.`} style={{ fontWeight: 600 }}>
-          <input type="checkbox" checked={prefs.ground} onChange={(e) => updatePrefs({ ...prefs, ground: e.target.checked })} /> dò mặt đất
-        </label>
-        <label title="Sau mỗi lần dời / đổi cỡ box bằng chuột, tự đặt lại độ cao cho đáy chạm mặt đường tại vị trí mới">
-          <input type="checkbox" checked={autoSnap} disabled={!prefs.ground} onChange={(e) => setAutoSnap(e.target.checked)} /> tự bám mặt đất khi kéo
-        </label>
-        </Group>
-        <Group id="6" title={<>Object & cửa sổ</>}>
-        <span><IdBox value={num} max={max} onCommit={setSelectedNum} /></span>
-        <span>
-          <button disabled={k === 0} onClick={() => setK(k - 1)}>◀</button>{' '}
-          <span style={{ display: 'inline-block', minWidth: '6.5em', textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>Cửa sổ {k + 1}/{nWin}</span>{' '}
-          <button disabled={k >= nWin - 1} onClick={() => setK(k + 1)}>▶</button>
-        </span>
-        <span title="Cửa sổ đang hiện. Nhập a: bắt đầu cửa sổ từ frame a, b tự thành a + số frame - 1 (mặc định 6 frame). Sửa b: đổi số frame hiển thị (b - a + 1). Enter để áp dụng.">
-          Cửa sổ hiện{' '}
-          <input value={winA} onChange={(e) => setWinA(e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} onBlur={commitA} onFocus={(e) => e.target.select()} size={3} style={{ width: 44 }} /> →{' '}
-          <input value={winB} onChange={(e) => setWinB(e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} onBlur={commitB} onFocus={(e) => e.target.select()} size={3} style={{ width: 44 }} />{' '}
-          <span style={{ display: 'inline-block', minWidth: '4.6em', fontVariantNumeric: 'tabular-nums' }}>({frames.length} frame)</span>{' '}
-          <label><input type="checkbox" checked={prefs.keyOnly} onChange={(e) => updatePrefs({ ...prefs, keyOnly: e.target.checked })} /> chỉ keyframe</label>
-          {viewFrom !== '' && <button style={{ marginLeft: 4 }} onClick={() => { forceFirst.current = true; setViewFrom(''); }} title="Quay về đầu job">⟲ từ đầu</button>}
-        </span>
         </Group>
       </div>
       <div style={{ marginBottom: 6, display: 'flex', flexWrap: 'wrap', gap: '4px 12px', alignItems: 'center' }}>

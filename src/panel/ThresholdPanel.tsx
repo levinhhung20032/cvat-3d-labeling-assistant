@@ -133,10 +133,12 @@ function Section({ id, title, about, code, rules, labels, tracks, jobId, childre
   const params = fieldsOf(id);
   const changed = sectionChanged(id);
   return (
-    <details open={shown.length > 0 || changed} style={{ border: '1px solid #ccd', borderRadius: 4, margin: '6px 0', padding: '2px 8px' }}>
+    // mặc định thu gọn (chủ dự án 2026-10-29): số rule / "đã chỉnh" vẫn hiện trên tiêu đề
+    <details style={{ border: '1px solid #ccd', borderRadius: 4, margin: '6px 0', padding: '2px 8px' }}>
       <summary style={{ cursor: 'pointer', fontWeight: 700, padding: '3px 0' }}>
         {code && <SymbolInput kind={code} />}{title}
         <span style={{ color: shown.length ? '#a60' : '#999', fontWeight: 600, marginLeft: 8 }}>{shown.length ? `● ${shown.length} rule` : 'chưa có rule (không báo)'}</span>
+        {changed && <span style={{ color: '#345', fontWeight: 400, marginLeft: 8, fontSize: 12 }}>● tham số đã chỉnh</span>}
       </summary>
       <p style={{ margin: '2px 0 4px', color: '#456', fontSize: 12 }}>{about}</p>
       {children}

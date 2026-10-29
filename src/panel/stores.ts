@@ -167,6 +167,13 @@ export class CloudLoader {
     this.requeueChunkTasks(() => true);
     this.pump();
   }
+  private cached = new Set<number>(); // frame đã có trong bộ nhớ đệm HTTP của trình duyệt: tải từng frame (tức thì), không chờ chunk
+  /** Đặt tập frame đã có trong bộ nhớ đệm HTTP; các yêu cầu đang chờ chunk của chúng chuyển sang tải từng frame. */
+  setCached(frames: Set<number>) {
+    this.cached = frames;
+    this.requeueChunkTasks((n) => frames.has(n));
+    this.pump();
+  }
   /** Chunk chứa frame n (−1: không tải theo chunk). */
   private chunkOf(n: number): number {
     const c = this.chunks;
@@ -174,6 +181,7 @@ export class CloudLoader {
   }
   /** Frame n sẽ về cùng chunk của nó (chunk chưa tải hoặc đang tải). */
   private viaChunk(n: number): boolean {
+    if (this.cached.has(n)) return false;
     const k = this.chunkOf(n);
     if (k < 0) return false;
     const st = this.chunkState.get(k);
@@ -349,7 +357,11 @@ export class CloudLoader {
     );
   }
 
+  private held = false;
+  /** Tạm không gửi request nào (đang kiểm tra bộ nhớ đệm để chọn cách tải); `hold(false)` chạy lại hàng đợi. */
+  hold(on: boolean) { this.held = on; if (!on) this.pump(); }
   private pump() {
+    if (this.held) return;
     this.pumpChunks();
     while (this.queue.length) {
       this.queue.sort((a, b) => a.prio - b.prio || a.n - b.n);

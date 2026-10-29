@@ -93,6 +93,21 @@ export class CvatClient {
     return res.arrayBuffer();
   }
 
+  /**
+   * Frame n đã nằm trong bộ nhớ đệm HTTP của trình duyệt chưa (không gửi request ra mạng). Trả về 1 byte: 1 = có, 0 = không.
+   * Đo trên cvat-a job 9999 (2026-10-29): frame trong bộ nhớ đệm về sau 22 ms, tải mới ~2 s/frame; chunk 158 MB luôn tải lại (không vào bộ nhớ đệm).
+   */
+  async probeFrameCache(jobId: number, n: number): Promise<ArrayBuffer> {
+    const url = new URL(`/api/jobs/${jobId}/data?type=frame&number=${n}&quality=original`, this.origin);
+    let hit = false;
+    try {
+      const res = await this.fetchImpl(url.toString(), { method: 'GET', credentials: 'include', cache: 'only-if-cached', mode: 'same-origin' });
+      hit = res.ok;
+      void res.body?.cancel();
+    } catch { /* không có trong bộ nhớ đệm: trình duyệt báo lỗi mạng */ }
+    return new Uint8Array([hit ? 1 : 0]).buffer;
+  }
+
   /** Point cloud của frame: PCD nhị phân (x y z rgb), ~5 MB. Dùng bộ nhớ đệm HTTP của trình duyệt (như chính giao diện CVAT): nạp lại tab thì frame đã tải không phải sinh lại ở server. */
   getFrame(jobId: number, n: number): Promise<ArrayBuffer> {
     return this.getBinary(jobId, `type=frame&number=${n}&quality=original`, 'force-cache', this.loadCtl.signal);

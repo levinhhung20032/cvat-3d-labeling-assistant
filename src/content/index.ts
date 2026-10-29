@@ -117,9 +117,9 @@ function main() {
     }
   }
 
-  async function binary(kind: 'frame' | 'context', n: number, reqId: number) {
+  async function binary(kind: 'frame' | 'context' | 'probe', n: number, reqId: number) {
     try {
-      const buf = await (kind === 'frame' ? client.getFrame(jobId, n) : client.getContextImages(jobId, n));
+      const buf = await (kind === 'frame' ? client.getFrame(jobId, n) : kind === 'probe' ? client.probeFrameCache(jobId, n) : client.getContextImages(jobId, n));
       send({ type: 'binary', reqId, buf }, [buf]);
     } catch (e) {
       send({ type: 'binary', reqId, buf: null, error: String(e) });

@@ -77,7 +77,7 @@ export function resolveBinary(reqId: number, buf: ArrayBuffer | null, error?: st
   else w.fail(new Error(error ?? 'không có dữ liệu'));
 }
 
-export function fetchBinary(kind: 'frame' | 'context', n: number): Promise<ArrayBuffer> {
+export function fetchBinary(kind: 'frame' | 'context' | 'probe', n: number): Promise<ArrayBuffer> {
   const reqId = nextId++;
   return new Promise((ok, fail) => {
     waiting.set(reqId, { ok, fail });

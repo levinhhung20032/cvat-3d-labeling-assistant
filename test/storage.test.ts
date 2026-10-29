@@ -2,13 +2,20 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 // Giả lập storage.local + manifest của extension (api.ts đọc globalThis.chrome lúc nạp module).
 const disk: Record<string, unknown> = {};
+let quotaLeft = Infinity; // số byte còn trống của kho giả (giả lập kho đầy)
+const size = () => Object.values(disk).reduce<number>((n, v) => n + String(v).length, 0);
+const runtime: { id?: string; getManifest: () => unknown } = { id: 'test-ext', getManifest: () => ({ host_permissions: ['https://cvat-a.example.com/*'] }) };
 (globalThis as unknown as { chrome: unknown }).chrome = {
   storage: { local: {
     get: async (k: string | null) => (k === null ? { ...disk } : { [k]: disk[k] }),
-    set: async (o: Record<string, unknown>) => { Object.assign(disk, o); },
-    remove: async (k: string) => { delete disk[k]; },
+    set: async (o: Record<string, unknown>) => {
+      const add = Object.values(o).reduce<number>((n, v) => n + String(v).length, 0);
+      if (size() + add > quotaLeft) throw new Error('QUOTA_BYTES quota exceeded');
+      Object.assign(disk, o);
+    },
+    remove: async (k: string | string[]) => { for (const x of Array.isArray(k) ? k : [k]) delete disk[x]; },
   } },
-  runtime: { getManifest: () => ({ host_permissions: ['https://cvat-a.example.com/*'] }) },
+  runtime,
 };
 let S: typeof import('../src/panel/storage');
 beforeAll(async () => { S = await import('../src/panel/storage'); });
@@ -52,5 +59,36 @@ describe('kho lưu trữ khi có nhiều máy chủ CVAT', () => {
     await S.useExtensionStorage('https://cvat-a.example.com');
     expect(S.kv.get('cvla-made:9999')).toBe('[10]');
     expect(S.kv.get('cvla-theme')).toBe('gray');
+  });
+
+  it('kho đầy: tự xoá kết quả tính lưu sẵn (tính lại được) rồi ghi lại; vẫn không đủ thì báo lỗi, không mất lặng lẽ', async () => {
+    S.kv.set('cvla-pass:1', 'x'.repeat(500));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(disk['ui:cvla-pass:1']).toBeDefined();
+    quotaLeft = size() + 100;
+    S.kv.set('cvla-shifts', 'y'.repeat(300)); // không đủ chỗ → xoá cvla-pass:1 → ghi được
+    await new Promise((r) => setTimeout(r, 0));
+    expect(disk['ui:cvla-pass:1']).toBeUndefined();
+    expect(disk['ui:cvla-shifts']).toBe('y'.repeat(300));
+    expect(S.storageHealth().ok).toBe(true);
+    S.kv.set('cvla-big', 'z'.repeat(5000)); // không còn gì để xoá
+    await new Promise((r) => setTimeout(r, 0));
+    expect(S.storageHealth()).toMatchObject({ ok: false, reason: 'quota' });
+    quotaLeft = Infinity;
+    S.kv.set('cvla-theme', 'light'); // ghi được lại: hết báo lỗi
+    await new Promise((r) => setTimeout(r, 0));
+    expect(S.storageHealth().ok).toBe(true);
+  });
+
+  it('extension vừa Reload (phiên cũ mất runtime.id): báo ngay, không ghi nữa', async () => {
+    let n = 0;
+    const off = S.onStorageHealth(() => n++);
+    delete runtime.id;
+    S.kv.set('cvla-theme', 'dark');
+    expect(S.storageHealth()).toMatchObject({ ok: false, reason: 'orphan' });
+    expect(n).toBe(1);
+    expect(disk['ui:cvla-theme']).toBe('light');
+    off();
+    runtime.id = 'test-ext';
   });
 });

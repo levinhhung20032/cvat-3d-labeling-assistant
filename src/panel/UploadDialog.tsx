@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { scrollIntoPanel } from './scrollTo';
 import type { UploadResult } from '../content/uploader';
-import { changedFrames, outsideFrames, type ShiftTrackRec } from '../shared/shift';
+import { changedFrames, firstSeen, lockedOutsideKeys, outsideFrames, type ShiftTrackRec } from '../shared/shift';
 import { buildUploadPlan } from '../shared/upload';
 import type { CvatAnnotations, CvatJob, CvatLabel } from '../shared/types';
 import { post, rpc } from './bridge';
-import { kv } from './storage';
+import { kv, storageHealth } from './storage';
 import { madeStore } from './madeStore';
 
 interface LastInfo { time: string; tracks: number; reverted: boolean; verified: boolean }
@@ -76,6 +76,8 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
         changedFrames: changedFrames(plan.expected[i]!, plan.changed[i]!, job.start_frame, job.stop_frame),
         outsideBefore: outsideFrames(plan.expected[i]!, job.start_frame, job.stop_frame),
         outsideAfter: outsideFrames(plan.changed[i]!, job.start_frame, job.stop_frame),
+        firstSeen: firstSeen(plan.changed[i]!, job.start_frame, job.stop_frame), stop: job.stop_frame,
+        outsideKeys: lockedOutsideKeys(plan.expected[i]!, plan.changed[i]!, job.start_frame, job.stop_frame),
       })));
     }
   };
@@ -100,6 +102,11 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
 
       {nothing && !blocked && <p>Không có thay đổi nào cần gửi (mọi track đã giống CVAT{plan.others.tracks ? ', trừ các track chưa sửa còn thiếu keyframe outside' : ''}).</p>}
 
+      {!storageHealth().ok && (
+        <p style={{ margin: '6px 0', background: '#ffe5e5', color: '#900', padding: 4, fontWeight: 600 }}>
+          ⚠ Tool đang không lưu được dữ liệu: upload vẫn lên CVAT nhưng KPI của lần upload này sẽ KHÔNG được ghi vào ca. Nên tải lại tab CVAT (F5) trước.
+        </p>
+      )}
       {plan.created.length > 0 && (
         <p style={{ margin: '6px 0', background: '#dff5df', padding: 4 }}>
           🛠 Sẽ <b>tạo {plan.created.length} object mới</b> do tool tạo (PATCH <code>action=create</code>, nằm cuối danh sách nên ID của object cũ không đổi): {plan.createdInfo.map((c) => `#${c.index + 1} ${names.get(c.label_id) ?? '?'} (${c.shapes} keyframe)`).join(', ')}.

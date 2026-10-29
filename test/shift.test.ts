@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { changedFrames, computeKpi, kpiText, outsideFrames, shiftName, uniqueShiftName, type Shift, type ShiftTrackRec } from '../src/shared/shift';
+import { changedFrames, computeKpi, firstSeen, kpiText, lockedOutsideKeys, outsideFrames, shiftName, uniqueShiftName, type Shift, type ShiftTrackRec } from '../src/shared/shift';
 import { shape, track } from './fixtures';
 import { serializeCuboid } from '../src/shared/cuboid';
 
@@ -106,5 +106,36 @@ describe('changedFrames (KPI: mọi frame đã thay đổi)', () => {
     const after = mk([[0, 0], [2, 2, true], [3, 2, true]]);
     expect(changedFrames(before, after, 0, 4)).toEqual([3]);
     expect(changedFrames(mk([[0, 0], [4, 4]]), mk([[0, 0], [2, 1, true], [4, 4]]), 0, 4)).toEqual([1, 2, 3]);
+  });
+});
+
+describe('KPI = Σ frame từ lúc ID xuất hiện (cả outside) + KF outside khoá − trùng', () => {
+  it('firstSeen bỏ keyframe outside đầu track · lockedOutsideKeys chỉ lấy keyframe outside mới', () => {
+    expect(firstSeen(track(1, [shape(0, true), shape(4), shape(9, true)]), 0, 20)).toBe(4);
+    expect(firstSeen(track(1, [shape(0, true)]), 0, 20)).toBeNull();
+    expect(firstSeen(track(1, [shape(0)]), 3, 20)).toBe(3);
+    const before = track(1, [shape(0), shape(5, true)]);
+    const after = track(1, [shape(0, true), shape(2), shape(5, true), shape(6, true), shape(7, true)]);
+    expect(lockedOutsideKeys(before, after, 0, 20)).toEqual([0, 6, 7]);
+  });
+  it('cộng theo ID, trừ KF outside nằm trong khoảng đã tính, gộp nhiều lần upload cùng ID', () => {
+    const s = base();
+    s.uploads.push(
+      // ID 5: xuất hiện từ frame 4, job hết ở 19 → 16 frame; khoá outside 0, 1 (trước lúc xuất hiện) và 10 (trùng)
+      { time: 't1', jobId: 1, tracks: [rec(5, { firstSeen: 4, stop: 19, outsideKeys: [0, 1, 10] })] },
+      // ID 5 upload lần 2: khoá lại frame 1 (trùng lần trước) và 12 (trùng khoảng)
+      { time: 't2', jobId: 1, tracks: [rec(5, { firstSeen: 4, stop: 19, outsideKeys: [1, 12] }), rec(7, { firstSeen: 15, stop: 19, outsideKeys: [] })] },
+    );
+    const k = computeKpi(s);
+    expect(k.objects.find((o) => o.num === 5)).toMatchObject({ span: 16, outsideLocked: 4, dup: 2, kpi: 18 });
+    expect(k.objects.find((o) => o.num === 7)).toMatchObject({ span: 5, kpi: 5 });
+    expect(k.totals.kpi).toBe(23);
+    expect(kpiText(k)).toContain('KPI: 23 frame');
+  });
+  it('ID không còn xuất hiện: chỉ tính KF outside khoá · ca cũ (chưa ghi khoảng xuất hiện) lấy số frame đã thay đổi', () => {
+    const s = base();
+    s.uploads.push({ time: 't', jobId: 1, tracks: [rec(3, { firstSeen: null, stop: 19, outsideKeys: [0, 5] }), rec(4, { changedFrames: [1, 2, 3] })] });
+    const k = computeKpi(s);
+    expect(k.objects.map((o) => o.kpi)).toEqual([2, 3]);
   });
 });

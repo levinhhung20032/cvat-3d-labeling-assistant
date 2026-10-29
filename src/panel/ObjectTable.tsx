@@ -7,6 +7,10 @@ import { ISSUE_NAMES } from '../shared/qcrules';
 import { sym, useSymbols } from './symbolStore';
 import { fmtIou, type OverlapPair } from '../shared/overlap';
 import { PENDING_STYLE } from './ui';
+import { seenStore, useSeen } from './seenStore';
+
+/** ID đã xem trong Batch Review: gạch chân. */
+const SEEN_STYLE = { textDecoration: 'underline', textDecorationThickness: 2, textUnderlineOffset: 2 } as const;
 
 type SortKey = 'num' | 'assigned' | 'outside' | 'missing' | 'jumps' | 'issues' | 'drift' | 'hints' | 'overlap' | 'dist';
 /** Khoảng cách tâm box tới ego (gốc toạ độ, trên mặt phẳng ngang) và frame đo. */
@@ -19,7 +23,8 @@ const issueTip = (by: Record<string, number>) => {
   return lines.length ? lines.join(String.fromCharCode(10)) : 'Không có lỗi luật QC';
 };
 
-export function ObjectTable({ rows, hints, overlapFrames, overlapPairs, onOpen, onDelete, incomplete, tracks, start, stop, cvatFrame }: {
+export function ObjectTable({ jobId, rows, hints, overlapFrames, overlapPairs, onOpen, onDelete, incomplete, tracks, start, stop, cvatFrame }: {
+  jobId: number;
   onDelete: (r: ObjectRow) => void; rows: ObjectRow[]; hints: Map<number, number>; overlapFrames: Map<number, number>; overlapPairs: OverlapPair[]; onOpen: (num: number, first: number | null) => void;
   incomplete: ReadonlySet<number>; // object còn frame chưa tải / chưa tính ít điểm: ô "luật QC" (có phần ít điểm P) chưa đáng tin
   tracks: CvatTrack[]; start: number; stop: number;
@@ -27,6 +32,7 @@ export function ObjectTable({ rows, hints, overlapFrames, overlapPairs, onOpen, 
 }) {
   useSymbols();
   const [label, setLabel] = useState('');
+  const seen = useSeen(jobId);
   const [sort, setSort] = useState<SortKey>('num');
   const [onlyMissing, setOnlyMissing] = useState(false);
   const [onlyJumps, setOnlyJumps] = useState(false);
@@ -87,6 +93,12 @@ export function ObjectTable({ rows, hints, overlapFrames, overlapPairs, onOpen, 
         <label title="Object có thuộc tính (attribute) khác với gợi ý theo kích thước box"><input type="checkbox" checked={onlyHints} onChange={(e) => setOnlyHints(e.target.checked)} /> chỉ ID có gợi ý thuộc tính</label>{' '}
         <label title="Object chồng lên object khác (xét chéo giữa các ID) ở ít nhất một frame"><input type="checkbox" checked={onlyOverlap} onChange={(e) => setOnlyOverlap(e.target.checked)} /> chỉ ID có chồng lấn</label>{' '}
         — {shown.length}/{rows.length} object
+        {seen.size > 0 && (
+          <span style={{ marginLeft: 10 }} title="ID gạch chân = object đã mở xem trong Batch Review (lưu theo job)">
+            <span style={SEEN_STYLE}>ID</span> đã xem: {rows.filter((r) => seen.has(r.id)).length}{' '}
+            <button onClick={() => { if (confirm('Bỏ đánh dấu "đã xem" của mọi object trong job này?')) seenStore.clear(jobId); }} style={{ padding: '0 5px' }}>↺ bỏ đánh dấu</button>
+          </span>
+        )}
       </div>
       <div style={{ marginBottom: 6 }} title="Khoảng cách từ ego (gốc toạ độ) tới tâm box, trên mặt phẳng ngang. Bấm tiêu đề cột 📏 để sắp xếp gần → xa, bấm lần nữa để đảo chiều.">
         📏 Khoảng cách tới ego:{' '}
@@ -109,7 +121,7 @@ export function ObjectTable({ rows, hints, overlapFrames, overlapPairs, onOpen, 
         <tbody>
           {shown.map((r) => (
             <tr key={r.num} onClick={() => onOpen(r.num, r.first)} style={{ cursor: 'pointer', borderTop: '1px solid #ddd', background: r.made === 'draft' ? '#dff5df' : r.made === 'server' ? '#e3ecff' : undefined }}>
-              <td><b>{r.num}</b> {r.made === 'draft' ? <span title="Object do tool tạo, đang trong NHÁP (chưa có trên CVAT)" style={{ background: '#2e9d3b', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 mới</span> : r.made === 'server' ? <span title="Object do tool tạo và đã upload; chỉ loại này mới xóa được bằng tool" style={{ background: '#2f5fd0', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 tool</span> : <span style={{ color: "#999", fontSize: 10 }}>db {r.id}</span>}</td><td>{r.label}</td><td>{r.assigned}</td><td>{r.outside}</td>
+              <td><b style={seen.has(r.id) ? SEEN_STYLE : undefined} title={seen.has(r.id) ? 'Đã xem trong Batch Review' : undefined}>{r.num}</b> {r.made === 'draft' ? <span title="Object do tool tạo, đang trong NHÁP (chưa có trên CVAT)" style={{ background: '#2e9d3b', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 mới</span> : r.made === 'server' ? <span title="Object do tool tạo và đã upload; chỉ loại này mới xóa được bằng tool" style={{ background: '#2f5fd0', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 tool</span> : <span style={{ color: "#999", fontSize: 10 }}>db {r.id}</span>}</td><td>{r.label}</td><td>{r.assigned}</td><td>{r.outside}</td>
               <td style={{ color: r.missing ? '#b00' : undefined, fontWeight: r.missing ? 700 : 400 }}>{r.missing}</td>
               <td style={{ color: r.jumps ? '#a05a00' : undefined, fontWeight: r.jumps ? 700 : 400 }}>{r.jumps}</td>
               <td style={{ color: r.issues ? '#a0006e' : undefined, fontWeight: r.issues ? 700 : 400, ...(incomplete.has(r.num) ? PENDING_STYLE : null) }} title={incomplete.has(r.num) ? `${pendingTip}\n${issueTip(r.issuesByKind)}` : issueTip(r.issuesByKind)}>{r.issues}</td>
