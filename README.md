@@ -1,131 +1,123 @@
 # CVAT 3D Labeling Assistant
 
-Extension trình duyệt (Manifest V3) giúp **review và sửa nhãn cuboid 3D trên point cloud** ngay trong tab job của CVAT (bản tự host, CVAT 2.77.1). Tool đọc và ghi nhãn **bằng chính phiên đăng nhập sẵn có của tab**, không cần tải dữ liệu về máy.
+Extension cho trình duyệt **Edge / Chrome** (và bản thử cho Firefox) giúp **kiểm tra và sửa nhãn hộp 3D (cuboid) trên point cloud** ngay trong trang job của CVAT. Tool dùng chính phiên đăng nhập CVAT của bạn, không cần tải dữ liệu về máy, không gửi dữ liệu đi đâu khác.
 
-Chạy trên **Edge / Chrome** (đã dùng thử) và **Firefox 128+** (bản thử, xem [Firefox](#firefox)).
+> ⚠️ Bạn đang làm việc trên **dữ liệu thật**. Mọi thay đổi nằm trong **bản nháp** cho tới khi bạn bấm **Upload lên CVAT**, và có màn hình xem lại cùng nhật ký để hoàn nguyên.
 
-> ⚠️ Môi trường mục tiêu là **dữ liệu thật**, không có job sandbox. Mọi thao tác ghi đều đi qua màn hình xem lại, có nhật ký để hoàn nguyên. Xem [Luật an toàn](#luật-an-toàn).
+## Bắt đầu nhanh
 
-## Tính năng
+1. **Cài:** tải file `cvat-3d-labeling-assistant-<phiên bản>.zip` ở trang **Releases**, giải nén. Mở `edge://extensions` → bật **Developer mode** → **Load unpacked** → chọn thư mục vừa giải nén.
+2. **Thêm máy chủ CVAT:** tool không có sẵn máy chủ nào. Mở một job (`https://<máy-chủ>/tasks/<id>/jobs/<id>`), bấm biểu tượng extension: trang **Cài đặt** tự mở với tên miền điền sẵn → **Thêm** → đồng ý khi trình duyệt hỏi quyền → bấm biểu tượng extension lần nữa để bật tool.
+3. **Nhập ngưỡng cảnh báo:** vào tab **Threshold** và thêm rule cho các lỗi bạn muốn tool báo (xem [Threshold](#threshold-ngưỡng-cảnh-báo)). Chưa có rule thì tool không báo lỗi nào.
+4. **Làm việc:** bấm **Vào ca**, chọn một dòng trong **Bảng object** để mở **Batch Review**, sửa trực tiếp trên các hình chiếu, rồi bấm **⬆ Upload lên CVAT…** khi xong.
+5. **Cập nhật:** giải nén bản mới **đè vào đúng thư mục cũ**, bấm **Reload** ở `edge://extensions`, rồi F5 tab CVAT.
 
-| Nhóm | Mô tả |
+## Tool làm được gì
+
+| Nhóm | Mô tả ngắn |
 | --- | --- |
-| **Batch Review** | Cửa sổ frame tự chọn (a → b, mặc định 6 frame, mỗi trang chung 1 frame với trang kề) × 3 hình chiếu (Trên / Bên / Trước, mỗi view có khung và nhãn riêng) quanh một object; zoom bằng con lăn, **giữ chuột phải kéo để dời khung nhìn** (mọi frame cùng dời), nút **⌖ Về giữa**; bấm đúp vào cột frame để thu nhỏ tool và focus camera 3D của CVAT; ID object theo đúng ID hiển thị của CVAT; mở được khi đã tải và tính xong 60 frame đầu, phần còn lại tải ngầm |
-| **Bảng object** | Số frame được gán / outside / thiếu keyframe outside, cảnh báo đi xa, luật QC (rê chuột xem số frame theo từng mã, gồm cả ít điểm `P`), trôi box, chồng lấn, gợi ý thuộc tính, **khoảng cách tới ego** (tại một frame hoặc gần nhất cả track); lọc và sắp xếp; ô còn đang tải ngầm có viền vàng |
-| **Chỉnh sửa trực tiếp** | Kéo thả trên 3 hình chiếu: dời, đổi kích thước (cạnh đối diện đứng yên), xoay yaw (chấm trắng hoặc giữ Alt), nghiêng box theo mặt đường dốc (Alt + kéo ở view Bên / Trước); zoom chung mọi frame; hoàn tác / làm lại |
-| **Keyframe & outside** | Khoá / mở khoá từng frame, mở khoá keyframe ở giữa một khoảng, khoá tất cả thành keyframe; outside theo 3 cách: từ frame đang chọn (O), cả khoảng nhập tay, chọn khoảng bằng chuột; box được sao lưu trước khi outside để đưa trở lại đúng vị trí cũ |
-| **Threshold** | Tab định nghĩa các lỗi bằng **rule**: mỗi mục lỗi (S K Z H D O T Y, lệch / ít điểm, đáy lơ lửng / chìm, outside liên tục) có danh sách rule, mỗi rule chọn bằng dropbox **đối tượng** (tất cả / class của job / một object), **thuộc tính** (dài, rộng, cao, z, yaw đổi, khoảng cách, lệch kích thước, IoU…), **quy tắc** (`>`, `>=`, `<`, `<=`, `=`, `!=`) và **ngưỡng**; có nút **＋ Thêm rule** và **✕** xoá. **Extension không kèm con số ngưỡng nào: chưa có rule thì không báo lỗi, bạn tự nhập rule theo guideline của mình** (lưu cục bộ trong trình duyệt). S chỉ xét object có Dynamic size TẮT theo tab Dynamic size của job. Class trong dropbox lấy từ nhãn của job, không giả định job có class nào. **Ký hiệu lỗi sửa được** (ô chữ đậm đầu mỗi mục; mặc định đi xa bất thường = Y). **Xuất setting.json / Nạp setting.json…** lưu / nạp toàn bộ cài đặt (rule, tham số, ký hiệu, Dynamic size) ra file riêng của bạn; `setting.json` đã nằm trong `.gitignore`, đừng đưa lên GitHub công khai |
-| **Dynamic size** | Bật / tắt theo class (danh sách class lấy từ job), theo từng giá trị attribute, hoặc riêng từng object; tắt thì đổi size một frame là áp cho cả object (mặt đứng yên giữ nguyên) |
-| **Cảnh báo & gợi ý** | Box lệch khỏi cụm điểm (kèm box gợi ý nét đứt, chấp nhận bằng A; có công tắc tắt), vật đi xa bất thường, **trôi box** (toạ độ ego của box không đổi trong khi xe chạy, tức box bị giữ nguyên thay vì bám vật; chỉ so hai frame liền nhau nên rất nhẹ, và bỏ báo khi box vẫn còn đủ điểm do vật chạy cùng vận tốc với xe), ít điểm (< 6), **đáy lơ lửng / chìm** so với mặt đường đo riêng cho từng object tại từng frame (8 cung quanh box + lớp điểm dưới gầm, báo khi cao > 10 cm / thấp > 5 cm và vượt độ bất định, chỉ trong bán kính 80 m quanh ego), **ground snap** (G, hỗ trợ mặt dốc), công tắc **hiện mặt đường ego (Oxy)** vẽ vạch z = 0 ở view Bên / Trước của mọi frame; **luật QC** S K Z H D (scale không đồng bộ, kích thước ngoài ngưỡng, z ngoài ngưỡng, đổi hướng > 40°, quá xa > 80 m), **chồng lấn** (mọi cặp có phần giao nhìn từ trên) và **outside liên tục từ 6 frame** kèm nút ✂ tách ID |
-| **QC** | Hai phần riêng: **QC note** (QC mode: ghi chú theo (ID, frame), xuất Excel `ID, frame, note` và **nhập lại** file đó để chuyển ghi chú giữa các máy, có xem trước và chọn giữ / ghi đè khi trùng) và **QC comparison** (đối chiếu file báo cáo QC .xlsx, đọc sheet Matrix ngay trên máy, đánh dấu từng flag còn lỗi / đã hết / ignore / fixed) |
-| **Thuộc tính (attribute)** | Hiện và sửa attribute của object; gợi ý theo kích thước box (loại xe, tuổi / tư thế người đi bộ, có người lái xe hai bánh…) |
-| **Upload** | Màn hình xem lại → ghi bằng `PATCH …/annotations?action=update` chia lô → đọc lại so khớp; tự điền keyframe outside, tự khoá hết thành keyframe cho object đã tác động; nhật ký + hoàn nguyên |
-| **Ca làm việc / KPI** | Ca tự động theo lịch, không cần chấm công (sáng 8:30–12:30, chiều 13:30–17:30, ngoài giờ là OT; cảnh báo 15 phút trước khi hết ca; tên ca `Oct21AM`, `Oct21PM`, `Oct21OT`…, lưu qua F5), KPI: object đã tác động, số frame đã thay đổi thật (sửa tay, nội suy, outside), số frame outside, keyframe thêm / gỡ / sửa, gợi ý chấp nhận / bỏ qua |
-| **Liên kết với CVAT** | Chọn object trong CVAT → tool chọn theo; chọn trong tool → CVAT kích hoạt object (đổi frame nếu cần); bấm đúp trong CVAT mở rộng tool; nút **Focus** thu nhỏ tool và zoom cận cảnh object trong khung 3D của CVAT |
-| **Giao diện** | Cửa sổ nổi kéo / đổi cỡ / thu nhỏ / phóng to; thanh đầu dính khi cuộn; **giao diện tối và xám** (nút ◐ / 🌙 / 🌫 / ☀ ở đầu panel: tự động theo hệ điều hành, tối, xám, sáng); cỡ ô tự khớp màn hình; phím tắt tùy chỉnh (cảnh báo trùng phím); ảnh camera căn giữa, có kính lúp |
-| **Nháp** | Bản nháp chưa upload được lưu cục bộ để F5 không mất; sau upload tool tự tải lại tab CVAT rồi mở lại đúng tab / object / cửa sổ frame đang làm |
-| **Tải nền** | Bật tool là tải point cloud cả job **theo chunk** (một request cho cả job như giao diện CVAT: job 65 frame ~33 s thay vì ~5 phút tải từng frame; kiểm chứng file đầu trùng frame 0 và đủ số file, sai thì quay về tải từng frame, tối đa 2 kết nối), có thanh tiến độ và dải **✅ Đã tải xong** ngay trong tool; nút **↻ Tải lại frame** (chỉ frame lỗi hoặc tất cả, ngắt mọi request đang treo, hiện tiến trình chunk); kết quả tính (ít điểm, mặt đường) lưu theo job nên tải lại tab không phải tính lại từ đầu, chỉ tính lại box đã đổi |
-| **Máy chủ CVAT** | Không có máy chủ mặc định: thêm từng tên miền CVAT ở trang **Cài đặt** của extension (không cần sửa code; trình duyệt hỏi cấp quyền); tool chạy chế độ nhúng trong trang; dữ liệu theo job tách riêng theo máy chủ (dữ liệu cũ của `cvat-a` được giữ) |
+| **Bảng object** | Danh sách object của job kèm số frame, cảnh báo, khoảng cách tới xe; lọc và sắp xếp. |
+| **Batch Review** | Xem một object qua nhiều frame cùng lúc, 3 hình chiếu (Trên / Bên / Trước). Kéo thả để dời, đổi kích thước, xoay box; zoom bằng con lăn, giữ chuột phải kéo để dời khung nhìn. |
+| **Keyframe & outside** | Khoá / mở khoá keyframe, đánh dấu outside (box được lưu lại để trả về đúng chỗ cũ). |
+| **Cảnh báo & gợi ý** | Box lệch khỏi cụm điểm (có box gợi ý, bấm A để nhận), trôi box, đi xa bất thường, chồng lấn, đáy box lơ lửng / chìm so với mặt đường, ít điểm, outside quá lâu (có nút tách ID). |
+| **Threshold** | Bạn tự đặt các rule cảnh báo; xuất / nạp toàn bộ cài đặt ra file `setting.json`. |
+| **Dynamic size** | Chọn class nào được đổi kích thước theo từng frame, class nào dùng một kích thước cho cả object. |
+| **QC** | Ghi chú QC theo (ID, frame) và xuất Excel; **đối chiếu file báo cáo QC** (xem [mục dưới](#đối-chiếu-file-qc-qc-comparison)). |
+| **Thuộc tính** | Xem và sửa attribute, có gợi ý theo kích thước box. |
+| **Upload** | Màn hình xem lại → ghi lên CVAT → đọc lại để so khớp; có nhật ký hoàn nguyên. |
+| **Ca làm việc / KPI** | Tự chia ca sáng / chiều / OT theo giờ, thống kê số object và frame đã sửa. |
+| **Giao diện** | Cửa sổ nổi kéo được, giao diện sáng / tối / xám, phím tắt tuỳ chỉnh. |
 
-## Luật an toàn
+Tool tải sẵn point cloud của cả job ngầm ở nền (có thanh tiến độ); nút **↻ Tải lại frame** dùng khi có frame bị lỗi. Bản nháp được lưu trong trình duyệt nên F5 không mất.
 
-Các luật này được kiểm tra bằng code và test, không có ngoại lệ (chi tiết ở tài liệu nội bộ của dự án):
+## Threshold (ngưỡng cảnh báo)
 
-1. **Không bao giờ xóa hay đổi ID của object có sẵn.** Không có đường nào gửi `PUT` thay cả annotation; trước mỗi lần ghi, ID nào biến mất so với lúc đọc thì dừng. Ngoại lệ duy nhất (chủ dự án duyệt 2026-10-26): tool có thể tạo object mới từ gợi ý và chỉ xóa được những object do chính nó tạo (theo sổ ID, có xác nhận và đọc lại kiểm tra).
-2. **Mọi frame outside đều có keyframe** (`outside: true`); thiếu thì được tự điền trước khi gửi.
-3. **Góc box:** yaw là góc chính; roll/pitch (`rx`, `ry`) được phép để box nằm song song mặt đường dốc, kẹp ±30° và phải xác nhận khi upload (quy ước góc Euler XYZ của CVAT, chưa đối chiếu với dữ liệu thật — kiểm tra bằng mắt trên CVAT).
-4. **Quyền riêng tư:** không xin quyền `cookies`, không đọc / lưu token hay mật khẩu; không có máy chủ mặc định: mọi máy chủ CVAT (kể cả `cvat-a`) do người dùng tự thêm ở trang Cài đặt, trình duyệt hỏi cấp quyền cho từng tên miền; request là `fetch` cùng origin với `credentials: 'include'`; token CSRF chỉ đọc đúng lúc gửi, không lưu.
-5. **Dữ liệu không rời tab:** không export file dữ liệu nhãn, không telemetry, không tải thư viện lúc chạy, không gửi gì tới host khác ngoài CVAT. Ngoại lệ duy nhất được chủ dự án duyệt: QA/QC xuất Excel gồm đúng 3 cột `ID, frame, note`, tạo ngay trong trình duyệt.
-6. Không giả header hay giả nhịp thao tác người; thay đổi ghi qua API chuẩn của CVAT dưới tài khoản người dùng.
+Tool **không kèm sẵn con số ngưỡng nào**. Mỗi loại lỗi là một danh sách **rule** do bạn đặt; chưa có rule thì lỗi đó không được báo. Mỗi rule chọn bằng 4 ô:
 
-## Cài đặt
+| Đối tượng | Thuộc tính | Quy tắc | Ngưỡng |
+| --- | --- | --- | --- |
+| Class: *Car* | Dài | `>` | *6* |
+| Tất cả object | Khoảng cách tới xe | `>` | *70* |
 
-Cần Node.js 20+. Trên Windows có thể chạy `build.bat`: tự cài Node.js (bằng `winget`) nếu chưa có, rồi `npm install` và `npm run build`.
+(Bảng trên chỉ là **ví dụ minh hoạ**, không phải giá trị khuyến nghị.) Rule đầu nghĩa là: "với class Car, nếu chiều dài lớn hơn 6 thì báo lỗi K". Bấm **＋ Thêm rule** để thêm, **✕** để xoá.
 
-```bash
-npm install
-npm run build           # Edge / Chrome → dist/
-npm run build:firefox   # Firefox      → dist-firefox/
-```
+- **Đối tượng:** tất cả, một class (danh sách lấy từ nhãn của job đang mở), hoặc một object cụ thể.
+- **Quy tắc:** `>`, `>=`, `<`, `<=`, `=`, `!=`. Một số thuộc tính chỉ cho các quy tắc hợp lý (ví dụ IoU chỉ có `>`, `>=`).
+- **Mã lỗi:** S (kích thước không đồng bộ), K (kích thước), Z (độ cao), H (đổi hướng), D (quá xa), O (chồng lấn), T (trôi box), Y (đi xa bất thường), và lệch / ít điểm, đáy lơ lửng / chìm, outside liên tục. Chữ ký hiệu ở đầu mỗi mục **sửa được**.
+- **S** chỉ xét object có Dynamic size đang **tắt** (xem tab Dynamic size).
+- **Xuất setting.json / Nạp setting.json…** lưu hoặc nạp toàn bộ cài đặt (rule, ký hiệu, Dynamic size). Đây là file riêng của bạn, **đừng đưa lên GitHub công khai** (đã nằm trong `.gitignore`).
 
-### Edge / Chrome
+## Đối chiếu file QC (QC comparison)
 
-1. Mở `edge://extensions` (hoặc `chrome://extensions`) → bật **Developer mode**.
-2. **Load unpacked** → chọn thư mục `dist`.
-3. Mở một job dạng `https://<host>/tasks/<id>/jobs/<id>`, bấm biểu tượng extension để bật tool.
-4. Cập nhật: build lại rồi bấm **Reload** trên thẻ extension (giữ nguyên thư mục để ID extension không đổi), sau đó tải lại tab CVAT.
-5. Máy chủ CVAT khác (vd `https://cvat-b.example.com`): mở job trên máy chủ đó và bấm biểu tượng extension, trang **Cài đặt** tự mở với tên miền điền sẵn (hoặc vào chi tiết extension → *Extension options*) → **Thêm** → đồng ý khi trình duyệt hỏi quyền → bấm biểu tượng lần nữa. Gỡ bằng nút **Gỡ**.
+Tính năng này so file báo cáo QC (.xlsx) với kết quả tool tự phát hiện, để biết lỗi nào QC đã chỉ ra mà còn lỗi, đã hết, hoặc bạn đã bỏ qua / sửa.
 
-### Firefox
+**Cách tool đọc file** (toàn bộ diễn ra trong trình duyệt, file không được gửi đi đâu):
 
-Bản Firefox là **bản thử**: đã build và qua `web-ext lint` (0 lỗi) nhưng **chưa được chạy trong Firefox thật**.
+1. Bạn chọn file `.xlsx` trong tab **QC** (tối đa 20 MB; chỉ nhận `.xlsx`, không nhận `.xls` hay `.csv`).
+2. Tool mở file và tìm **tab (sheet) tên `Matrix`** (không phân biệt hoa thường). Không có tab này thì báo lỗi.
+3. Trong tab đó, tool tìm **dòng tiêu đề** có ô đầu tiên là `Track ID`.
+4. Các ô tiêu đề còn lại trên dòng đó phải là **số frame** (0, 1, 2…). Mỗi dòng bên dưới là một object, ô đầu là ID object.
+5. Ô nào có chữ **S, K, Z, H, O, D** (viết hoa hay thường đều được) thì tool ghi nhận một lỗi tại (object, frame) đó. Ô trống là không có lỗi.
 
-```bash
-npm run lint:firefox     # kiểm tra manifest và mã
-npm run start:firefox    # mở Firefox với extension tạm (cần Firefox cài sẵn)
-```
+Ví dụ một tab `Matrix` hợp lệ (số liệu minh hoạ tự tạo):
 
-Hoặc `about:debugging` → *This Firefox* → **Load Temporary Add-on** → chọn `dist-firefox/manifest.json` (mất khi tắt Firefox). Lần bấm biểu tượng đầu tiên Firefox sẽ hỏi cấp quyền truy cập host của CVAT. Cài lâu dài cần ký (`npm run package:firefox` tạo file zip để nộp ký, loại không công khai) hoặc dùng Firefox Developer Edition / ESR. Lưu ý ký qua Mozilla nghĩa là mã nguồn extension được tải lên Mozilla.
+| Track ID | 0 | 1 | 2 | 3 | 4 |
+| --- | --- | --- | --- | --- | --- |
+| 1 |  | K | K |  |  |
+| 2 |  |  | Z |  |  |
+| 7 | S |  |  | H |  |
+| 12 |  | O | O |  | D |
 
-## Cập nhật
+Đọc bảng: object 1 bị lỗi K ở frame 1 và 2; object 2 lỗi Z ở frame 2; object 7 lỗi S ở frame 0 và H ở frame 3; object 12 lỗi O ở frame 1, 2 và D ở frame 4.
 
-Phiên bản hiện tại là **v1.2.0**. Tool không tự kiểm tra bản mới. Để cập nhật: lấy gói `cvat-3d-labeling-assistant-<phiên bản>.zip` ở trang Releases (hoặc `npm run build`), giải nén **đè vào đúng thư mục đang Load unpacked** (giữ ID extension), bấm **Reload** ở `edge://extensions`, rồi F5 tab CVAT.
+**Lưu ý về định dạng:**
 
-## Sử dụng nhanh
+- Tên tab phải là `Matrix`, ô đầu của dòng tiêu đề phải là `Track ID`, các ô tiêu đề frame phải là số nguyên. File có cấu trúc khác (đổi tên tab, thêm dòng gộp ô trong bảng, ghi frame dạng `f12`…) sẽ không đọc được: hãy chỉnh lại file cho đúng dạng trên.
+- Chỉ 6 mã S K Z H O D được đọc từ file. Mỗi ô nên chỉ chứa các chữ mã này (ví dụ `K` hoặc `SK`); chữ khác trong ô có thể bị nhận nhầm thành mã.
+- Mã trong file luôn là mã gốc. Nếu bạn đổi ký hiệu hiển thị ở Threshold, màn hình đối chiếu vẫn dùng mã gốc của file.
+- Phần "tool tự phát hiện" dùng các rule ở tab Threshold. **Chưa có rule thì tool không phát hiện gì**, mọi lỗi trong file sẽ hiện "đã hết". Hãy nạp rule (ví dụ nạp `setting.json`) trước khi đối chiếu.
 
-- **Vào ca** trước khi làm để có KPI; **Ra ca** khi xong.
-- Tab **Bảng object**: bấm một dòng để mở Batch Review của object đó. Hoặc nhập ID ở ô *Object ID*.
-- Sửa trên các hình chiếu (kéo trong box = dời, kéo cạnh = đổi cỡ, giữ **Alt** kéo = xoay; giữ **chuột phải** kéo = dời khung nhìn, không sửa box). Mọi sửa đổi nằm trong **nháp** cho tới khi bấm **⬆ Upload lên CVAT…**.
-- Sau khi upload, tool tự tải lại tab CVAT (giao diện CVAT còn giữ bản cũ, bấm Save ở đó có thể ghi đè) rồi mở lại đúng chỗ đang làm, không tính lại các số liệu đã có.
+## An toàn dữ liệu
 
-### Phím tắt mặc định (đổi được ở tab *Phím tắt*)
+- **Không xoá, không đổi ID** object có sẵn. Ngoại lệ duy nhất: tool có thể tạo object mới từ gợi ý và chỉ xoá được chính những object do nó tạo (có xác nhận và kiểm tra lại).
+- **Mọi frame outside đều có keyframe**; thiếu thì tool tự điền trước khi gửi.
+- **Quyền riêng tư:** không xin quyền `cookies`, không đọc hay lưu mật khẩu / token. Tool chỉ chạy trên các máy chủ CVAT bạn tự thêm, trình duyệt hỏi quyền cho từng tên miền.
+- **Dữ liệu không rời tab:** không telemetry, không tải thư viện từ mạng khi chạy, không gửi gì tới nơi khác ngoài CVAT. Hai thứ tool cho xuất ra file: Excel ghi chú QC (3 cột `ID, frame, note`) và `setting.json` (chỉ cài đặt, không có dữ liệu nhãn).
+- Thay đổi được ghi qua chức năng chuẩn của CVAT dưới tài khoản của bạn.
+
+## Phím tắt mặc định (đổi được ở tab *Phím tắt*)
 
 | Phím | Tác dụng |
 | --- | --- |
 | `←` `→` | Cửa sổ frame trước / sau |
-| `↑` `↓` | Object trước / sau (ID ∓ 1) |
-| `,` `.` | Chọn cột frame bên trái / phải |
+| `↑` `↓` | Object trước / sau |
 | `K` | Khoá / mở khoá keyframe |
-| `Alt+K` | Mở khoá keyframe ở giữa khoảng frame (giữ hai đầu mút) |
-| `O` | Gắn keyframe outside / đưa object trở lại |
-| `G` | Ground snap (đáy box chạm mặt đường) |
+| `O` | Đánh dấu outside / đưa object trở lại |
+| `G` | Đáy box chạm mặt đường |
 | `A` / `I` | Chấp nhận / bỏ qua gợi ý sửa box |
-| `F` | Focus: thu nhỏ tool, zoom cận cảnh object trong CVAT |
-| `+` `-` `0` | Zoom vào / ra / về vừa object (`0` cũng đưa khung nhìn về giữa) |
+| `F` | Thu nhỏ tool, zoom cận cảnh object trong CVAT |
 | `Ctrl+Z` `Ctrl+Y` | Hoàn tác / làm lại |
-| `` ` `` | Thu nhỏ / mở lại cửa sổ tool (dùng được cả ở trang CVAT) |
+| `` ` `` | Thu nhỏ / mở lại cửa sổ tool |
 
-`K`, `O`, `G`, `A`, `I` tác dụng lên **cột frame đang trỏ chuột** (viền xanh), nếu không thì frame đã chọn, và với `G` / `A` / `I` là cả cửa sổ.
-
-## Phát triển
-
-```bash
-npm test               # vitest, dùng dữ liệu tổng hợp, không cần CVAT
-npm run typecheck      # tsc --noEmit
-npm run build:all      # cả hai bản
-```
-
-- **Công nghệ:** TypeScript + Vite, giao diện React trong iframe của extension (tránh CSP của trang), WebGL (dự phòng canvas 2D) cho hình chiếu điểm, `fflate` giải nén ảnh camera. Mọi thứ đóng gói sẵn, không tải gì lúc chạy.
-- **Kiến trúc:** content script là điểm **duy nhất** gọi API CVAT; panel (iframe) nói chuyện với content script qua `postMessage` có kiểm tra origin và mã phiên ngẫu nhiên; background chỉ bật / tắt theo tab và chạy một hàm nhỏ trong ngữ cảnh trang để zoom camera 3D của CVAT.
-
-```
-src/
-  background/   bật tắt theo tab; chạy hàm focus camera 3D trong ngữ cảnh trang
-  content/      cvatClient (đọc; ghi chỉ update/create, dry-run mặc định), uploader, cửa sổ nổi, đọc / điều khiển DOM của CVAT
-  panel/        giao diện React: bảng object, Batch Review, thuộc tính, upload, ca / KPI, phím tắt
-  options/      trang Cài đặt: thêm / gỡ máy chủ CVAT
-  shared/       logic thuần (nội suy, luật, gợi ý, ground snap, upload, KPI, keymap…) — phần lớn code test được
-test/           unit test với fixtures tự tạo (không dùng dữ liệu thật)
-public/         manifest.json (Edge / Chrome) và manifest.firefox.json
-PLAN.md         kế hoạch đã duyệt
-```
-
-Test dùng dữ liệu tổng hợp; một số test đối chiếu dữ liệu thật tự bỏ qua nếu không có thư mục `backups/` (thư mục này **không bao giờ được commit**, đã nằm trong `.gitignore`).
+`K`, `O`, `G`, `A`, `I` tác dụng lên cột frame đang trỏ chuột, nếu không thì frame đã chọn.
 
 ## Giới hạn đã biết
 
-- Tool dựa vào **nội bộ của CVAT 2.77.1** (tên class trong DOM, kho trạng thái React, hàm `focus` của canvas 3D); đổi phiên bản CVAT có thể phải sửa.
-- Chỉ tạo track mới khi tách ID; chưa nội suy cải tiến / bake tối thiểu, chưa có đề xuất cuboid đầy đủ (fit L-shape, mặt đường toàn cảnh); chưa chặn upload khi thiếu attribute bắt buộc.
-- **Trôi box** chỉ bắt box giữ nguyên toạ độ ego khi xe chạy (thường là giữ sau keyframe cuối hoặc trước keyframe outside); không bắt box nhích chậm quanh vị trí đúng (cần ước lượng chính xác chuyển động ego, thuật toán cũ làm vậy nhưng nặng và báo sai khi job dài). Vật chạy cùng vận tốc với xe có thể bị báo nhầm ở vài frame đầu nếu số điểm trong box chưa tính xong hoặc quá thưa.
-- Bản Firefox chưa chạy thử thật; tính năng điều khiển giao diện CVAT (sự kiện giả lập, tin nhắn giữa iframe và content script) là chỗ dễ khác nhau giữa trình duyệt.
-- Gợi ý attribute dựa vào kích thước box (ngưỡng cố định trong code); quy tắc cho Animal / Obstacle chưa kiểm trên dữ liệu thật.
+- Tool dựa vào cách CVAT **2.77.1** hoạt động bên trong; đổi phiên bản CVAT có thể phải sửa tool.
+- Bản Firefox chỉ là bản thử, chưa chạy thử trong Firefox thật.
+- **Trôi box** chỉ bắt box giữ nguyên toạ độ so với xe khi xe đang chạy, không bắt box nhích chậm quanh vị trí đúng.
+- Gợi ý attribute theo kích thước box chưa kiểm trên dữ liệu thật cho Animal / Obstacle.
+
+## Dành cho người phát triển
+
+Cần Node.js 20+. Trên Windows chạy `build.bat` (tự cài Node.js, `npm install`, `npm run build`).
+
+```bash
+npm install
+npm run build           # Edge / Chrome → dist/
+npm run build:firefox   # Firefox → dist-firefox/
+npm test                # test với dữ liệu tổng hợp, không cần CVAT
+npm run typecheck
+```
+
+TypeScript + Vite, giao diện React trong iframe của extension, WebGL cho hình chiếu điểm. Content script là nơi duy nhất gọi API CVAT; panel nói chuyện với content script qua `postMessage` có kiểm tra nguồn. Mã nguồn nằm trong `src/` (`content`, `panel`, `shared`, `background`, `options`), test trong `test/`. Thư mục `backups/` chứa dữ liệu cục bộ và không bao giờ được commit.
