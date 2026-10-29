@@ -74,7 +74,7 @@ Ví dụ một tab `Matrix` hợp lệ (số liệu minh hoạ tự tạo):
 
 - Tên tab phải là `Matrix`, ô đầu của dòng tiêu đề phải là `Track ID`, các ô tiêu đề frame phải là số nguyên. File có cấu trúc khác (đổi tên tab, thêm dòng gộp ô trong bảng, ghi frame dạng `f12`…) sẽ không đọc được: hãy chỉnh lại file cho đúng dạng trên.
 - Chỉ 6 mã S K Z H O D được đọc từ file. Mỗi ô nên chỉ chứa các chữ mã này (ví dụ `K` hoặc `SK`); chữ khác trong ô có thể bị nhận nhầm thành mã.
-- Mã trong file luôn là mã gốc. Nếu bạn đổi ký hiệu hiển thị ở Threshold, màn hình đối chiếu vẫn dùng mã gốc của file.
+- Mã trong file luôn là mã gốc (S K Z H O D). Nếu bạn đã đổi ký hiệu hiển thị ở Threshold, màn hình đối chiếu hiện cả hai, ví dụ `L (K)`; việc đối chiếu vẫn dùng mã gốc. Nên giữ nguyên 6 mã này cho dễ đọc.
 - Phần "tool tự phát hiện" dùng các rule ở tab Threshold. **Chưa có rule thì tool không phát hiện gì**, mọi lỗi trong file sẽ hiện "đã hết". Hãy nạp rule (ví dụ nạp `setting.json`) trước khi đối chiếu.
 
 ## An toàn dữ liệu

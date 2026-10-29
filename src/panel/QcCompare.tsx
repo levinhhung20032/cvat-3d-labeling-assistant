@@ -3,6 +3,10 @@ import { ISSUE_KINDS, ISSUE_NAMES, type IssueKind } from '../shared/qcrules';
 import { detectAll, flagKey, flagState, parseQcMatrix, type FlagState, type QcFlag } from '../shared/qcimport';
 import type { CvatTrack } from '../shared/types';
 import { qcFlagStore, useFlagMarks, useQcImports } from './qcFlagStore';
+import { sym, useSymbols } from './symbolStore';
+
+/** Mã lỗi của file QC; nếu đã đổi ký hiệu hiển thị ở Threshold thì hiện "ký hiệu (mã gốc)", ví dụ L (K). */
+const kindLabel = (k: string) => (sym(k) === k ? k : `${sym(k)} (${k})`);
 import { useThresholdVersion } from './thresholdStore';
 
 const STATE_LABEL: Record<FlagState, string> = { open: 'còn lỗi', cleared: 'đã hết (tool)', ignore: 'bỏ qua', fixed: 'đã sửa' };
@@ -44,6 +48,7 @@ export function QcCompare({ jobId, tracks, labels, start, stop, onOpen }: {
   const [picked, setPicked] = useState<Set<number>>(new Set());
 
   const thrVer = useThresholdVersion(); // ngưỡng chỉnh tay đổi thì dò lại
+  useSymbols(); // ký hiệu lỗi đổi thì vẽ lại
   const detected = useMemo(() => (imp ? detectAll(tracks, labels, start, stop) : new Map<string, string>()), [imp, tracks, labels, start, stop, thrVer]);
   const rows = useMemo<Row[]>(() => (imp ? imp.flags.map((f) => {
     const msg = detected.get(`${f.num}:${f.frame}:${f.kind}`);
@@ -115,7 +120,7 @@ export function QcCompare({ jobId, tracks, labels, start, stop, onOpen }: {
               </select>
             </span>
             {ISSUE_KINDS.map((k) => (
-              <label key={k} title={ISSUE_NAMES[k]}><input type="checkbox" checked={fKinds.has(k)} onChange={() => { toggleKind(k); setLimit(PAGE); }} /> {k}</label>
+              <label key={k} title={ISSUE_NAMES[k]}><input type="checkbox" checked={fKinds.has(k)} onChange={() => { toggleKind(k); setLimit(PAGE); }} /> {kindLabel(k)}</label>
             ))}
             <button onClick={() => { setFKinds(new Set(ISSUE_KINDS)); setLimit(PAGE); }} disabled={fKinds.size === ISSUE_KINDS.length} title="Hiện mọi loại lỗi">Bật tất cả</button>
             <button onClick={() => { setFKinds(new Set()); setLimit(PAGE); }} disabled={fKinds.size === 0} title="Ẩn mọi loại lỗi">Tắt tất cả</button>
@@ -150,7 +155,7 @@ export function QcCompare({ jobId, tracks, labels, start, stop, onOpen }: {
                       <td><input type="checkbox" className="cvla-check" checked={picked.has(num)} onChange={() => setPicked(toggleIn(picked, num))} title="Chọn để ignore / fixed theo lô" /></td>
                       <td><button onClick={() => setOpen(toggleIn(open, num))} style={{ padding: '0 5px' }} title="Xem từng loại lỗi và các đoạn frame">{isOpen ? '▾' : '▸'}</button></td>
                       <td><button onClick={() => onOpen(num, start)} style={{ padding: '0 5px', fontWeight: 700 }} title="Mở object này trong Batch Review từ frame đầu">{num}</button>{" "}<span style={{ color: '#567', fontWeight: 400 }}>{labels[num - 1] ?? ''}</span></td>
-                      <td>{[...byKind].map(([k, rs]) => <span key={k} style={{ marginRight: 8 }} title={ISSUE_NAMES[k]}><b>{k}</b> {rs.length}</span>)}</td>
+                      <td>{[...byKind].map(([k, rs]) => <span key={k} style={{ marginRight: 8 }} title={ISSUE_NAMES[k]}><b>{kindLabel(k)}</b> {rs.length}</span>)}</td>
                       <td>{counts(all).map(([s, n]) => <span key={s} style={{ color: STATE_COLOR[s], marginRight: 8, fontWeight: 600 }}>{STATE_LABEL[s]} {n}</span>)}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>{actions(all)}</td>
                     </tr>
@@ -158,7 +163,7 @@ export function QcCompare({ jobId, tracks, labels, start, stop, onOpen }: {
                       <tr key={`${num}:${k}`} style={{ background: '#f8fbff' }}>
                         <td /><td />
                         <td colSpan={2} style={{ paddingLeft: 16 }}>
-                          <b>{k}</b> <span style={{ color: '#666' }}>{ISSUE_NAMES[k]}</span>{' '}
+                          <b>{kindLabel(k)}</b> <span style={{ color: '#666' }}>{ISSUE_NAMES[k]}</span>{' '}
                           {toRanges(rs.map((r) => r.f.frame)).map(([a, b]) => {
                             const inRange = rs.filter((r) => r.f.frame >= a && r.f.frame <= b);
                             const tip = inRange.map((r) => `frame ${r.f.frame}: ${STATE_LABEL[r.state]}${r.msg ? ` — ${r.msg}` : ''}`).slice(0, 12).join('\n');
