@@ -85,6 +85,31 @@ export function fetchBinary(kind: 'frame' | 'context', n: number): Promise<Array
   });
 }
 
+/** Huỷ mọi request tải point cloud đang chạy ở content script (request treo giữ kết nối với máy chủ). */
+export function abortLoads() { post({ type: 'abortLoads' }); }
+
+// --- chunk point cloud (theo luồng: nhiều file cho một yêu cầu) ---
+const chunkWaiting = new Map<number, { onFile: (i: number, buf: ArrayBuffer) => void; ok: (n: number) => void; fail: (e: Error) => void }>();
+
+/** Tải chunk `index` (frame first … first + count − 1); `onFile` nhận từng frame ngay khi về. Xong thì trả số file. */
+export function streamChunk(index: number, first: number, count: number, onFile: (i: number, buf: ArrayBuffer) => void): Promise<number> {
+  const reqId = nextId++;
+  return new Promise((ok, fail) => {
+    chunkWaiting.set(reqId, { onFile, ok, fail });
+    post({ type: 'chunk', index, first, count, reqId });
+  });
+}
+export function resolveChunkFile(reqId: number, i: number, buf: ArrayBuffer) {
+  chunkWaiting.get(reqId)?.onFile(i, buf);
+}
+export function resolveChunkEnd(reqId: number, count: number, error?: string) {
+  const w = chunkWaiting.get(reqId);
+  if (!w) return;
+  chunkWaiting.delete(reqId);
+  if (error || count < 0) w.fail(new Error(error ?? 'tải chunk lỗi'));
+  else w.ok(count);
+}
+
 // --- yêu cầu/đáp (upload, hoàn nguyên) ---
 const rpcWaiting = new Map<number, (v: unknown) => void>();
 export function resolveRpc(reqId: number, v: unknown) {

@@ -11,6 +11,9 @@ export type PanelMessage = Envelope<typeof PANEL_SOURCE> &
     | { type: 'ready' | 'load' | 'close' }
     | { type: 'resize'; wide: boolean }
     | { type: 'binary'; kind: 'frame' | 'context'; n: number; reqId: number }
+    // tải cả chunk point cloud (theo luồng, từng file gửi về bằng chunkFile); first / count: frame đầu và số frame dự kiến để đối chiếu
+    | { type: 'abortLoads' } // huỷ mọi request tải point cloud (frame / chunk) đang chạy
+    | { type: 'chunk'; index: number; first: number; count: number; reqId: number }
     // chuyển focus trong giao diện CVAT sang object (đổi frame nếu cần); zoom = camera 3D của CVAT lại gần object; minimize = thu nhỏ tool
     | { type: 'reloadCvat' } // tải lại tab CVAT (sau upload) rồi tự mở lại tool
     | { type: 'toggleWindow' } // thu nhỏ / mở lại cửa sổ tool
@@ -36,7 +39,10 @@ export type ContentMessage = Envelope<typeof CONTENT_SOURCE> &
         labels: CvatLabel[];
         annotations: CvatAnnotations;
         removedIds: number[];
+        chunkSize: number | null; // số frame mỗi chunk của job (null: không biết → chỉ tải từng frame)
       }
     | { type: 'binary'; reqId: number; buf: ArrayBuffer | null; error?: string }
+    | { type: 'chunkFile'; reqId: number; i: number; buf: ArrayBuffer } // file thứ i (frame first + i) của chunk
+    | { type: 'chunkEnd'; reqId: number; count: number; error?: string } // hết chunk (count file) hoặc lỗi
     | { type: 'rpc'; reqId: number; result: unknown }
   );

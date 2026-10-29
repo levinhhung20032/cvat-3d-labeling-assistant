@@ -36,7 +36,7 @@ import { suggestAttributes } from '../shared/attrSuggest';
 import { fmtDuration, shiftName, computeKpi } from '../shared/shift';
 import { emitAction, isCapturing, useKeymap } from './actions';
 import { ObjectTable } from './ObjectTable';
-import { diag, keyTarget, onContentMessage, post, resolveBinary, resolveRpc } from './bridge';
+import { diag, keyTarget, onContentMessage, post, resolveBinary, resolveChunkEnd, resolveChunkFile, resolveRpc, streamChunk } from './bridge';
 
 export interface Data {
   job: CvatJob;
@@ -149,8 +149,8 @@ const EMPTY: Draft = { work: null, edited: new Set<string>(), undo: [], redo: []
 
 type State = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ok'; data: Data };
 type Tab = 'objects' | 'review' | 'shift' | 'qc' | 'dyn' | 'keys' | 'job';
-/** Batch Review mở được khi đã tải và tính xong ngần này frame (job ngắn hơn: cả job); phần còn lại chạy ngầm. */
-const UNLOCK_FRAMES = 60;
+/** Tải ưu tiên ngần này frame đầu; tải xong là mở được Batch Review (job ngắn hơn: cả job), phần còn lại tải và tính ngầm. */
+const UNLOCK_FRAMES = 6;
 
 
 /** Giao diện chung: nút bo góc, tab rõ ràng, thanh đầu (tiêu đề, ca, tab, nút upload) dính ở đầu khi cuộn. */
@@ -227,6 +227,7 @@ export function App() {
     return () => window.clearInterval(t);
   }, []);
   const [toast, setToast] = useState('');
+  const [reloadMenu, setReloadMenu] = useState(false); // menu của nút "Tải lại frame" (chỉ frame lỗi / tất cả)
   const [restorable, setRestorable] = useState<SavedDraft | null>(null);
   const restorableRef = useRef<SavedDraft | null>(null);
   const [draftNote, setDraftNote] = useState('');
@@ -276,6 +277,12 @@ export function App() {
         if (!chk.ok && chk.reason !== 'none') { setDraftNote(chk.message); kv.remove(draftKey(m.job.id)); }
         countRef.current = m.annotations.tracks.length;
         dynClassStore.ensure(m.job.id, m.labels.map((l) => l.name)); // lấy class của job một lần
+        // Point cloud tải theo chunk như giao diện CVAT (ít request, máy chủ không phải đọc lại chunk cho từng frame); không biết cỡ chunk
+        // hoặc job không phải 3D thì chỉ tải từng frame.
+        // Job ground truth chỉ gồm một số frame chọn lọc: thứ tự trong chunk khác dải start…stop → không dùng chunk.
+        pointClouds.setChunks(m.chunkSize && m.job.dimension !== '2d' && m.job['type'] !== 'ground_truth'
+          ? { start: m.job.start_frame, stop: m.job.stop_frame, size: m.chunkSize, stream: streamChunk }
+          : null);
       } else if (m.type === 'cvatDbl') {
         // Bấm đúp trong CVAT: chọn object đó và chuyển sang Batch Review; ô "CVAT → tool" tắt thì bỏ qua (content script cũng không gửi).
         if (syncRef.current && m.num >= 1 && m.num <= countRef.current) {
@@ -309,6 +316,8 @@ export function App() {
         setToast(`Focus: không zoom được vào object #${m.num} — ${why[m.reason] ?? m.reason}. Thử bấm Focus lại sau vài giây.`);
       } else if (m.type === 'rpc') resolveRpc(m.reqId, m.result);
       else if (m.type === 'binary') resolveBinary(m.reqId, m.buf, m.error);
+      else if (m.type === 'chunkFile') resolveChunkFile(m.reqId, m.i, m.buf);
+      else if (m.type === 'chunkEnd') resolveChunkEnd(m.reqId, m.count, m.error);
     };
     const off = onContentMessage(onMsg);
     post({ type: 'ready' });
@@ -461,6 +470,15 @@ export function App() {
   // đẩy khỏi bộ nhớ trước khi tính xong. Kết quả được lưu theo job: tab CVAT tải lại (sau upload) thì dùng lại, không tính từ đầu.
   const [cloudTick, setCloudTick] = useState(0); // tăng mỗi lần kho point cloud đổi (tải xong / tải lỗi)
   useEffect(() => pointClouds.subscribe(() => setCloudTick((x) => x + 1)), []);
+  // Tiến trình đợt tải lại: tính lại mỗi lần kho đổi và mỗi giây (để số giây chờ máy chủ chạy).
+  const [, setSecTick] = useState(0);
+  const reloadSt = pointClouds.reloadStatus();
+  const reloading = reloadSt.total > 0;
+  useEffect(() => {
+    if (!reloading) return;
+    const t = window.setInterval(() => setSecTick((x) => x + 1), 1000);
+    return () => window.clearInterval(t);
+  }, [reloading]);
   const passRes = useRef(new Map<number, Map<number, PassEntry>>());
   const passKey = data ? `cvla-pass:${data.job.id}` : null;
   const restored = useMemo(() => { passRes.current = passKey ? loadPass(passKey) : new Map(); return passKey; }, [passKey]);
@@ -490,8 +508,10 @@ export function App() {
     if (!data || !work) return;
     const a = data.job.start_frame, tracks = work.tracks;
     const bg = new Map<number, number>();
-    for (const f of pending) if (!pointClouds.peek(f) && !pointClouds.failed(f)) bg.set(f, 100 + f - a); // sau cửa sổ Batch Review
+    for (const f of pending) if (!pointClouds.peek(f) && !pointClouds.failed(f)) bg.set(f, f - a < UNLOCK_FRAMES ? 10 + f - a : 100 + f - a); // frame đầu trước (sau cửa sổ Batch Review), phần còn lại sau
     pointClouds.background(bg);
+    // Ưu tiên tải: còn frame đang chờ tải thì CHƯA tính (mặt đường, ít điểm…) để băng thông và CPU dành cho việc tải; tải xong hết mới tính.
+    if (bg.size > 0) return;
     let live = true;
     const timer = window.setTimeout(async () => {
       let n = 0, frames = 0;
@@ -523,13 +543,13 @@ export function App() {
   // Tổng hợp: số frame ít điểm theo object (chỉ kết quả khớp box hiện tại), object còn frame chờ (số liệu chưa đáng tin), tiến độ.
   const passView = useMemo(() => {
     const sparse = new Map<number, number>(), incomplete = new Set<number>();
-    if (!data || !work) return { sparse, incomplete, pending: 0, failed: 0, total: 0 };
+    if (!data || !work) return { sparse, incomplete, pending: 0, failed: 0, total: 0, loading: 0 };
     const { start_frame: a, stop_frame: b } = data.job;
-    let failed = 0, waitingFrames = 0;
+    let failed = 0, waitingFrames = 0, loading = 0;
     for (let f = a; f <= b; f++) {
       const waiting = pending.has(f);
       if (waiting && pointClouds.failed(f)) { failed++; continue; } // tải lỗi sau mọi lần thử: bỏ qua, không chờ mãi
-      if (waiting) waitingFrames++;
+      if (waiting) { waitingFrames++; if (!pointClouds.peek(f)) loading++; }
       const r = passRes.current.get(f);
       work.tracks.forEach((t, i) => {
         const c = stateAt(t, f).cuboid;
@@ -539,10 +559,35 @@ export function App() {
         else if (e?.sparse) sparse.set(i + 1, (sparse.get(i + 1) ?? 0) + 1);
       });
     }
-    return { sparse, incomplete, pending: waitingFrames, failed, total: b - a + 1 };
+    return { sparse, incomplete, pending: waitingFrames, failed, total: b - a + 1, loading };
   }, [data, work, pending, cloudTick]);
   const sparseAll = passView.sparse;
-  // Batch Review mở được khi đã có đủ UNLOCK_FRAMES frame tính xong (job ngắn hơn: cả job); phần còn lại chạy ngầm. Đã mở thì giữ nguyên
+  // Frame tải lỗi (vd máy chủ báo bận) không bị bỏ mặc: khi không còn frame nào đang tải thì tự thử lại sau 20 giây, tối đa 3 lần; có nút thử lại tay.
+  const autoRetry = useRef(0);
+  const retryFailedNow = () => { pointClouds.retryFailed(); };
+  // Nút cố định trên thanh đầu: luôn bấm được, báo lại kết quả (số frame lỗi được tải lại, hoặc còn bao nhiêu frame đang tải).
+  const reloadAllClouds = () => {
+    if (!data) return;
+    const { start_frame: a, stop_frame: b } = data.job;
+    if (!confirm(`Tải lại tất cả ${b - a + 1} frame point cloud từ máy chủ? Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.`)) return;
+    autoRetry.current = 0;
+    pointClouds.abortInFlight();
+    setToast(`Đang tải lại ${pointClouds.reloadAll(a, b)} frame…`);
+  };
+  const reloadClouds = () => {
+    autoRetry.current = 0;
+    pointClouds.abortInFlight(); // ngắt cả request đang treo để giải phóng kết nối máy chủ
+    const n = pointClouds.retryFailed();
+    setToast(n ? `Đã ngắt request đang chạy, đang tải lại ${n} frame lỗi…` : passView.loading > 0 ? `Không có frame lỗi; đã ngắt request đang chạy và tải lại ${passView.loading} frame chưa về.` : 'Không có frame lỗi cần tải lại.');
+  };
+  useEffect(() => {
+    if (passView.failed === 0) { autoRetry.current = 0; return; }
+    if (passView.loading > 0 || autoRetry.current >= 3) return;
+    const t = window.setTimeout(() => { autoRetry.current++; retryFailedNow(); }, 20000);
+    return () => window.clearTimeout(t);
+  }, [passView.failed, passView.loading]);
+  // Batch Review mở được khi UNLOCK_FRAMES frame đầu đã tải xong (hoặc đã có kết quả lưu / tải lỗi; job ngắn hơn: cả job); số liệu của phần
+  // còn lại tự cập nhật sau (ô chưa đủ có viền vàng). Đã mở thì giữ nguyên
   // cho job đó. Báo "đã tải xong" (một lần mỗi job) khi không còn frame chờ — chỉ khi phiên này đã thực sự tính (khôi phục thì không).
   const [readyJob, setReadyJob] = useState<number | null>(null);
   const ready = !!data && readyJob === data.job.id;
@@ -552,8 +597,13 @@ export function App() {
   const [doneNote, setDoneNote] = useState('');
   useEffect(() => {
     if (!data || !work) return;
-    const { pending: waiting, failed, total } = passView, finished = total - waiting - failed;
-    if (!ready && finished + failed >= Math.min(UNLOCK_FRAMES, total)) setReadyJob(data.job.id);
+    const { pending: waiting, failed, total } = passView;
+    if (!ready) {
+      const a = data.job.start_frame;
+      let ok = true;
+      for (let f = a; f < a + Math.min(UNLOCK_FRAMES, total); f++) if (pending.has(f) && !pointClouds.peek(f) && !pointClouds.failed(f)) ok = false;
+      if (ok) setReadyJob(data.job.id);
+    }
     if (waiting === 0 && doneJob !== data.job.id) {
       setDoneJob(data.job.id);
       if (computed.current > 0) setDoneNote(`Job ${data.job.id}: đã tải ${total - failed}/${total} frame${failed ? ` (${failed} frame tải lỗi, bỏ qua)` : ''}, đo xong mặt đường cho ${work.tracks.length} object (trong bán kính ${DEFAULT_GROUND.maxRange} m quanh ego), đã tính trôi box (${driftAll.size} object có trôi). Mọi số liệu trong bảng đã đầy đủ.`);
@@ -561,7 +611,7 @@ export function App() {
   }, [data, work, passView, ready, doneJob, driftAll]);
   const openReview = () => {
     if (readyRef.current) setTab('review');
-    else setToast(`Batch Review mở được khi đã tải và tính xong ${Math.min(UNLOCK_FRAMES, passView.total)} frame đầu (xem tiến độ phía trên).`);
+    else setToast(`Batch Review mở được khi ${Math.min(UNLOCK_FRAMES, passView.total)} frame đầu đã tải xong (xem tiến độ phía trên).`);
   };
   // Trước khi tool tự tải lại tab CVAT (sau upload / xóa): ghi lại chỗ đang làm; tool mở lại thì về đúng chỗ (hiệu lực 2 phút).
   const here = useRef({ job: 0, tab, num: selectedNum, start: startFrame }); // trạng thái mới nhất (hộp thoại giữ hàm cũ)
@@ -657,6 +707,16 @@ export function App() {
         {tabBtn('dyn', 'Dynamic size')}
         {tabBtn('keys', 'Phím tắt')}
         {tabBtn('job', 'Thông tin job')}
+        {data && (reloadMenu ? (
+          <span style={{ marginLeft: 8 }}>
+            Tải lại:{' '}
+            <button onClick={() => { setReloadMenu(false); reloadClouds(); }} title="Chỉ tải lại các frame lỗi (frame đang tải thì giữ nguyên)">Chỉ frame lỗi{passView.failed ? <span className="cvla-badge">{passView.failed}</span> : null}</button>{' '}
+            <button onClick={() => { setReloadMenu(false); reloadAllClouds(); }} title="Bỏ hết point cloud đã tải và tải lại cả job từ máy chủ">Tất cả {data.job.stop_frame - data.job.start_frame + 1} frame</button>{' '}
+            <button onClick={() => setReloadMenu(false)} title="Đóng menu">✕</button>
+          </span>
+        ) : (
+          <button onClick={() => setReloadMenu(true)} style={{ marginLeft: 8 }} title="Tải lại point cloud: chọn chỉ frame lỗi hoặc tất cả">↻ Tải lại frame ▾{passView.failed ? <span className="cvla-badge">{passView.failed}</span> : null}</button>
+        ))}
         {data && (
           <span style={{ marginLeft: 12, padding: '2px 6px', background: draft.edited.size ? '#fff3cd' : '#eee' }}>
             Nháp: <b>{draft.edited.size}</b> frame chưa upload <Help text="Các chỉnh sửa chỉ nằm trong bộ nhớ (và bản lưu cục bộ để F5 không mất) cho tới khi bạn bấm Upload lên CVAT." />{' '}
@@ -708,14 +768,35 @@ export function App() {
           }}
         />
       )}
+      {data && reloading && (
+        <div style={{ background: '#eef4ff', border: '1px solid #7aa2e3', padding: '4px 8px', margin: '6px 0', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <progress value={reloadSt.total - reloadSt.left} max={reloadSt.total} style={{ width: 160 }} />
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+            ↻ Đang tải lại: <b>{reloadSt.total - reloadSt.left}/{reloadSt.total}</b> frame đã về
+            {reloadSt.chunks.map((c) => (
+              <span key={c.k}> · chunk {c.k}: {c.got === 0 ? `chờ máy chủ dựng (${c.secs} s, thường 20–30 s)` : `đang nhận ${c.got}/${c.count} file (${c.secs} s)`}</span>
+            ))}
+            {reloadSt.chunks.length === 0 ? ' · đang tải từng frame' : ''}
+          </span>
+        </div>
+      )}
       {data && passView.pending > 0 && (
         <div style={{ background: '#eef4ff', border: '1px solid #7aa2e3', padding: '4px 8px', margin: '6px 0', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <progress value={passView.total - passView.pending} max={passView.total} style={{ width: 160 }} />
           <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-            ⏳ {ready ? 'Đang tải ngầm phần còn lại' : `Đang tải ${Math.min(UNLOCK_FRAMES, passView.total)} frame đầu`}: đã tính xong <b>{passView.total - passView.pending - passView.failed}/{passView.total}</b> frame
-            (point cloud, mặt đường, ít điểm){passView.failed ? ` · ${passView.failed} frame tải lỗi, bỏ qua` : ''} · trôi box: đã tính.{' '}
-            {ready ? <>Ô có <span style={PENDING_STYLE}>viền vàng</span>: số liệu chưa đủ, tự cập nhật khi tải xong.</> : 'Batch Review mở được khi xong.'}
+            ⏳ {passView.loading > 0
+              ? <>Đang tải point cloud: còn <b>{passView.loading}</b> frame (mặt đường và ít điểm sẽ tính sau khi tải xong)</>
+              : <>{ready ? 'Đang tính phần còn lại' : 'Đang tính'}: đã tính xong <b>{passView.total - passView.pending - passView.failed}/{passView.total}</b> frame (mặt đường, ít điểm)</>}{passView.failed ? ` · ${passView.failed} frame tải lỗi, bỏ qua` : ''} · trôi box: đã tính.{' '}
+            {ready ? <>Ô có <span style={PENDING_STYLE}>viền vàng</span>: số liệu chưa đủ, tự cập nhật khi tải xong.</> : `Batch Review mở được khi ${Math.min(UNLOCK_FRAMES, passView.total)} frame đầu tải xong.`}{' '}
+            <button onClick={retryFailedNow} title="Tải lại các frame lỗi ngay (frame đang tải thì giữ nguyên)">↻ Tải lại</button>
           </span>
+        </div>
+      )}
+      {data && passView.failed > 0 && (
+        <div style={{ background: '#fff4e5', border: '1px solid #e0a040', padding: '4px 8px', margin: '6px 0', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          ⚠ <b>{passView.failed}</b> frame tải lỗi (thường do máy chủ báo bận), nên chưa có số liệu mặt đường / ít điểm của các frame đó.
+          <button onClick={() => { autoRetry.current = 0; retryFailedNow(); }}>↻ Tải lại các frame lỗi</button>
+          <span style={{ color: '#666' }}>{autoRetry.current < 3 ? `Tự thử lại sau 20 giây (đã thử ${autoRetry.current}/3).` : 'Đã tự thử 3 lần; bấm nút để thử tiếp.'}</span>
         </div>
       )}
       {doneNote && (

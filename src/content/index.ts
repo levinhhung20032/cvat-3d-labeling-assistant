@@ -111,7 +111,7 @@ function main() {
       const removedIds = stored ? checkIdsNotRemoved(stored, now).map((v) => v.trackId!) : [];
       // Chỉ lưu danh sách ID từng thấy (hợp của các lần đọc) để cảnh báo ID biến mất không tự tắt.
       await api.storage.local.set({ [key]: [...new Set([...(stored ?? []), ...now])] });
-      send({ type: 'data', job, labels, annotations, removedIds });
+      send({ type: 'data', job, labels, annotations, removedIds, chunkSize: await client.getChunkSize(job) });
     } catch (e) {
       send({ type: 'error', message: String(e) });
     }
@@ -123,6 +123,16 @@ function main() {
       send({ type: 'binary', reqId, buf }, [buf]);
     } catch (e) {
       send({ type: 'binary', reqId, buf: null, error: String(e) });
+    }
+  }
+
+  /** Tải cả chunk point cloud theo luồng, chuyển từng frame sang panel ngay khi đọc xong (không giữ cả chunk trong bộ nhớ). */
+  async function chunk(index: number, first: number, count: number, reqId: number) {
+    try {
+      const n = await client.streamChunkChecked(jobId, index, first, count, (i, buf) => send({ type: 'chunkFile', reqId, i, buf }, [buf]));
+      send({ type: 'chunkEnd', reqId, count: n });
+    } catch (e) {
+      send({ type: 'chunkEnd', reqId, count: -1, error: String(e) });
     }
   }
 
@@ -399,6 +409,8 @@ function main() {
     else if (m.type === 'cvatFocus') void focusInCvat(m.num, m.frame, !!m.zoom, !!m.minimize);
     else if (m.type === 'upload') void rpcUpload(m.reqId, () => runUpload(uploadDeps, m.req));
     else if (m.type === 'deleteOwn') void rpcUpload(m.reqId, () => runDelete(uploadDeps, m.req));
+    else if (m.type === 'abortLoads') client.abortLoads();
+    else if (m.type === 'chunk') void chunk(m.index, m.first, m.count, m.reqId);
     else if (m.type === 'revert') void rpcUpload(m.reqId, () => runRevert(uploadDeps, m.real));
     else if (m.type === 'revertInfo') {
       void uploadDeps.loadLog().then((log) => {

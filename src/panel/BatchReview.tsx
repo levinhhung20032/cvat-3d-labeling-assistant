@@ -243,18 +243,26 @@ function Column({ groundOv, groundOn, suggestOn, f, size, st, refCub, half, locH
   f: number; size: number; st: FrameState; refCub: Cuboid | null; half: number; locHalf: number; selected: boolean; edited: boolean;
   onSelect: () => void; onLoaded: (f: number) => void; onCommit: (f: number, c: Cuboid) => void; onZoom: (factor: number) => void;
 }) {
-  const [pc, setPc] = useState<PointCloud | null>(null);
+  const [pc, setPc] = useState<PointCloud | null>(() => pointClouds.peek(f) ?? null); // đã có trong kho (tải ở giao diện chính) thì dùng ngay
   const [err, setErr] = useState('');
   const [preview, setPreview] = useState<LocalBox | null>(null);
   const [retryN, setRetryN] = useState(0);
   useEffect(() => {
     let live = true;
-    setPc(null); setErr('');
+    const hit = pointClouds.peek(f);
+    setErr('');
+    if (hit) { setPc(hit); onLoaded(f); } else setPc(null); // không xoá rồi nạp lại: tránh nháy "đang tải…" dù dữ liệu đã có
     pointClouds.get(f, 0)
       .then((p) => { if (live) { setPc(p); onLoaded(f); } })
       .catch((e) => { if (live && !(e instanceof Cancelled)) setErr(String(e)); });
     return () => { live = false; };
   }, [f, retryN]);
+  // Frame đang hiện mà bị bỏ (về từ một chunk không qua kiểm chứng đánh số) → tải lại, không hiện dữ liệu không tin được.
+  const pcRef = useRef(pc);
+  pcRef.current = pc;
+  useEffect(() => pointClouds.subscribe(() => {
+    if (pcRef.current && pointClouds.invalidated(f)) { pcRef.current = null; setPc(null); setRetryN((x) => x + 1); }
+  }), [f]);
   // Lọc điểm một lần ở phạm vi lớn nhất (thu nhỏ tối đa) để phóng to/thu nhỏ không phải lọc lại.
   const loc = useMemo(() => (pc && refCub ? localize(pc, refCub, locHalf) : null), [pc, refCub, locHalf]);
   // Khung nhìn căn theo box: box nghiêng thì điểm, box gợi ý, vật khác... đều quay sang khung riêng của box để mọi view thấy box thẳng.

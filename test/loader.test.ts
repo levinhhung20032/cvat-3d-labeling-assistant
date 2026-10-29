@@ -97,6 +97,22 @@ describe('thử lại khi tải lỗi và đếm frame đã tải', () => {
     expect(s.loader.has(7)).toBe(true);
     vi.useRealTimers();
   });
+  it('máy chủ báo bận (503): chờ lâu hơn và thử nhiều lần hơn trước khi báo lỗi, chỉ ghi log lần đầu và lần cuối', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const loader = new CloudLoader(64, 6, 2, 5, async () => { calls++; if (calls <= 5) throw new Error('GET /api/jobs/1/data → 503'); return new ArrayBuffer(0); },
+      () => ({ count: 0, xyz: new Float32Array(0), rgb: null }) as PointCloud);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const p = loader.get(3, 0);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toBe(1); // chưa thử lại sớm như lỗi thường (700 ms)
+    await vi.advanceTimersByTimeAsync(60_000);
+    await expect(p).resolves.toBeDefined(); // thành công ở lần thứ 6, lỗi thường đã bỏ cuộc sau 4 lần
+    expect(calls).toBe(6);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+    vi.useRealTimers();
+  });
   it('lỗi kéo dài: sau 4 lần mới báo lỗi, has() vẫn false', async () => {
     vi.useFakeTimers();
     const s = mk(99);
@@ -105,6 +121,48 @@ describe('thử lại khi tải lỗi và đếm frame đã tải', () => {
     expect(await p).toContain('502');
     expect(s.calls).toBe(4);
     expect(s.loader.has(9)).toBe(false);
+    vi.useRealTimers();
+  });
+});
+
+describe('máy chủ báo bận và tải lại frame lỗi', () => {
+  const pc = () => ({ count: 0, xyz: new Float32Array(0), rgb: null }) as PointCloud;
+  it('sau 503 chỉ chạy tối đa 2 kết nối song song', async () => {
+    vi.useFakeTimers();
+    let running = 0, peak = 0, calls = 0;
+    const loader = new CloudLoader(64, 6, 6, 6, async () => {
+      calls++;
+      if (calls === 1) throw new Error('GET /api/jobs/1/data → 503');
+      running++; peak = Math.max(peak, running);
+      await new Promise((r) => setTimeout(r, 100));
+      running--; return new ArrayBuffer(0);
+    }, pc);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const first = loader.get(0, 0);
+    await vi.advanceTimersByTimeAsync(50);
+    const rest = [1, 2, 3, 4, 5].map((n) => loader.get(n, 0));
+    await vi.advanceTimersByTimeAsync(10_000);
+    await Promise.all([first, ...rest]);
+    expect(peak).toBeLessThanOrEqual(2);
+    warn.mockRestore();
+    vi.useRealTimers();
+  });
+  it('retryFailed: frame đã lỗi được bỏ đánh dấu để tải lại', async () => {
+    vi.useFakeTimers();
+    let ok = false;
+    const loader = new CloudLoader(64, 6, 2, 5, async () => { if (!ok) throw new Error('HTTP 502'); return new ArrayBuffer(0); }, pc);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const p = loader.get(7).catch(() => 'failed');
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await p).toBe('failed');
+    expect(loader.failed(7)).toBe(true);
+    expect(loader.retryFailed()).toBe(1);
+    expect(loader.failed(7)).toBe(false);
+    expect(loader.retryFailed()).toBe(0);
+    ok = true;
+    await loader.get(7);
+    expect(loader.has(7)).toBe(true);
+    warn.mockRestore();
     vi.useRealTimers();
   });
 });

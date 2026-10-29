@@ -1,6 +1,6 @@
 import { unzipSync } from 'fflate';
 import { parsePcd, type PointCloud } from '../shared/pcd';
-import { fetchBinary } from './bridge';
+import { abortLoads, fetchBinary } from './bridge';
 
 export class Cancelled extends Error {}
 
@@ -18,6 +18,31 @@ interface Task {
  * yêu cầu khẩn, và tới `maxIdle` (vẫn chừa chỗ cho yêu cầu khẩn) khi không có, để tải nền nhanh lúc người dùng đang xem/sửa.
  * Chỉ giữ trong bộ nhớ (không lưu ra đĩa).
  */
+/** Thời gian chờ (ms) giữa các lần thử lại khi máy chủ báo bận (503 / 429). */
+const BUSY_DELAYS = [2000, 4000, 8000, 15000, 25000, 40000];
+/** Sau khi gặp 503 / 429: trong ngần này ms chỉ chạy tối đa BUSY_PARALLEL kết nối song song (tải 6 frame cùng lúc làm máy chủ yếu quá tải thêm). */
+const BUSY_THROTTLE_MS = 90_000, BUSY_PARALLEL = 2;
+const LOAD_TIMEOUT_MS = 60_000;
+
+/**
+ * Nguồn chunk của job (giống cách giao diện CVAT tải point cloud): frame `start` … `stop`, `size` frame mỗi chunk, chunk đánh số theo
+ * job. `stream` tải chunk `index` theo luồng, gọi `onFile(i, buf)` cho frame `first + i` ngay khi về, xong thì trả số file.
+ */
+export interface ChunkSource {
+  start: number;
+  stop: number;
+  size: number;
+  stream: (index: number, first: number, count: number, onFile: (i: number, buf: ArrayBuffer) => void) => Promise<number>;
+}
+/** running: đang tải · done: đã tải xong (frame bị đẩy khỏi bộ nhớ sau đó thì tải lẻ) · failed: lỗi, tải lẻ (thử lại được) · bad: đánh số sai, không dùng lại. */
+type ChunkState = 'running' | 'done' | 'failed' | 'bad';
+/** Chờ tối đa (ms) tới frame đầu của chunk (máy chủ có thể mất vài phút dựng chunk lần đầu) và giữa hai frame liền nhau. */
+const CHUNK_FIRST_MS = 300_000, CHUNK_IDLE_MS = 120_000;
+/** Số lần thử một chunk (lỗi mạng / máy chủ) trước khi quay về tải từng frame. */
+const CHUNK_ATTEMPTS = 2;
+/** Số chunk tải cùng lúc: 1 cho tải nền, thêm 1 khi cửa sổ đang xem cần chunk khác. */
+const CHUNK_PARALLEL = 1, CHUNK_PARALLEL_URGENT = 2;
+
 export class CloudLoader {
   private cache = new Map<number, PointCloud>(); // LRU
   private pending = new Map<number, Promise<PointCloud>>();
@@ -26,10 +51,25 @@ export class CloudLoader {
   private listeners = new Set<() => void>();
 
   private runningUrgent = 0;
+  private throttleUntil = 0; // máy chủ vừa báo bận: tới lúc này chỉ chạy ít kết nối song song
   private pausedUntil = 0; // tải nền tạm dừng tới thời điểm này (nhường server cho giao diện CVAT đang nạp frame)
   private finished: number[] = []; // thời điểm (ms) hoàn thành của các frame gần đây, để đo tốc độ
   private everLoaded_ = new Set<number>(); // frame đã từng tải xong (kể cả đã bị đẩy khỏi bộ nhớ LRU)
   private failed_ = new Set<number>(); // frame tải lỗi sau mọi lần thử lại (không tính frame bị hủy khỏi kế hoạch)
+  private chunks: ChunkSource | null = null;
+  private chunkState = new Map<number, ChunkState>();
+  private chunkTries = new Map<number, number>();
+  private chunkTasks = new Map<number, Task>(); // frame → yêu cầu đang chờ chunk của nó
+  private chunkGen = 0; // đổi nguồn chunk (job khác) thì kết quả của nguồn cũ bị bỏ
+  private chunkUrgent = new Set<number>(); // chunk đang tải được khởi động cho cửa sổ đang xem
+  private chunkAbort = new Map<number, (e: Error) => void>(); // chunk đang chạy → hàm kết thúc nó (dùng để huỷ)
+  /** Báo content script huỷ request đang chạy (thay được trong kiểm thử). */
+  onAbort: () => void = () => abortLoads();
+  private chunkInfo = new Map<number, { t0: number; got: number; count: number }>(); // chunk đang chạy: bắt đầu lúc nào, đã nhận bao nhiêu file
+  private reloadTotal = 0; // số frame của đợt tải lại hiện tại (để hiện tiến trình)
+  private tracked = new Set<number>(); // frame lỗi được thử lại: chỉ để hiện tiến trình (việc tải do kế hoạch tải nền yêu cầu)
+  private forced = new Set<number>(); // frame đang được "tải lại tất cả": giữ trong kế hoạch tới khi tải xong (hoặc lỗi)
+  private invalid_ = new Set<number>(); // frame đã giao từ một chunk rồi bị bỏ (chunk không qua kiểm chứng): nơi đang hiện nó phải tải lại
 
   constructor(
     private cap: number, private maxTotal: number, private maxBackground: number, private maxIdle = maxBackground,
@@ -41,6 +81,54 @@ export class CloudLoader {
   cachedCount() { return this.cache.size; }
   /** Frame n đã từng tải xong chưa (bộ nhớ chỉ giữ `cap` frame nên job dài hơn không bao giờ nằm trọn trong bộ nhớ). */
   everLoaded(n: number) { return this.everLoaded_.has(n); }
+  /** Bỏ đánh dấu lỗi của mọi frame để tải lại (kế hoạch tải nền tự xếp chúng vào hàng). Trả về số frame được thử lại. */
+  retryFailed(): number {
+    const n = this.failed_.size;
+    for (const f of this.failed_) if (!this.everLoaded_.has(f)) this.tracked.add(f);
+    this.failed_.clear();
+    this.reloadTotal = new Set([...this.forced, ...this.tracked]).size;
+    for (const [k, st] of this.chunkState) if (st === 'failed') { this.chunkState.delete(k); this.chunkTries.delete(k); }
+    if (n) { this.emit(); this.replan(); }
+    return n;
+  }
+  /**
+   * Tiến trình đợt tải lại (nút "Tải lại frame"): `total` frame của đợt, `left` frame chưa về (lỗi lại thì không tính là chưa về),
+   * và các chunk đang chạy (`got` / `count` file đã nhận, `secs` giây từ lúc bắt đầu; got = 0 nghĩa là máy chủ còn đang dựng chunk).
+   * Hết đợt thì total = 0.
+   */
+  reloadStatus(): { total: number; left: number; chunks: { k: number; got: number; count: number; secs: number }[] } {
+    let left = 0;
+    for (const n of new Set([...this.forced, ...this.tracked])) if (!this.everLoaded_.has(n) && !this.failed_.has(n)) left++;
+    if (left === 0) { this.reloadTotal = 0; this.forced.clear(); this.tracked.clear(); return { total: 0, left: 0, chunks: [] }; }
+    const chunks = [...this.chunkInfo].map(([k, c]) => ({ k, got: c.got, count: c.count, secs: Math.round((this.now() - c.t0) / 1000) }));
+    return { total: this.reloadTotal, left, chunks };
+  }
+  /**
+   * Ngắt MỌI request đang chạy / đang treo (chunk và từng frame) để giải phóng kết nối với máy chủ rồi tải lại từ đầu.
+   * Chunk bị ngắt: bỏ các frame đã nhận từ chunk đó (chưa kiểm chứng trọn vẹn), reset số lần thử, chạy lại chunk. Frame lẻ bị ngắt: tự thử lại.
+   */
+  abortInFlight(): void {
+    this.onAbort();
+    for (const [k, abort] of [...this.chunkAbort]) { this.chunkTries.set(k, 0); abort(new Error('đã huỷ (người dùng bấm tải lại)')); }
+  }
+  /**
+   * Tải lại TẤT CẢ frame `first … last`: bỏ khỏi bộ nhớ, xoá dấu "đã tải / lỗi" rồi xếp vào hàng tải nền (theo chunk nếu bật).
+   * Chunk đang chạy giữ nguyên (frame về sau sẽ ghi đè). Trả về số frame được tải lại.
+   */
+  reloadAll(first: number, last: number): number {
+    for (const n of [...this.cache.keys()]) if (n >= first && n <= last) this.cache.delete(n);
+    for (let n = first; n <= last; n++) {
+      this.everLoaded_.delete(n); this.failed_.delete(n); this.invalid_.delete(n);
+      this.forced.add(n);
+    }
+    for (const [k, st] of [...this.chunkState]) if (st !== 'running') { this.chunkState.delete(k); this.chunkTries.delete(k); }
+    this.reloadTotal = new Set([...this.forced, ...this.tracked]).size;
+    this.emit();
+    this.replan();
+    return last - first + 1;
+  }
+  /** Frame n từng được giao từ một chunk sau đó bị bỏ (đánh số không qua kiểm chứng): dữ liệu đang hiện của nó không còn tin được. */
+  invalidated(n: number) { return this.invalid_.has(n); }
   /** Frame n đã tải lỗi sau mọi lần thử lại (để tiến độ "tải xong" không kẹt mãi vì một frame hỏng). */
   failed(n: number) { return this.failed_.has(n) && !this.everLoaded_.has(n); }
   /**
@@ -66,14 +154,47 @@ export class CloudLoader {
   }
   private emit() { this.listeners.forEach((cb) => cb()); }
 
+  /**
+   * Bật tải theo chunk cho job (null: chỉ tải từng frame). Frame thuộc chunk chưa tải sẽ chờ cả chunk về thay vì gửi request riêng;
+   * chunk lỗi thì các frame của nó quay về tải từng frame.
+   */
+  setChunks(src: ChunkSource | null) {
+    this.chunks = src;
+    this.chunkState.clear();
+    this.chunkTries.clear();
+    this.chunkUrgent.clear();
+    this.chunkGen++;
+    this.requeueChunkTasks(() => true);
+    this.pump();
+  }
+  /** Chunk chứa frame n (−1: không tải theo chunk). */
+  private chunkOf(n: number): number {
+    const c = this.chunks;
+    return c && n >= c.start && n <= c.stop ? Math.floor((n - c.start) / c.size) : -1;
+  }
+  /** Frame n sẽ về cùng chunk của nó (chunk chưa tải hoặc đang tải). */
+  private viaChunk(n: number): boolean {
+    const k = this.chunkOf(n);
+    if (k < 0) return false;
+    const st = this.chunkState.get(k);
+    return st === undefined || st === 'running';
+  }
+  /** Chuyển các yêu cầu đang chờ chunk (thoả `pick`) sang hàng đợi tải từng frame. */
+  private requeueChunkTasks(pick: (n: number) => boolean) {
+    for (const [n, t] of this.chunkTasks) if (pick(n)) { this.chunkTasks.delete(n); this.queue.push(t); }
+  }
+
   get(n: number, prio = 0): Promise<PointCloud> {
     const hit = this.cache.get(n);
     if (hit) { this.cache.delete(n); this.cache.set(n, hit); return Promise.resolve(hit); }
-    const queued = this.queue.find((t) => t.n === n);
+    const queued = this.queue.find((t) => t.n === n) ?? this.chunkTasks.get(n);
     if (queued) queued.prio = Math.min(queued.prio, prio);
     const existing = this.pending.get(n);
     if (existing) { this.pump(); return existing; }
-    const p = new Promise<PointCloud>((ok, fail) => this.queue.push({ n, prio, ok, fail }));
+    const p = new Promise<PointCloud>((ok, fail) => {
+      const t = { n, prio, ok, fail };
+      if (this.viaChunk(n)) this.chunkTasks.set(n, t); else this.queue.push(t);
+    });
     this.pending.set(n, p);
     p.catch(() => {});
     this.pump();
@@ -111,6 +232,10 @@ export class CloudLoader {
 
   private replan() {
     const wanted = new Map(this.bgPlan);
+    for (const n of [...this.forced]) {
+      if (this.everLoaded_.has(n) || this.failed_.has(n)) this.forced.delete(n);
+      else wanted.set(n, Math.min(200 + n, wanted.get(n) ?? Infinity));
+    }
     for (const [n, p] of this.windowPlan) wanted.set(n, Math.min(p, wanted.get(n) ?? Infinity));
     this.queue = this.queue.filter((t) => {
       const prio = wanted.get(t.n);
@@ -122,42 +247,148 @@ export class CloudLoader {
       t.prio = prio;
       return true;
     });
+    for (const [n, t] of this.chunkTasks) {
+      const prio = wanted.get(n);
+      if (prio === undefined) { this.chunkTasks.delete(n); this.pending.delete(n); t.fail(new Cancelled()); } // chunk vẫn tải tiếp
+      else t.prio = prio;
+    }
     for (const [n, prio] of wanted) {
       if (!this.cache.has(n) && !this.pending.has(n)) void this.get(n, prio).catch(() => {});
     }
     this.pump();
   }
 
+  /** Một request treo (máy chủ không trả lời) không được giữ kết nối mãi: quá LOAD_TIMEOUT_MS thì coi là lỗi để thử lại. */
+  private timed<T>(p: Promise<T>, n: number): Promise<T> {
+    return new Promise<T>((ok, fail) => {
+      const timer = setTimeout(() => fail(new Error(`frame ${n}: quá ${LOAD_TIMEOUT_MS / 1000} giây không có phản hồi`)), LOAD_TIMEOUT_MS);
+      p.then((v) => { clearTimeout(timer); ok(v); }, (e) => { clearTimeout(timer); fail(e); });
+    });
+  }
+
+  /** Khởi động chunk cho các frame đang chờ: ưu tiên chunk có frame của cửa sổ đang xem. */
+  private pumpChunks() {
+    if (!this.chunks) return;
+    const need = new Map<number, number>(); // chunk → ưu tiên cao nhất của các frame đang chờ nó
+    for (const t of this.chunkTasks.values()) {
+      const k = this.chunkOf(t.n);
+      if (k >= 0 && this.chunkState.get(k) === undefined) need.set(k, Math.min(t.prio, need.get(k) ?? Infinity));
+    }
+    let running = 0, background = 0;
+    for (const [k, st] of this.chunkState) if (st === 'running') { running++; if (!this.chunkUrgent.has(k)) background++; }
+    for (const [k, prio] of [...need].sort((a, b) => a[1] - b[1] || a[0] - b[0])) {
+      const urgent = prio === 0;
+      if (running >= CHUNK_PARALLEL_URGENT || (!urgent && background >= CHUNK_PARALLEL)) continue;
+      if (!urgent && this.now() < this.pausedUntil) continue;
+      this.startChunk(k, urgent);
+      running++;
+      if (!urgent) background++;
+    }
+  }
+
+  private startChunk(k: number, urgent: boolean) {
+    const c = this.chunks!, gen = this.chunkGen;
+    if (urgent) this.chunkUrgent.add(k); else this.chunkUrgent.delete(k);
+    const first = c.start + k * c.size, count = Math.min(c.size, c.stop - first + 1);
+    this.chunkState.set(k, 'running');
+    this.chunkTries.set(k, (this.chunkTries.get(k) ?? 0) + 1);
+    this.chunkAbort.set(k, (e) => finish(e));
+    this.chunkInfo.set(k, { t0: this.now(), got: 0, count });
+    const got: number[] = [];
+    let over = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (err: Error | null) => {
+      if (over) return;
+      over = true;
+      clearTimeout(timer);
+      this.chunkAbort.delete(k);
+      this.chunkInfo.delete(k);
+      if (gen !== this.chunkGen) return; // đã sang job khác
+      this.chunkUrgent.delete(k);
+      if (err) {
+        // Không tin frame của chunk chưa kiểm chứng trọn vẹn: bỏ hết, tải lại (chunk lần nữa, hoặc từng frame); nơi đang hiện chúng tự tải lại.
+        for (const n of got) { this.cache.delete(n); this.everLoaded_.delete(n); this.invalid_.add(n); }
+        const mapping = /trùng frame|dự kiến/.test(err.message);
+        const again = !mapping && (this.chunkTries.get(k) ?? 0) < CHUNK_ATTEMPTS;
+        console.warn('[CVLA] tải chunk', k, 'lỗi:', err.message, again ? '→ thử lại chunk' : '→ chuyển sang tải từng frame');
+        if (again) this.chunkState.delete(k);
+        else { this.chunkState.set(k, mapping ? 'bad' : 'failed'); this.requeueChunkTasks((n) => this.chunkOf(n) === k); }
+      } else {
+        this.chunkState.set(k, 'done');
+        this.requeueChunkTasks((n) => this.chunkOf(n) === k); // frame đã về rồi bị đẩy khỏi bộ nhớ trong lúc chờ → tải lẻ
+      }
+      this.emit();
+      this.pump();
+    };
+    const arm = (ms: number) => { clearTimeout(timer); timer = setTimeout(() => finish(new Error(`chunk ${k}: quá ${ms / 1000} giây không có dữ liệu`)), ms); };
+    arm(CHUNK_FIRST_MS);
+    c.stream(k, first, count, (i, buf) => {
+      if (over || gen !== this.chunkGen) return;
+      if (i >= count) { finish(new Error(`chunk ${k} có nhiều hơn ${count} file như dự kiến`)); return; }
+      arm(CHUNK_IDLE_MS);
+      let pc: PointCloud;
+      try { pc = this.parse(buf); } catch (e) { finish(e instanceof Error ? e : new Error(String(e))); return; }
+      const n = first + i;
+      this.cache.delete(n);
+      this.cache.set(n, pc);
+      got.push(n);
+      const info = this.chunkInfo.get(k);
+      if (info) info.got++;
+      this.everLoaded_.add(n);
+      this.failed_.delete(n);
+      this.invalid_.delete(n);
+      this.finished.push(this.now());
+      if (this.finished.length > 12) this.finished.shift();
+      const t = this.chunkTasks.get(n);
+      if (t) { this.chunkTasks.delete(n); this.pending.delete(n); t.ok(pc); }
+      this.evict();
+      this.emit();
+    }).then(
+      (files) => finish(files === count ? null : new Error(`chunk ${k} có ${files} file, dự kiến ${count}`)),
+      (e) => finish(e instanceof Error ? e : new Error(String(e))),
+    );
+  }
+
   private pump() {
+    this.pumpChunks();
     while (this.queue.length) {
       this.queue.sort((a, b) => a.prio - b.prio || a.n - b.n);
       const t = this.queue[0]!;
       if (t.prio !== 0 && this.now() < this.pausedUntil) break; // hàng đợi đã sắp theo ưu tiên: phía sau toàn tải nền
       const urgentActive = this.runningUrgent > 0 || this.queue.some((q) => q.prio === 0);
-      const limit = t.prio === 0 ? this.maxTotal : urgentActive ? this.maxBackground : this.maxIdle;
+      let limit = t.prio === 0 ? this.maxTotal : urgentActive ? this.maxBackground : this.maxIdle;
+      if (this.now() < this.throttleUntil) limit = Math.min(limit, BUSY_PARALLEL);
       if (this.running >= limit) break;
       this.queue.shift();
       this.running++;
       const urgent = t.prio === 0;
       let retry = false;
       if (urgent) this.runningUrgent++;
-      this.load(t.n)
+      this.timed(this.load(t.n), t.n)
         .then((buf) => this.parse(buf))
         .then((pc) => {
           this.finished.push(this.now());
           if (this.finished.length > 12) this.finished.shift();
           this.cache.set(t.n, pc);
           this.everLoaded_.add(t.n);
+          this.invalid_.delete(t.n);
           this.evict();
           t.ok(pc);
           this.emit();
         })
         .catch((e) => {
           // Lỗi mạng / máy chủ tạm thời (quá tải khi nhiều kết nối song song…): thử lại tối đa 3 lần với thời gian chờ tăng dần, rồi mới báo lỗi.
+          // Máy chủ báo bận (503 / 429, vd chunk của job mới chưa dựng xong): chờ lâu hơn, thử nhiều lần hơn và nhường máy chủ (dừng tải nền) trong lúc chờ.
           const tries = (t.tries ?? 0) + 1;
-          console.warn('[CVLA] tải frame', t.n, 'lỗi (lần', tries, '):', String(e));
-          if (tries < 4) { retry = true; t.tries = tries; setTimeout(() => { this.queue.push(t); this.pump(); }, 700 * tries); }
-          else { this.failed_.add(t.n); t.fail(e instanceof Error ? e : new Error(String(e))); this.emit(); }
+          const busy = /\b(503|429)\b/.test(String(e));
+          const max = busy ? BUSY_DELAYS.length + 1 : 4;
+          if (tries === 1 || tries >= max) console.warn('[CVLA] tải frame', t.n, 'lỗi (lần', tries, '/', max, '):', String(e)); // không ghi từng lần thử: console không bị tràn
+          if (tries < max) {
+            retry = true; t.tries = tries;
+            const delay = busy ? BUSY_DELAYS[tries - 1]! : 700 * tries;
+            if (busy) { this.pauseBackground(delay); this.throttleUntil = this.now() + BUSY_THROTTLE_MS; }
+            setTimeout(() => { this.queue.push(t); this.pump(); }, delay);
+          } else { this.failed_.add(t.n); t.fail(e instanceof Error ? e : new Error(String(e))); this.emit(); }
         })
         .finally(() => {
           if (!retry) this.pending.delete(t.n);
@@ -169,7 +400,9 @@ export class CloudLoader {
   }
 }
 
-export const pointClouds = new CloudLoader(64, 6, 2, 3);
+// Tải từng frame (chỉ khi chunk không dùng được): đo trên cvat-b 2026-10-29, máy chủ làm gần như tuần tự (1 kết nối 5,0 s/frame, 2 kết nối 4,0 s/frame,
+// 3 kết nối thì mỗi request chờ 15–25 s; 6 kết nối làm 503) nên tối đa 2 kết nối.
+export const pointClouds = new CloudLoader(64, 2, 1, 2);
 
 class Lru<V> {
   private m = new Map<number, Promise<V>>();
