@@ -13,3 +13,6 @@ setting.json
 # Tài liệu nội bộ, không đưa lên GitHub
 GUIDELINE.md
 NOTES.md
+
+# Kết quả graphify (sơ đồ tri thức của code, sinh ra trên máy)
+graphify-out/

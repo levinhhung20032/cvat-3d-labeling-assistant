@@ -80,7 +80,7 @@ export interface ShiftTrackRec {
   stop?: number; // frame cuối của job
   outsideKeys?: number[]; // frame được khoá thành keyframe outside trong lần upload này (lockedOutsideKeys())
 }
-export interface ShiftUpload { time: string; jobId: number; tracks: ShiftTrackRec[] }
+export interface ShiftUpload { time: string; jobId: number; tracks: ShiftTrackRec[]; origin?: string } // origin: phạm vi kho của máy chủ ('' / thiếu = máy chủ dữ liệu cũ)
 
 export interface Shift {
   slot?: import('./schedule').Slot; // ca sáng / chiều / OT (ca tự động theo lịch)
@@ -94,6 +94,7 @@ export interface Shift {
   ignored: number; // gợi ý đã bỏ qua
   edits: number; // số thao tác sửa trong nháp
   touched: string[]; // `${jobId}:${num}` các object đã sửa (kể cả chưa upload)
+  assign?: Record<string, string>; // ca OT: ID (idKeyOf) → tên ca sáng / chiều nhận KPI của ID đó (kể cả ca sắp tới)
 }
 
 export interface ObjectKpi {

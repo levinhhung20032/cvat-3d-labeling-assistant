@@ -4,8 +4,7 @@ import {
   fieldsOf, isChanged, resetAll, resetSection, SECTIONS, sectionChanged, setValue, type Field, type SectionId,
 } from '../shared/thresholds';
 import { metricsOf, METRIC_BY_ID, type MetricDef, type Op, type Rule, type SectionCode, type Target } from '../shared/alertRules';
-import { defaultDyn, useDynClasses, useDynRules } from './dynClassStore';
-import { attrRuleKey } from '../shared/dynrule';
+import { DynClassTable } from './DynSizePanel';
 import { SYMBOL_DEFAULTS, type SymbolKind } from '../shared/symbols';
 import { symbolStore, sym, useSymbols } from './symbolStore';
 import { thresholdStore, useRules, useThresholdVersion } from './thresholdStore';
@@ -171,8 +170,6 @@ export function ThresholdPanel({ jobId, labels, tracks }: { jobId: number; label
   useThresholdVersion();
   useSymbols();
   const rules = useRules();
-  const dynMap = useDynClasses(jobId);
-  const dynRules = useDynRules(jobId);
 
   return (
     <>
@@ -190,21 +187,11 @@ export function ThresholdPanel({ jobId, labels, tracks }: { jobId: number; label
         <Section key={s.id} id={s.id} code={s.code} title={s.title} about={s.about} rules={rules} labels={labels} tracks={tracks} jobId={jobId}>
           {s.id === 'S' && (
             <>
-              <p style={{ margin: '2px 0' }}>Chỉ xét object có <b>Dynamic size TẮT</b> (tab Dynamic size của job này: công tắc riêng của object &gt; luật attribute &gt; công tắc class).</p>
-              <table style={{ borderCollapse: 'collapse', marginBottom: 4 }}>
-                <tbody>
-                  {labels.map((l) => {
-                    const on = dynMap[l.name] ?? defaultDyn(l.name);
-                    const nr = Object.keys(dynRules).filter((k) => k.startsWith(attrRuleKey(l.name, '', '').split('|')[0] + '|')).length;
-                    return (
-                      <tr key={l.id}>
-                        <td style={{ padding: '1px 10px 1px 0' }}><b>{l.name}</b></td>
-                        <td style={{ color: on ? '#060' : '#a00' }}>{on ? 'Dynamic bật → không xét S' : 'Dynamic tắt → xét S'}{nr > 0 ? ` (+${nr} luật attribute)` : ''}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              <p style={{ margin: '2px 0' }}>
+                Chỉ xét object có <b>Dynamic size TẮT</b>: class bật thì không xét S, tắt thì xét. Sửa ngay tại đây (cùng cài đặt với tab Dynamic size);
+                thứ tự ưu tiên: công tắc riêng của object (Batch Review) &gt; luật attribute &gt; công tắc class. Đổi công tắc class sẽ bỏ công tắc riêng của các object thuộc class đó.
+              </p>
+              <div style={{ marginBottom: 4 }}><DynClassTable jobId={jobId} labels={labels} tracks={tracks} /></div>
             </>
           )}
         </Section>

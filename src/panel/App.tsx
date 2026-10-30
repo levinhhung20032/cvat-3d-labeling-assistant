@@ -1,7 +1,7 @@
 import { propagateEdit, propagateSize } from '../shared/dynsize';
 import { findOverlaps, groupPairs } from '../shared/overlap';
 import { applyDraft, buildDraft, checkDraft, draftKey, type SavedDraft } from '../shared/draft';
-import { kv, onStorageHealth, storageHealth } from './storage';
+import { hostScope, kv, onStorageHealth, storageHealth } from './storage';
 import { seenStore } from './seenStore';
 import { api } from '../shared/api';
 import { useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react';
@@ -831,7 +831,7 @@ export function App() {
           onUploaded={(tracks) => {
             // đã lên CVAT thì không còn là nháp: xóa ngay để lần nạp lại / F5 không hiện lại "bản nháp chưa upload"
             kv.remove(draftKey(data.job.id)); restorableRef.current = null; setRestorable(null);
-            shiftStore.upload({ time: new Date().toISOString(), jobId: data.job.id, tracks });
+            shiftStore.upload({ time: new Date().toISOString(), jobId: data.job.id, tracks, origin: hostScope() || undefined });
           }}
           onReload={() => {
             setUploading(false);

@@ -8,8 +8,9 @@ export interface Schedule {
   amStart: string; amEnd: string; // "HH:MM"
   pmStart: string; pmEnd: string;
   warnMin: number;
+  kpiTarget: number; // chỉ tiêu KPI (frame) của mỗi ca sáng / chiều; OT không có chỉ tiêu
 }
-export const DEFAULT_SCHEDULE: Schedule = { amStart: '08:30', amEnd: '12:30', pmStart: '13:30', pmEnd: '17:30', warnMin: 15 };
+export const DEFAULT_SCHEDULE: Schedule = { amStart: '08:30', amEnd: '12:30', pmStart: '13:30', pmEnd: '17:30', warnMin: 15, kpiTarget: 500 };
 
 export type Slot = 'AM' | 'PM' | 'OT';
 export interface SlotInfo {
@@ -30,7 +31,8 @@ export function normalizeSchedule(s: Partial<Schedule> | null | undefined): Sche
   const t = [parse(v.amStart), parse(v.amEnd), parse(v.pmStart), parse(v.pmEnd)];
   const ok = t.every((x) => Number.isFinite(x)) && t[0]! < t[1]! && t[1]! <= t[2]! && t[2]! < t[3]!;
   const warn = Number.isFinite(v.warnMin) ? Math.min(120, Math.max(1, Math.round(v.warnMin))) : DEFAULT_SCHEDULE.warnMin;
-  return ok ? { ...v, warnMin: warn } : { ...DEFAULT_SCHEDULE, warnMin: warn };
+  const target = Number.isFinite(v.kpiTarget) ? Math.min(100000, Math.max(1, Math.round(v.kpiTarget))) : DEFAULT_SCHEDULE.kpiTarget;
+  return ok ? { ...v, warnMin: warn, kpiTarget: target } : { ...DEFAULT_SCHEDULE, warnMin: warn, kpiTarget: target };
 }
 
 const at = (d: Date, minutes: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), Math.floor(minutes / 60), minutes % 60, 0, 0);

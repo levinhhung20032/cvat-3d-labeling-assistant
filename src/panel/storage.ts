@@ -30,6 +30,8 @@ export const LEGACY_DATA_ORIGIN = 'https://cvat-a.example.com';
 export function defaultOrigin(): string | null {
   try { return patternOrigin(api.runtime.getManifest().host_permissions?.[0] ?? '') ?? LEGACY_DATA_ORIGIN; } catch { return LEGACY_DATA_ORIGIN; }
 }
+/** Phạm vi kho của máy chủ đang mở ('' = máy chủ dữ liệu cũ): phân biệt job / ID trùng số giữa hai máy chủ trong KPI. */
+export const hostScope = () => scope;
 /** Khóa thật trong storage.local của một khóa logic, theo máy chủ đang dùng. */
 export const storageKey = (key: string, hostScope = scope) => (hostScope && isPerHost(key) ? `ui@${hostScope}|${key}` : PREFIX + key);
 

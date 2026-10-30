@@ -60,6 +60,7 @@ export function mergeShift(a: Shift, b: Shift): Shift {
     uploads: [...ups.values()].sort((x, y) => (x.time < y.time ? -1 : x.time > y.time ? 1 : 0)),
     accepted: Math.max(a.accepted, b.accepted), ignored: Math.max(a.ignored, b.ignored), edits: Math.max(a.edits, b.edits),
     touched: [...new Set([...a.touched, ...b.touched])],
+    ...(a.assign || b.assign ? { assign: { ...b.assign, ...a.assign } } : {}),
   };
 }
 

@@ -5,12 +5,14 @@ import { parseLabelSpecs } from '../shared/attributes';
 import { attrRuleKey, ruleValues, type DynRule } from '../shared/dynrule';
 import { kv } from './storage';
 
-/** Tab "Dynamic size": bật / tắt theo class (danh sách class lấy từ job). Mỗi class có thể đặt thêm theo GIÁ TRỊ attribute (vd Two-wheels: rider state = false → static, true → dynamic). Công tắc riêng của từng object trong Batch Review luôn được ưu tiên hơn cả hai. */
-export function DynSizePanel({ jobId, labels, tracks }: { jobId: number; labels: CvatLabel[]; tracks: CvatTrack[] }) {
+/**
+ * Bảng công tắc Dynamic size theo class (+ theo giá trị attribute) của job. Dùng ở tab "Dynamic size" và ngay trong mục lỗi S của tab
+ * Threshold (S chỉ xét object có Dynamic size TẮT), cùng một kho nên hai nơi luôn khớp nhau.
+ */
+export function DynClassTable({ jobId, labels, tracks }: { jobId: number; labels: CvatLabel[]; tracks: CvatTrack[] }) {
   const map = useDynClasses(jobId);
   const rules = useDynRules(jobId);
   const specs = useMemo(() => parseLabelSpecs(labels), [labels]);
-  const names = useMemo(() => labels.map((l) => l.name), [labels]);
   const counts = useMemo(() => {
     const m = new Map<number, number>();
     for (const t of tracks) m.set(t.label_id, (m.get(t.label_id) ?? 0) + 1);
@@ -24,11 +26,6 @@ export function DynSizePanel({ jobId, labels, tracks }: { jobId: number; labels:
   };
 
   return (
-    <>
-      <p style={{ margin: '4px 0' }}>
-        <b>Dynamic size theo class</b> (job {jobId}). <b>Bật</b>: kích thước nội suy giữa các keyframe. <b>Tắt</b>: đổi kích thước ở một frame thì áp cho mọi keyframe của object.
-        Danh sách class lấy từ job này (lần đầu mở job); mặc định lấy từ file setting (class có tên trùng), không có thì bật.
-      </p>
       <table style={{ borderCollapse: 'collapse' }}>
         <thead><tr style={{ textAlign: 'left' }}><th>Class</th><th>Số object</th><th>Dynamic size</th></tr></thead>
         <tbody>
@@ -85,6 +82,19 @@ export function DynSizePanel({ jobId, labels, tracks }: { jobId: number; labels:
           })}
         </tbody>
       </table>
+  );
+}
+
+/** Tab "Dynamic size": bật / tắt theo class (danh sách class lấy từ job). Mỗi class có thể đặt thêm theo GIÁ TRỊ attribute (vd Two-wheels: rider state = false → static, true → dynamic). Công tắc riêng của từng object trong Batch Review luôn được ưu tiên hơn cả hai. */
+export function DynSizePanel({ jobId, labels, tracks }: { jobId: number; labels: CvatLabel[]; tracks: CvatTrack[] }) {
+  const names = useMemo(() => labels.map((l) => l.name), [labels]);
+  return (
+    <>
+      <p style={{ margin: '4px 0' }}>
+        <b>Dynamic size theo class</b> (job {jobId}). <b>Bật</b>: kích thước nội suy giữa các keyframe. <b>Tắt</b>: đổi kích thước ở một frame thì áp cho mọi keyframe của object.
+        Danh sách class lấy từ job này (lần đầu mở job); mặc định lấy từ file setting (class có tên trùng), không có thì bật.
+      </p>
+      <DynClassTable jobId={jobId} labels={labels} tracks={tracks} />
       <p style={{ margin: '6px 0' }}>
         <button onClick={() => { dynClassStore.reset(jobId, names); dynRuleStore.reset(jobId); tracks.forEach((_, i) => { try { kv.remove(`cvla-dyn:${jobId}:${i + 1}`); } catch { /* bỏ qua */ } }); }}>Đặt lại mặc định</button>{' '}
         <span style={{ color: '#555' }}>Đổi công tắc class sẽ xóa công tắc riêng của các object thuộc class đó. Tắt dynamic size chỉ áp dụng cho lần sửa size tiếp theo (hoặc bấm "Đồng bộ size" trong Batch Review).</span>

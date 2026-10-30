@@ -3,23 +3,42 @@ import { useSyncExternalStore } from 'react';
 import type { Shift, ShiftUpload } from '../shared/shift';
 import { DEFAULT_SCHEDULE, normalizeSchedule, type Schedule } from '../shared/schedule';
 import { MAX_REMOVED, mergeShiftState, removedKey, recordActivity, syncShifts } from '../shared/shiftflow';
+import { creditAll, firstDays, retainShifts, type IdCredit } from '../shared/kpiCredit';
 
 /** Ca làm việc và danh sách "bỏ qua gợi ý", lưu cục bộ trong trình duyệt (localStorage của extension, không rời máy). */
-interface State { active: Shift | null; history: Shift[]; removed?: string[] } // removed: dấu (removedKey) các ca đã xoá khỏi lịch sử
+// removed: dấu (removedKey) các ca đã xoá khỏi lịch sử; idDays: ngày đầu tiên làm từng ID (KPI rework), giữ cả khi ca cũ bị cắt khỏi lịch sử
+interface State { active: Shift | null; history: Shift[]; removed?: string[]; idDays?: Record<string, string> }
 const KEY = 'cvla-shifts';
 
 const parse = (raw: string | null): State | null => {
   try {
     const o = JSON.parse(raw ?? 'null') as State | null;
-    if (o && Array.isArray(o.history)) return { active: o.active ?? null, history: o.history, removed: Array.isArray(o.removed) ? o.removed : [] };
+    if (o && Array.isArray(o.history)) {
+      const idDays = o.idDays && typeof o.idDays === 'object' && !Array.isArray(o.idDays) ? o.idDays : {};
+      return { active: o.active ?? null, history: o.history, removed: Array.isArray(o.removed) ? o.removed : [], idDays };
+    }
   } catch { /* bỏ qua */ }
   return null;
 };
-const load = (): State => parse(kv.get(KEY)) ?? { active: null, history: [], removed: [] };
+const load = (): State => parse(kv.get(KEY)) ?? { active: null, history: [], removed: [], idDays: {} };
 /** Gộp hai bản (của phiên này và của kho / phiên khác): không bản nào làm mất upload hay ca của bản kia. */
 const merge = (a: State, b: State): State => {
   const removed = [...new Set([...(a.removed ?? []), ...(b.removed ?? [])])].slice(-MAX_REMOVED);
-  return { ...mergeShiftState(a, b, removed), removed };
+  const idDays = { ...(b.idDays ?? {}) };
+  for (const [k, d] of Object.entries(a.idDays ?? {})) if (!idDays[k] || d < idDays[k]!) idDays[k] = d;
+  return { ...mergeShiftState(a, b, removed), removed, idDays };
+};
+const MAX_ID_DAYS = 20000; // sổ ngày đầu: giữ ngần này ID gần nhất (~45 byte mỗi ID)
+/**
+ * Bổ sung sổ ngày đầu từ các ca hiện có (TRƯỚC khi cắt, nên ID của ca bị bỏ vẫn nằm trong sổ để nhận ra rework), rồi chỉ giữ ca của
+ * hôm nay và 3 ngày đi làm gần nhất trước đó.
+ */
+const withDays = (st: State): State => {
+  let idDays = firstDays([...(st.active ? [st.active] : []), ...st.history], schedule, st.idDays ?? {});
+  const ids = Object.entries(idDays);
+  if (ids.length > MAX_ID_DAYS) idDays = Object.fromEntries(ids.sort((a, b) => (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : 0)).slice(0, MAX_ID_DAYS));
+  const history = retainShifts(st.history, new Date(), schedule);
+  return { ...st, history, idDays };
 };
 
 let state: State = load();
@@ -29,7 +48,7 @@ const commit = (next: State) => {
   // Hai tab CVAT (hoặc phiên cũ chưa đóng) cùng ghi một khóa: gộp với bản đang có trong kho trước khi ghi, thay vì ghi đè.
   const disk = kv.get(KEY);
   const other = disk !== written ? parse(disk) : null;
-  state = other ? merge(next, other) : next;
+  state = withDays(other ? merge(next, other) : next);
   try { written = JSON.stringify(state); kv.set(KEY, written); } catch { /* bỏ qua */ }
   listeners.forEach((l) => l());
 };
@@ -76,6 +95,21 @@ export const shiftStore = {
   },
   ignored() { withActive((s) => ({ ...s, ignored: s.ignored + 1 })); },
   upload(u: ShiftUpload) { withActive((s) => ({ ...s, uploads: [...s.uploads, u] })); },
+  /** Dồn KPI của các ID mà ca `name` (OT) sở hữu: ID → ca nhận (null = giữ ở ca này). Ghi đè phân bổ cũ của các ID được nêu. */
+  assign(name: string, mapping: Record<string, string | null>) {
+    const fix = (x: Shift): Shift => {
+      if (x.name !== name) return x;
+      const next = { ...(x.assign ?? {}) };
+      for (const [k, to] of Object.entries(mapping)) { if (to && to !== name) next[k] = to; else delete next[k]; }
+      return { ...x, assign: next };
+    };
+    commit({ ...state, active: state.active ? fix(state.active) : null, history: state.history.map(fix) });
+  },
+  /** Bỏ mọi phân bổ của ca `name`: KPI về lại ca đó. */
+  unassign(name: string) {
+    const fix = (x: Shift): Shift => (x.name === name ? { ...x, assign: {} } : x);
+    commit({ ...state, active: state.active ? fix(state.active) : null, history: state.history.map(fix) });
+  },
   remove(name: string) { commit({ ...state, history: state.history.filter((h) => h.name !== name), removed: [...(state.removed ?? []), ...state.history.filter((h) => h.name === name).map(removedKey)] }); },
 };
 
@@ -89,9 +123,9 @@ const ignListeners = new Set<() => void>();
 // Chế độ nhúng: module có thể được nạp TRƯỚC khi kho extension sẵn sàng (content script gộp một file) → nạp lại khi sẵn sàng,
 // không thì lần ghi đầu tiên sẽ ghi đè dữ liệu thật bằng trạng thái rỗng.
 whenStorageReady(() => {
-  state = load();
-  written = kv.get(KEY);
   schedule = loadSchedule();
+  state = withDays(load()); // bỏ ca cũ hơn 3 ngày đi làm ngay khi nạp (ghi xuống ở lần ghi kế tiếp)
+  written = kv.get(KEY);
   ignored = loadIgnored();
   listeners.forEach((l) => l());
   schedListeners.forEach((l) => l());
@@ -118,3 +152,15 @@ export const ignoreStore = {
     ignListeners.forEach((l) => l());
   },
 };
+
+// ---------- KPI ghi cho từng ca (gộp theo ngày, rework, dồn OT) ----------
+let creditCache: { st: State; sch: Schedule; v: IdCredit[] } | null = null;
+/** KPI theo ID của mọi ca (tính lại khi ca hoặc lịch đổi). */
+export function getCredits(): IdCredit[] {
+  if (creditCache && creditCache.st === state && creditCache.sch === schedule) return creditCache.v;
+  const all = [...(state.active ? [state.active] : []), ...state.history];
+  const v = creditAll(all, firstDays(all, schedule, state.idDays ?? {}), schedule);
+  creditCache = { st: state, sch: schedule, v };
+  return v;
+}
+export const useCredits = () => { useShifts(); useSchedule(); return getCredits(); };

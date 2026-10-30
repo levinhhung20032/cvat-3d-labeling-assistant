@@ -63,3 +63,14 @@ describe('lịch hợp lệ', () => {
     expect(normalizeSchedule({ warnMin: 9999 }).warnMin).toBe(120);
   });
 });
+
+describe('chỉ tiêu KPI mỗi ca', () => {
+  it('mặc định 500 frame; số sai / ngoài khoảng thì về mặc định hoặc kẹp lại; lịch cũ chưa có chỉ tiêu nhận mặc định', () => {
+    expect(DEFAULT_SCHEDULE.kpiTarget).toBe(500);
+    expect(normalizeSchedule({ amStart: '08:30' }).kpiTarget).toBe(500);
+    expect(normalizeSchedule({ kpiTarget: Number.NaN }).kpiTarget).toBe(500);
+    expect(normalizeSchedule({ kpiTarget: 0 }).kpiTarget).toBe(1);
+    expect(normalizeSchedule({ kpiTarget: 650.4 }).kpiTarget).toBe(650);
+    expect(normalizeSchedule({ amStart: 'abc', kpiTarget: 700 }).kpiTarget).toBe(700); // lịch sai về mặc định nhưng giữ chỉ tiêu
+  });
+});
