@@ -11,8 +11,8 @@ export function Help({ text }: { text: string }) {
 /**
  * Thanh trượt có số: nhấp đúp vào thanh để về mặc định, bấm vào con số để gõ giá trị trực tiếp (Enter áp dụng, Esc hủy).
  */
-export function Slider({ value, min, max, step, def, unit = '', decimals = 0, disabled = false, onChange, title }: {
-  value: number; min: number; max: number; step: number; def: number; unit?: string; decimals?: number; disabled?: boolean;
+export function Slider({ value, min, max, step, def, unit = '', decimals = 0, disabled = false, onChange, title, width }: {
+  value: number; min: number; max: number; step: number; def: number; unit?: string; decimals?: number; disabled?: boolean; width?: number;
   onChange: (v: number) => void; title?: string;
 }) {
   const [edit, setEdit] = useState<string | null>(null);
@@ -25,7 +25,7 @@ export function Slider({ value, min, max, step, def, unit = '', decimals = 0, di
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }} title={title ?? 'Nhấp đúp vào thanh để về mặc định; bấm vào số để gõ giá trị'}>
       <input
-        type="range" min={min} max={max} step={step} value={value} disabled={disabled}
+        type="range" min={min} max={max} step={step} value={value} disabled={disabled} style={width ? { width } : undefined}
         onChange={(e) => onChange(Number(e.target.value))}
         onDoubleClick={() => { if (!disabled) onChange(def); }}
       />

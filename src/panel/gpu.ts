@@ -13,6 +13,8 @@ export interface GpuParams {
   zClip: number; slab: number; slabFront: number; colorHalf: number;
   dot: number; // px CSS
   pan: [number, number, number]; // tâm khung nhìn (u, v, w) khi dời bằng chuột phải; [0, 0, 0] = tâm box
+  color: [number, number, number] | null; // màu cố định (0–1); null = tô theo độ cao
+  alpha: number; // độ đậm 0–1 (điểm chồng nhau thì đậm dần)
   /** Tô hồng điểm nằm ngay sát ngoài box (cảnh báo lệch). */
   misfit: { cu: number; cv: number; cw: number; sx: number; sy: number; sz: number } | null;
 }
@@ -20,9 +22,9 @@ export interface GpuParams {
 const BUCKETS = 8;
 const VERT = `
 attribute vec3 a_pos;
-uniform float u_view, u_size, u_half, u_zClip, u_slab, u_slabFront, u_colorHalf, u_dotPx, u_dpr, u_misfit;
-uniform vec3 u_bc, u_bs, u_pan;
-varying vec3 v_col;
+uniform float u_view, u_size, u_half, u_zClip, u_slab, u_slabFront, u_colorHalf, u_dotPx, u_dpr, u_misfit, u_useSolid, u_alpha;
+uniform vec3 u_bc, u_bs, u_pan, u_solid;
+varying vec4 v_col;
 vec3 hsl2rgb(float h, float s, float l) {
   float c = (1.0 - abs(2.0 * l - 1.0)) * s;
   float hp = h / 60.0;
@@ -50,15 +52,16 @@ void main() {
   gl_PointSize = u_dotPx;
   float t = (p.z + u_colorHalf) / (2.0 * u_colorHalf);
   float b = min(${BUCKETS - 1}.0, max(0.0, floor(t * ${BUCKETS}.0)));
-  v_col = hsl2rgb(220.0 - b * 200.0 / ${BUCKETS - 1}.0, 0.8, 0.55);
+  vec3 col = u_useSolid > 0.5 ? u_solid : hsl2rgb(220.0 - b * 200.0 / ${BUCKETS - 1}.0, 0.8, 0.55);
   if (u_misfit > 0.5) {
     float du = abs(p.x - u_bc.x) - u_bs.x * 0.5, dv = abs(p.y - u_bc.y) - u_bs.y * 0.5, dw = p.z - u_bc.z - u_bs.z * 0.5;
-    if ((du > 0.0 || dv > 0.0 || dw > 0.0) && du < 0.6 && dv < 0.6 && dw < 0.6 && p.z - u_bc.z > -u_bs.z * 0.5 + 0.2) v_col = vec3(1.0, 0.169, 0.839);
+    if ((du > 0.0 || dv > 0.0 || dw > 0.0) && du < 0.6 && dv < 0.6 && dw < 0.6 && p.z - u_bc.z > -u_bs.z * 0.5 + 0.2) col = vec3(1.0, 0.169, 0.839);
   }
+  v_col = vec4(col * u_alpha, u_alpha); // nhân sẵn alpha (premultiplied) cho phép trộn ONE, ONE_MINUS_SRC_ALPHA
 }`;
 const FRAG = `precision mediump float;
-varying vec3 v_col;
-void main() { gl_FragColor = vec4(v_col, 1.0); }`;
+varying vec4 v_col;
+void main() { gl_FragColor = v_col; }`;
 
 interface Gl {
   canvas: HTMLCanvasElement;
@@ -94,7 +97,7 @@ function init(): Gl | null {
     gl.linkProgram(prog);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog) ?? 'link');
     const u: Record<string, WebGLUniformLocation | null> = {};
-    for (const n of ['u_view', 'u_size', 'u_half', 'u_zClip', 'u_slab', 'u_slabFront', 'u_colorHalf', 'u_dotPx', 'u_dpr', 'u_misfit', 'u_bc', 'u_bs', 'u_pan']) u[n] = gl.getUniformLocation(prog, n);
+    for (const n of ['u_view', 'u_size', 'u_half', 'u_zClip', 'u_slab', 'u_slabFront', 'u_colorHalf', 'u_dotPx', 'u_dpr', 'u_misfit', 'u_bc', 'u_bs', 'u_pan', 'u_useSolid', 'u_solid', 'u_alpha']) u[n] = gl.getUniformLocation(prog, n);
     canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); lost = true; });
     canvas.addEventListener('webglcontextrestored', () => { lost = false; state = null; });
     state = { canvas, gl, prog, u, aPos: gl.getAttribLocation(prog, 'a_pos'), buffers: new Map() };
@@ -153,6 +156,11 @@ export function drawPointsGpu(ctx: CanvasRenderingContext2D, loc: Local, p: GpuP
       gl.uniform3f(u.u_bc!, p.misfit?.cu ?? 0, p.misfit?.cv ?? 0, p.misfit?.cw ?? 0);
       gl.uniform3f(u.u_bs!, p.misfit?.sx ?? 0, p.misfit?.sy ?? 0, p.misfit?.sz ?? 0);
       gl.uniform3f(u.u_pan!, p.pan[0], p.pan[1], p.pan[2]);
+      gl.uniform1f(u.u_useSolid!, p.color ? 1 : 0);
+      gl.uniform3f(u.u_solid!, p.color?.[0] ?? 0, p.color?.[1] ?? 0, p.color?.[2] ?? 0);
+      gl.uniform1f(u.u_alpha!, Math.min(1, Math.max(0.05, p.alpha)));
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.drawArrays(gl.POINTS, 0, loc.n);
     }
     ctx.drawImage(canvas, 0, 0, p.size, p.size);

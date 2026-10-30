@@ -199,6 +199,13 @@ body { margin: 0; }
 .cvla-root label.cvla-filebtn input { display: none; }
 /* nhóm điều khiển của Batch Review: nút / công tắc xuống dòng nguyên khối, không gãy chữ giữa chừng */
 .cvla-root fieldset.cvla-group > label, .cvla-root fieldset.cvla-group > button, .cvla-root fieldset.cvla-group button { white-space: nowrap; }
+/* bố cục nhóm điều khiển (ControlLayout): nút kéo ⠿, vạch đổi rộng / cao */
+.cvla-grip { cursor: grab; color: #8a94a3; padding: 0 3px 0 0; user-select: none; font-weight: 400; }
+.cvla-grip:hover { color: #2563eb; }
+.cvla-split { border-radius: 2px; touch-action: none; }
+.cvla-split-v { cursor: col-resize; }
+.cvla-split-h { cursor: row-resize; height: 6px; }
+.cvla-split:hover { background: #93c5fd; }
 .cvla-badge { display: inline-block; min-width: 16px; padding: 0 5px; margin-left: 6px; border-radius: 9px; background: #fff; color: #1d4ed8; font-size: 11px; line-height: 16px; text-align: center; }
 .cvla-help { display: inline-block; width: 15px; height: 15px; border-radius: 50%; border: 1px solid #8a94a3; color: #5b6573; font-size: 10px; line-height: 14px; text-align: center; cursor: help; margin-left: 4px; font-weight: 700; user-select: none; }
 .cvla-root button.cvla-num { border: 0; background: transparent; padding: 0 2px; min-width: 40px; text-align: left; text-decoration: underline dotted; }
@@ -687,6 +694,9 @@ export function App() {
     setRefFrame(f ?? selFrameRef.current ?? startFrame);
     if (readyRef.current) setTab('ref');
   };
+  // Mở Batch Review từ bảng object: cửa sổ bắt đầu ở frame này (frame 0) và bỏ lần nhảy theo frame CVAT lúc vừa mở. Hết lượt mở thì xoá.
+  const openAtRef = useRef<number | null>(null);
+  useEffect(() => { openAtRef.current = null; }, [tab]);
   const openReview = () => {
     if (readyRef.current) setTab('review');
     else setToast(`Batch Review mở được khi ${Math.min(UNLOCK_FRAMES, passView.total)} frame đầu đã tải xong (xem tiến độ phía trên).`);
@@ -935,9 +945,11 @@ export function App() {
           jobId={data.job.id} onDelete={deleteMade} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs} incomplete={passView.incomplete}
           tracks={work.tracks} labels={data.labels} start={data.job.start_frame} stop={data.job.stop_frame} cvatFrame={focus?.frame ?? null}
           selectedNum={selectedNum} onSelect={selectFromTool}
-          onOpen={(num, first) => {
+          onOpen={(num) => {
+            // Bấm đúp ở bảng object: cửa sổ Batch Review luôn bắt đầu ở frame 0 (frame đầu job), không theo frame CVAT đang mở.
             selectFromTool(num);
-            setStartFrame(first ?? data.job.start_frame);
+            setStartFrame(data.job.start_frame);
+            openAtRef.current = data.job.start_frame;
             openReview();
           }}
         />
@@ -951,7 +963,7 @@ export function App() {
       )}
       {data && work && (tab === 'review' || tab === 'ref') && (
         <BatchReview
-          key={tab} refView={tab === 'ref'} onOpenRef={openRef} onCloseRef={() => setTab('review')}
+          key={tab} refView={tab === 'ref'} onOpenRef={openRef} onCloseRef={() => setTab('review')} openAt={openAtRef.current}
           overlaps={overlaps} drift={driftAll}
           labels={data.labels} job={data.job} ann={work} rows={rows} selectedNum={selectedNum} setSelectedNum={selectFromTool}
           onSel={(f) => { selFrameRef.current = f; }}

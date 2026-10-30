@@ -85,7 +85,14 @@ export function clampPan(p: Pan, lim: number): Pan {
 }
 
 /** Thông số cảnh KHÔNG phụ thuộc mức zoom (để phóng to / thu nhỏ chỉ đổi khung nhìn, không đổi tập điểm được vẽ). */
-export interface Scene { zClip: number; slab: number; colorHalf: number; slabFront?: number }
+export interface Scene { zClip: number; slab: number; colorHalf: number; slabFront?: number; point?: PointStyle }
+/** Kiểu vẽ điểm (nhóm Hiển thị): màu cố định (null = tô theo độ cao), độ đậm 0–1, hệ số cỡ điểm. Điểm lọt ngoài box vẫn tô hồng. */
+export interface PointStyle { color: string | null; alpha: number; scale: number }
+/** '#rrggbb' → [r, g, b] trong 0–1 (sai định dạng: null). */
+export function hexRgb(hex: string): [number, number, number] | null {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  return m ? [parseInt(m[1]!, 16) / 255, parseInt(m[2]!, 16) / 255, parseInt(m[3]!, 16) / 255] : null;
+}
 
 /**
  * Điểm có được vẽ ở khung nhìn nửa-rộng `half` không. Hai trục lên màn hình chỉ bị cắt theo khung (đổi theo zoom — vùng nhìn
@@ -128,13 +135,17 @@ export function drawView(
   ctx.fillStyle = '#0b0f14';
   ctx.fillRect(0, 0, size, size);
   const k = size / (2 * half), c = size / 2;
-  const dot = Math.max(1.5, size / 110);
+  const ps = scene.point;
+  const alpha = ps?.alpha ?? 1;
+  const solid = ps?.color ?? null;
+  const dot = Math.max(1.5, size / 110) * (ps?.scale ?? 1);
   const [ox, oy] = panOffset(view, pan, k);
   // GPU (WebGL) nếu có: chiếu, cắt lát, tô màu và tô hồng điểm lọt ngoài box đều làm trong shader; không thì vẽ bằng canvas 2D như cũ.
   const gpuDone = !!loc && drawPointsGpu(ctx, loc, {
     view: view === 'top' ? 0 : view === 'side' ? 1 : 2, size, half, zClip: scene.zClip, slab: scene.slab, slabFront: scene.slabFront ?? scene.slab,
-    colorHalf: scene.colorHalf, dot, pan: [pan.u, pan.v, pan.w], misfit: misfit && box && box.dyaw === 0 ? { cu: box.cu, cv: box.cv, cw: box.cw, sx: box.sx, sy: box.sy, sz: box.sz } : null,
+    colorHalf: scene.colorHalf, dot, pan: [pan.u, pan.v, pan.w], color: solid ? hexRgb(solid) : null, alpha, misfit: misfit && box && box.dyaw === 0 ? { cu: box.cu, cv: box.cv, cw: box.cw, sx: box.sx, sy: box.sy, sz: box.sz } : null,
   });
+  ctx.globalAlpha = alpha;
   if (loc && !gpuDone) {
     const buckets: number[][] = Array.from({ length: BUCKETS }, () => []);
     const shell: number[] = [];
@@ -154,7 +165,7 @@ export function drawView(
     }
     buckets.push(shell); // nhóm cuối: điểm lọt ra ngoài box
     buckets.forEach((idx, b) => {
-      ctx.fillStyle = b === BUCKETS ? '#ff2bd6' : PALETTE[b]!;
+      ctx.fillStyle = b === BUCKETS ? '#ff2bd6' : solid ?? PALETTE[b]!;
       for (const i of idx) {
         const [x, y] = project(view, loc.u[i]!, loc.v[i]!, loc.w[i]!, k, c);
         ctx.fillRect(x + ox - dot / 2, y + oy - dot / 2, dot, dot);
@@ -171,6 +182,7 @@ export function drawView(
       ctx.fillRect(x + ox - dot / 2, y + oy - dot / 2, dot, dot);
     }
   }
+  ctx.globalAlpha = 1;
   // Mọi thứ còn lại (box, mặt đường, dấu…) vẽ theo khung nhìn đã dời; khung + nhãn view vẽ sau cùng, đứng yên.
   ctx.save();
   ctx.translate(ox, oy);
