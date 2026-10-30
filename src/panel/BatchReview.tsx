@@ -1150,11 +1150,11 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
         <Group id="6" title={<>Object & cửa sổ</>}>
         <span><IdBox value={num} max={max} onCommit={setSelectedNum} /></span>
         <span>
-          <button disabled={k === 0} onClick={() => setK(0)} title={hint('win.first', 'Về cửa sổ đầu tiên')}>|&lt;</button>{' '}
+          <button disabled={k === 0} onClick={() => setK(0)} title={hint('win.first', 'Về cửa sổ đầu tiên')}>|◀</button>{' '}
           <button disabled={k === 0} onClick={() => setK(k - 1)} title={hint('win.prev', 'Cửa sổ frame trước')}>◀</button>{' '}
           <span style={{ display: 'inline-block', minWidth: '6.5em', textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>Cửa sổ {k + 1}/{nWin}</span>{' '}
           <button disabled={k >= nWin - 1} onClick={() => setK(k + 1)} title={hint('win.next', 'Cửa sổ frame sau')}>▶</button>{' '}
-          <button disabled={k >= nWin - 1} onClick={() => setK(nWin - 1)} title={hint('win.last', 'Tới cửa sổ cuối cùng')}>&gt;|</button>
+          <button disabled={k >= nWin - 1} onClick={() => setK(nWin - 1)} title={hint('win.last', 'Tới cửa sổ cuối cùng')}>▶|</button>
         </span>
         <span title="Cửa sổ đang hiện. Nhập a: bắt đầu cửa sổ từ frame a, b tự thành a + số frame - 1 (mặc định 6 frame). Sửa b: đổi số frame hiển thị (b - a + 1). Enter để áp dụng.">
           Cửa sổ hiện{' '}
