@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { actionFor, assign, comboOf, defaultKeymap, normalizeKeymap, prettyCombo, unassign } from '../src/shared/keymap';
+import { actionFor, assign, comboOf, defaultKeymap, duplicateCombos, normalizeKeymap, prettyCombo, unassign } from '../src/shared/keymap';
 
 const ev = (key: string, mods: Partial<{ ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }> = {}) =>
   ({ key, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods });
@@ -73,6 +73,26 @@ describe('Alt+K mở khoá keyframe ở giữa', () => {
   }
     {
     expect(normalizeKeymap({ 'kf.toggle': ['k'] })['kf.unlockInner']).toEqual(['alt+k']);
+  }
+  });
+});
+
+describe('phím tắt cho mọi nút của Batch Review', () => {
+  it("nút mới mặc định chưa gán · ② Ctrl+O, ③ Ctrl+Alt+O · bản lưu cũ nhận mặc định mới · không trùng phím mặc định", () => {
+    {
+    const m = defaultKeymap();
+    for (const id of ['win.first', 'win.last', 'win.fromStart', 'dyn.ownReset', 'size.unify', 'range.window', 'view.center']) expect(m[id]).toEqual([]);
+    expect(m['outside.window']).toEqual(['ctrl+o']);
+    expect(m['outside.pick']).toEqual(['ctrl+alt+o']);
+    expect(comboOf(ev('o', { ctrlKey: true, altKey: true }))).toBe('ctrl+alt+o');
+    expect(actionFor(m, 'ctrl+o')).toBe('outside.window');
+    expect(actionFor(m, 'o')).toBe('outside.from');
+  }
+    {
+    const old = normalizeKeymap({ 'kf.toggle': ['k'], 'outside.from': ['o'] });
+    expect(old['outside.window']).toEqual(['ctrl+o']);
+    expect(old['view.center']).toEqual([]);
+    expect(duplicateCombos(defaultKeymap())).toEqual([]);
   }
   });
 });

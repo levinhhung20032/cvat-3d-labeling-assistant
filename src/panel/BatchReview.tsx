@@ -25,7 +25,7 @@ import { issueKey, ignoreKey, ignoreStore, motionKey, overlapKey, shiftStore, us
 import { CameraPanel } from './CameraPanel';
 import { qcStore, useQcMode, useQcNotes } from './qcStore';
 import { qcKey } from '../shared/qc';
-import { onAction } from './actions';
+import { onAction, useKeyHint, useKeyOf } from './actions';
 import { DEFAULT_FIT, fitGroundOf, fitReport, type FitReport } from '../shared/fit';
 import { thresholdStore, useThresholdVersion } from './thresholdStore';
 import { sym, useSymbols } from './symbolStore';
@@ -247,6 +247,7 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
   onSelect: () => void; onLoaded: (f: number) => void; onCommit: (f: number, c: Cuboid) => void; onZoom: (factor: number) => void;
 }) {
   useSymbols(); // ký hiệu lỗi đổi thì vẽ lại
+  const hint = useKeyHint();
   const [pc, setPc] = useState<PointCloud | null>(() => pointClouds.peek(f) ?? null); // đã có trong kho (tải ở giao diện chính) thì dùng ngay
   const [err, setErr] = useState('');
   const [preview, setPreview] = useState<LocalBox | null>(null);
@@ -325,7 +326,7 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
       onClick={onSelect}
       // Bấm đúp vào cột: thu nhỏ tool và đưa camera 3D của CVAT tới object ở frame này (không áp dụng khi bấm vào nút / ô nhập)
       onDoubleClick={(e) => { if ((e.target as HTMLElement).closest('button, input, textarea, select')) return; onFocusFrame(f); }}
-      // Phím K / O / G / A / I tác dụng lên cột đang trỏ chuột; viền xanh cho biết cột nào sẽ nhận phím.
+      // Phím khoá KF / outside / ground snap / chấp nhận / bỏ qua gợi ý tác dụng lên cột đang trỏ chuột; viền xanh cho biết cột nào sẽ nhận phím.
       onMouseEnter={(e) => { onHover(f); e.currentTarget.style.boxShadow = '0 0 0 3px #2563eb'; }}
       onMouseLeave={(e) => { onHover(null); e.currentTarget.style.boxShadow = ''; }}
       style={{ border: `3px solid ${color}`, outline: selected ? '2px solid #111' : 'none', width: size, flex: 'none' }}
@@ -337,14 +338,14 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
         <span style={{ flex: 'none', display: 'flex', gap: 2 }}>
           {st.cuboid && (
             <button
-              title={st.status === 'key' ? 'Keyframe (khoá). Bấm để mở khoá (về nội suy) — phím K' : 'Chưa là keyframe. Bấm để khoá thành keyframe — phím K'}
+              title={hint('kf.toggle', st.status === 'key' ? 'Keyframe (khoá). Bấm để mở khoá (về nội suy)' : 'Chưa là keyframe. Bấm để khoá thành keyframe')}
               onClick={(e) => { e.stopPropagation(); onToggleKf(f); }}
               style={{ padding: '0 3px', lineHeight: 1.1 }}
             >{st.status === 'key' ? '🔒' : '🔓'}</button>
           )}
           {(st.cuboid || st.status === 'outside' || st.status === 'outside-key') && (
             <button
-              title={st.cuboid ? 'Gắn keyframe outside từ frame này (phím O khi trỏ chuột vào cột)' : 'Đưa object trở lại từ frame này (phím O khi trỏ chuột vào cột)'}
+              title={hint('outside.from', st.cuboid ? 'Gắn keyframe outside từ frame này (phím tắt: khi trỏ chuột vào cột)' : 'Đưa object trở lại từ frame này (phím tắt: khi trỏ chuột vào cột)')}
               onClick={(e) => { e.stopPropagation(); onToggleOutside(f); }}
               style={{ padding: '0 3px', lineHeight: 1.1 }}
             >{st.cuboid ? '⛔' : '↩'}</button>
@@ -356,8 +357,8 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
         {sug && (
           <span style={{ ...CHIP, background: '#c9f3ff', color: '#00505c' }} title={sug.message}>
             💡 gợi ý
-            <button onClick={(e) => { e.stopPropagation(); onAccept(f, sug); }} style={CHIP_BTN} title="Chấp nhận box gợi ý">✔</button>
-            <button onClick={(e) => { e.stopPropagation(); onIgnore(f, true); }} style={CHIP_BTN} title="Bỏ qua gợi ý (phím I)">✖</button>
+            <button onClick={(e) => { e.stopPropagation(); onAccept(f, sug); }} style={CHIP_BTN} title={hint('suggest.accept', 'Chấp nhận box gợi ý')}>✔</button>
+            <button onClick={(e) => { e.stopPropagation(); onIgnore(f, true); }} style={CHIP_BTN} title={hint('suggest.ignore', 'Bỏ qua gợi ý')}>✖</button>
           </span>
         )}
         {bad && !sug && <span style={{ ...CHIP, background: '#ffe0f7', color: '#5a0040' }} title={bad.message}>⚠ {bad.level === 'misfit' ? 'lệch' : 'ít điểm'}</span>}
@@ -383,8 +384,8 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
           {sug && (
             <div style={{ color: '#006b7a' }}>
               {sug.message}{' '}
-              <button onClick={(e) => { e.stopPropagation(); onAccept(f, sug); }} style={{ padding: '0 4px' }}>✔ nhận</button>{' '}
-              <button onClick={(e) => { e.stopPropagation(); onIgnore(f, true); }} style={{ padding: '0 4px' }} title="Bỏ qua gợi ý ở frame này (phím I)">✖ bỏ qua</button>
+              <button onClick={(e) => { e.stopPropagation(); onAccept(f, sug); }} style={{ padding: '0 4px' }} title={hint('suggest.accept', 'Chấp nhận box gợi ý ở frame này')}>✔ nhận</button>{' '}
+              <button onClick={(e) => { e.stopPropagation(); onIgnore(f, true); }} style={{ padding: '0 4px' }} title={hint('suggest.ignore', 'Bỏ qua gợi ý ở frame này')}>✖ bỏ qua</button>
             </div>
           )}
         </div>
@@ -447,7 +448,7 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
       {snap?.warn && (
         <div style={{ background: '#eaf6d8', color: '#2d5a00', fontSize: 11, padding: '1px 4px' }} title={groundTip(snap)}>
           ⏬ {groundAction(snap)}: đáy {snap.dz < 0 ? 'cao hơn' : 'thấp hơn'} mặt đường {cm(snap.dz)} cm (±{cm(snap.sigma)}){snap.slopeDeg >= 1 ? ` · dốc ${snap.slopeDeg.toFixed(1)}°${snap.steep ? ' — dốc lớn, đáy chỉ chạm một phía' : ''}` : ''}{' '}
-          <button onClick={(e) => { e.stopPropagation(); onGround(f); }} style={{ padding: '0 4px' }} title="Dời box theo z để đáy chạm mặt đường (phím G)">snap</button>
+          <button onClick={(e) => { e.stopPropagation(); onGround(f); }} style={{ padding: '0 4px' }} title={hint('ground.snap', 'Dời box theo z để đáy chạm mặt đường')}>snap</button>
         </div>
       )}
     </div>
@@ -512,6 +513,8 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   initialFrame: number; edited: Set<string>; onEdit: (trackIndex: number, frame: number, c: Cuboid, sizeAll?: boolean) => void;
 }) {
   const { start_frame: start, stop_frame: stop } = job;
+  const hint = useKeyHint();
+  const keyOf = useKeyOf();
   const [prefs, setPrefs] = useState(loadPrefs);
   const thrVer = useThresholdVersion(); // ngưỡng cảnh báo chỉnh tay (tab Threshold) đổi thì tính lại cảnh báo
   const max = ann.tracks.length;
@@ -826,6 +829,11 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     if (r && track) apply(removeInnerKeyframes(track, r[0], r[1]), `Đã mở khoá ${'{n}'} keyframe ở giữa ${r[0]}–${r[1]} (giữ hai đầu mút). Hoàn tác được.`, 'Không có keyframe nào ở giữa khoảng này để gỡ.');
   };
   const selSt = track && selFrame !== null ? stateAt(track, selFrame) : null;
+  const rangeToWindow = () => { setRangeFrom(String(frames[0])); setRangeTo(String(frames[frames.length - 1])); };
+  /** ③ Select range: bật / hủy chế độ chọn khoảng bằng hai tiêu đề cột. */
+  const togglePick = () => {
+    if (pick) { setPick(null); setNote('Đã hủy chọn khoảng.'); } else { setPick({ first: null }); setNote('Chọn khoảng: bấm tiêu đề cột ĐẦU khoảng (Esc để hủy).'); }
+  };
   useEffect(() => { setNote(''); }, [num, k]);
   /** Chấp nhận gợi ý: áp box đề xuất thành keyframe (vào nháp, hoàn tác được). */
   const accept = (f: number, s: Suggestion) => {
@@ -968,6 +976,15 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
       switch (id) {
         case 'win.next': setK((x) => Math.min(nWin - 1, x + 1)); break;
         case 'win.prev': setK((x) => Math.max(0, x - 1)); break;
+        case 'win.first': setK(0); break;
+        case 'win.last': setK(nWin - 1); break;
+        case 'win.fromStart': if (viewFrom !== '') { forceFirst.current = true; setViewFrom(''); } break;
+        case 'dyn.ownReset': if (own !== null) clearOwnDyn(); else setNote('Object này chưa có công tắc Dynamic size riêng.'); break;
+        case 'size.unify': if (!dyn) unifySize(); else setNote('Dynamic size đang bật: đồng bộ size chỉ dùng khi tắt Dynamic size.'); break;
+        case 'range.window': rangeToWindow(); break;
+        case 'outside.window': outsideRange(); break;
+        case 'outside.pick': togglePick(); break;
+        case 'view.center': setPan(NO_PAN); break;
         case 'obj.next': if (num < max) setSelectedNum(num + 1); break;
         case 'obj.prev': if (num > 1) setSelectedNum(num - 1); break;
         case 'sel.next': setSelFrame(cs[Math.min(cs.length - 1, (selFrame === null ? -1 : cs.indexOf(selFrame)) + 1)] ?? null); break;
@@ -993,7 +1010,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
         }
       }
     }),
-    [num, max, nWin, selFrame, track, k, cols, sugs, ign, snaps, rangeFrom, rangeTo],
+    [num, max, nWin, selFrame, track, k, cols, sugs, ign, snaps, rangeFrom, rangeTo, frames, pick, viewFrom, own, dyn],
   );
 
   if (!track) return <p>Job chưa có object.</p>;
@@ -1004,42 +1021,44 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     <>
       {/* 3 hàng cố định (chủ dự án 2026-10-30): Keyframe & kích thước + Outside · Gợi ý & mặt đất + QC · Object & cửa sổ + Hiển thị.
           Hai cột thẳng hàng ở mọi hàng; nội dung dài xuống dòng TRONG nhóm, không đẩy nhóm sang hàng khác. */}
-      <div style={{ marginBottom: 6, display: 'grid', gridTemplateColumns: 'minmax(0, 3fr) minmax(0, 2fr)', gap: 6, alignItems: 'stretch' }}>
-        <Group id="3" title={<>Keyframe & kích thước <Help text="🔒 / 🔓 trên tiêu đề cột hoặc phím K: khoá / mở khoá frame đang chọn. Alt+K: mở khoá keyframe ở giữa Phạm vi tác động." /></>} bg="#f4f4f4">
+      <div style={{ marginBottom: 6, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 6, alignItems: 'stretch' }}>
+        <Group id="3" title={<>Keyframe & kích thước <Help text="🔒 / 🔓 trên tiêu đề cột hoặc nút 🔒 frame: khoá / mở khoá frame đang chọn. 🔓 KF giữa: mở khoá keyframe ở giữa Phạm vi tác động. Rê chuột lên nút để xem phím tắt." /></>} bg="#f4f4f4">
         <label title={`Chỉ áp dụng cho object #${num} đang chọn, không đổi cả class. BẬT: kích thước nội suy giữa các keyframe. TẮT (static): đổi kích thước ở một frame thì áp cho mọi keyframe của object. Hiện đang ${dynWhy}. Mặc định theo class / attribute đặt ở tab Dynamic size.`} style={{ fontWeight: 600 }}>
           <input type="checkbox" checked={dyn} onChange={(e) => setDyn(e.target.checked)} /> Dynamic size · #{num}
         </label>
         <span style={{ color: '#567', fontSize: 11 }} title="Nguồn quyết định dynamic size của object này">({dynWhy})</span>
-        {own !== null && <button onClick={clearOwnDyn} title="Bỏ công tắc riêng, quay về theo attribute / class (tab Dynamic size)">↺ theo class</button>}
-        {!dyn && <button disabled={selFrame === null} onClick={() => unifySize()} title="Lấy kích thước của frame đang chọn áp cho mọi keyframe của object (hoàn tác được)">Đồng bộ size theo frame {selFrame ?? '…'}</button>}
+        {own !== null && <button onClick={clearOwnDyn} title={hint('dyn.ownReset', 'Bỏ công tắc riêng, quay về theo attribute / class (tab Dynamic size)')}>↺ theo class</button>}
+        {!dyn && <button disabled={selFrame === null} onClick={() => unifySize()} title={hint('size.unify', 'Lấy kích thước của frame đang chọn áp cho mọi keyframe của object (hoàn tác được)')}>Đồng bộ size theo frame {selFrame ?? '…'}</button>}
         <span style={{ whiteSpace: 'nowrap' }}>
         <b title="Khoảng frame mà các nút Keyframe và Outside bên cạnh tác động (khác với khoảng đang hiển thị ở nhóm Object & cửa sổ). Mặc định bằng cửa sổ đang xem.">Phạm vi tác động</b>{' '}
         <span>
           frame{' '}
           <input value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} size={3} style={{ width: 44 }} /> →{' '}
           <input value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} size={3} style={{ width: 44 }} />{' '}
-          <button onClick={() => { setRangeFrom(String(frames[0])); setRangeTo(String(frames[frames.length - 1])); }} title="Đặt phạm vi tác động bằng đúng cửa sổ đang hiển thị" style={{ padding: '0 5px' }}>= cửa sổ</button>
+          <button onClick={rangeToWindow} title={hint('range.window', 'Đặt phạm vi tác động bằng đúng cửa sổ đang hiển thị')} style={{ padding: '0 5px' }}>= cửa sổ</button>
         </span>
         </span>
         <button
           disabled={!selSt?.cuboid}
           onClick={() => selFrame !== null && toggleKf(selFrame)}
-          title="Phím K. Khoá frame đang chọn thành keyframe (giá trị giữ nguyên); frame đang là keyframe thì mở khoá về nội suy. Chọn frame bằng cách bấm tiêu đề cột."
-        >{selSt?.status === 'key' ? '🔓 Mở khoá' : '🔒 Khoá'} frame {selFrame ?? '…'} (K)</button>
-        <button onClick={unlockInner} title="Gỡ mọi keyframe nằm hẳn bên trong khoảng, giữ hai đầu mút; frame về nội suy">🔓 Mở khoá KF giữa (Alt+K)</button>
+          title={hint('kf.toggle', selSt?.status === 'key'
+            ? 'Mở khoá frame đang chọn: keyframe về nội suy. Chọn frame bằng cách bấm tiêu đề cột.'
+            : 'Khoá frame đang chọn thành keyframe (giá trị giữ nguyên). Chọn frame bằng cách bấm tiêu đề cột.')}
+        >{selSt?.status === 'key' ? '🔓' : '🔒'} frame {selFrame ?? '…'}</button>
+        <button onClick={unlockInner} title={hint('kf.unlockInner', 'Mở khoá keyframe ở giữa: gỡ mọi keyframe nằm hẳn bên trong Phạm vi tác động, giữ hai đầu mút; frame về nội suy')}>🔓 KF giữa</button>
 
         </Group>
         <Group id="4" title={<>Outside</>} bg="#fff4f4">
         <button
           disabled={selFrame === null}
           onClick={() => selFrame !== null && toggleOutside(selFrame)}
-          title="Phím O. Outside từ frame đang chọn tới keyframe kế tiếp; nếu frame đang là outside thì đưa object trở lại. Chọn frame bằng cách bấm tiêu đề cột."
-        >① ⛔ Outside — frame {selFrame ?? '…'} (O)</button>
-        <button onClick={outsideRange} title="Đặt outside cho mọi frame có box trong cửa sổ đang hiển thị; frame ngay sau cửa sổ giữ nguyên trạng thái">② ⛔ Current window</button>
+          title={hint('outside.from', 'Outside từ frame đang chọn tới keyframe kế tiếp; nếu frame đang là outside thì đưa object trở lại. Chọn frame bằng cách bấm tiêu đề cột.')}
+        >① ⛔ Outside — frame {selFrame ?? '…'}</button>
+        <button onClick={outsideRange} title={hint('outside.window', 'Đặt outside cho mọi frame có box trong cửa sổ đang hiển thị; frame ngay sau cửa sổ giữ nguyên trạng thái')}>② ⛔ Current window</button>
         <button
-          onClick={() => { if (pick) { setPick(null); setNote('Đã hủy chọn khoảng.'); } else { setPick({ first: null }); setNote('Chọn khoảng: bấm tiêu đề cột ĐẦU khoảng (Esc để hủy).'); } }}
+          onClick={togglePick}
           style={{ background: pick ? '#ffd9d9' : undefined, fontWeight: pick ? 700 : 400 }}
-          title="Select range: bấm nút rồi bấm tiêu đề hai cột (đầu và cuối khoảng, có thể ở hai cửa sổ khác nhau): mọi frame có box trong khoảng thành outside. Esc để hủy."
+          title={hint('outside.pick', 'Select range: bấm nút rồi bấm tiêu đề hai cột (đầu và cuối khoảng, có thể ở hai cửa sổ khác nhau): mọi frame có box trong khoảng thành outside. Esc hoặc bấm lại để hủy.')}
         >{pick ? (pick.first === null ? '③ Bấm cột đầu…' : `③ Bấm cột cuối (từ ${pick.first})…`) : '③ ⛔ Select range'}</button>
         </Group>
         <Group id="5" title={<>Gợi ý & mặt đất</>} bg="#f0fbff">
@@ -1047,24 +1066,24 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
           onClick={acceptSelectedOrAll}
           disabled={![...sugs.values()].some(Boolean)}
           style={{ fontWeight: 700, background: [...sugs.values()].some(Boolean) ? '#c9f3ff' : undefined }}
-          title="Áp box gợi ý (nét đứt xanh lơ) cho frame đang chọn; nếu chưa chọn frame thì cho mọi frame có gợi ý trong cửa sổ. Phím A."
-        >✔ Chấp nhận (A){[...sugs.entries()].filter(([f, s]) => s && frames.includes(f)).length ? ` · ${[...sugs.entries()].filter(([f, s]) => s && frames.includes(f)).length}` : ''}</button>
+          title={hint('suggest.accept', 'Áp box gợi ý (nét đứt xanh lơ) cho frame đang chọn; nếu chưa chọn frame thì cho mọi frame có gợi ý trong cửa sổ.')}
+        >✔ Chấp nhận{[...sugs.entries()].filter(([f, s]) => s && frames.includes(f)).length ? ` · ${[...sugs.entries()].filter(([f, s]) => s && frames.includes(f)).length}` : ''}</button>
         <button
           onClick={ignoreSelectedOrAll}
           disabled={![...sugs.values()].some(Boolean)}
-          title="Bỏ qua gợi ý (nét đứt xanh lơ) của frame đang chọn; nếu chưa chọn frame thì của mọi frame có gợi ý trong cửa sổ. Phím I."
-        >✖ Bỏ qua (I)</button>
+          title={hint('suggest.ignore', 'Bỏ qua gợi ý (nét đứt xanh lơ) của frame đang chọn; nếu chưa chọn frame thì của mọi frame có gợi ý trong cửa sổ.')}
+        >✖ Bỏ qua</button>
         <button
           onClick={groundSelectedOrAll}
-          title="Ground snap: ước lượng mặt đường quanh chân box (đường xanh lá nét đứt ở view Bên/Trước) rồi hạ/nâng box cho đáy chạm đất. Frame đang chọn, hoặc cả cửa sổ nếu chưa chọn. Phím G."
->⏬ Ground snap (G)</button>
-        <label title="sg size = gợi ý kích thước box: khi box lệch cụm điểm, đề xuất box mới (nét đứt xanh lơ, nút ✔ nhận, phím A) kèm cảnh báo ⚠ lệch. Tắt: không có gợi ý và không có cảnh báo lệch (⚠ ít điểm vẫn hiện)." style={{ fontWeight: 600 }}>
+          title={hint('ground.snap', 'Ground snap: ước lượng mặt đường quanh chân box (đường xanh lá nét đứt ở view Bên/Trước) rồi hạ/nâng box cho đáy chạm đất. Frame đang chọn, hoặc cả cửa sổ nếu chưa chọn.')}
+        >⏬ Ground snap</button>
+        <label title="sg size = gợi ý kích thước box: khi box lệch cụm điểm, đề xuất box mới (nét đứt xanh lơ, nút ✔ nhận) kèm cảnh báo ⚠ lệch. Tắt: không có gợi ý và không có cảnh báo lệch (⚠ ít điểm vẫn hiện)." style={{ fontWeight: 600 }}>
           <input type="checkbox" checked={prefs.suggest} onChange={(e) => updatePrefs({ ...prefs, suggest: e.target.checked })} /> sg size
         </label>
         <label title="gr z=0 = hiện mặt đường ego (Oxy): mặt phẳng Oxy (z = 0, mặt đường dưới xe) vẽ bằng vạch vàng chấm ở view Bên / Trước của MỌI frame, theo z của box ở frame đó (box nghiêng thì vạch nghiêng theo). Để so box với mặt đường chung của cả cảnh; không ảnh hưởng cảnh báo hay dữ liệu.">
           <input type="checkbox" checked={prefs.egoPlane} onChange={(e) => updatePrefs({ ...prefs, egoPlane: e.target.checked })} /> gr z=0
         </label>
-        <label title={`sg gr = dò mặt đất: đo mặt đường riêng cho object ở đúng frame đang xét (lớp thấp nhất có mật độ ở 8 cung quanh box + lớp tiếp xúc dưới gầm), không dự đoán từ frame khác. Báo khi đáy cao hơn mặt đường quá ${cm(DEFAULT_GROUND.floatTol)} cm hoặc thấp hơn quá ${cm(DEFAULT_GROUND.sinkTol)} cm và vượt độ bất định của phép đo. Tắt: không còn chip ⏬, không có Ground snap (G) và tự bám mặt đất.`} style={{ fontWeight: 600 }}>
+        <label title={`sg gr = dò mặt đất: đo mặt đường riêng cho object ở đúng frame đang xét (lớp thấp nhất có mật độ ở 8 cung quanh box + lớp tiếp xúc dưới gầm), không dự đoán từ frame khác. Báo khi đáy cao hơn mặt đường quá ${cm(DEFAULT_GROUND.floatTol)} cm hoặc thấp hơn quá ${cm(DEFAULT_GROUND.sinkTol)} cm và vượt độ bất định của phép đo. Tắt: không còn chip ⏬, không có Ground snap và tự bám mặt đất.`} style={{ fontWeight: 600 }}>
           <input type="checkbox" checked={prefs.ground} onChange={(e) => updatePrefs({ ...prefs, ground: e.target.checked })} /> sg gr
         </label>
         <label title="gr lock = tự bám mặt đất khi kéo: sau mỗi lần dời / đổi cỡ box bằng chuột, tự đặt lại độ cao cho đáy chạm mặt đường tại vị trí mới">
@@ -1131,11 +1150,11 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
         <Group id="6" title={<>Object & cửa sổ</>}>
         <span><IdBox value={num} max={max} onCommit={setSelectedNum} /></span>
         <span>
-          <button disabled={k === 0} onClick={() => setK(0)} title="Về cửa sổ đầu tiên">|&lt;</button>{' '}
-          <button disabled={k === 0} onClick={() => setK(k - 1)}>◀</button>{' '}
+          <button disabled={k === 0} onClick={() => setK(0)} title={hint('win.first', 'Về cửa sổ đầu tiên')}>|&lt;</button>{' '}
+          <button disabled={k === 0} onClick={() => setK(k - 1)} title={hint('win.prev', 'Cửa sổ frame trước')}>◀</button>{' '}
           <span style={{ display: 'inline-block', minWidth: '6.5em', textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>Cửa sổ {k + 1}/{nWin}</span>{' '}
-          <button disabled={k >= nWin - 1} onClick={() => setK(k + 1)}>▶</button>{' '}
-          <button disabled={k >= nWin - 1} onClick={() => setK(nWin - 1)} title="Tới cửa sổ cuối cùng">&gt;|</button>
+          <button disabled={k >= nWin - 1} onClick={() => setK(k + 1)} title={hint('win.next', 'Cửa sổ frame sau')}>▶</button>{' '}
+          <button disabled={k >= nWin - 1} onClick={() => setK(nWin - 1)} title={hint('win.last', 'Tới cửa sổ cuối cùng')}>&gt;|</button>
         </span>
         <span title="Cửa sổ đang hiện. Nhập a: bắt đầu cửa sổ từ frame a, b tự thành a + số frame - 1 (mặc định 6 frame). Sửa b: đổi số frame hiển thị (b - a + 1). Enter để áp dụng.">
           Cửa sổ hiện{' '}
@@ -1143,14 +1162,14 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
           <input value={winB} onChange={(e) => setWinB(e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} onBlur={commitB} onFocus={(e) => e.target.select()} size={3} style={{ width: 44 }} />{' '}
           <span style={{ display: 'inline-block', minWidth: '4.6em', fontVariantNumeric: 'tabular-nums' }}>({frames.length} frame)</span>{' '}
           <label><input type="checkbox" checked={prefs.keyOnly} onChange={(e) => updatePrefs({ ...prefs, keyOnly: e.target.checked })} /> chỉ keyframe</label>
-          {viewFrom !== '' && <button style={{ marginLeft: 4 }} onClick={() => { forceFirst.current = true; setViewFrom(''); }} title="Quay về đầu job">⟲ từ đầu</button>}
+          {viewFrom !== '' && <button style={{ marginLeft: 4 }} onClick={() => { forceFirst.current = true; setViewFrom(''); }} title={hint('win.fromStart', 'Quay về đầu job')}>⟲ từ đầu</button>}
         </span>
         </Group>
         <Group id="2" title={<>Hiển thị</>}>
         <span>
-          Zoom <button onClick={() => zoomBy(1 / 1.25)}>−</button> <b>{Math.round(zoom * 100)}%</b>{' '}
-          <button onClick={() => zoomBy(1.25)}>+</button> <button onClick={() => { setZoom(1); setPan(NO_PAN); }} title="Zoom 100% và đưa box về giữa ô">Vừa object</button>{' '}
-          <button onClick={() => setPan(NO_PAN)} disabled={!panned} style={panned ? { fontWeight: 700, color: '#a16207' } : undefined} title="Đưa khung nhìn về giữa box (đang dời bằng chuột phải). Giữ chuột phải trên ô rồi kéo để dời khung nhìn.">⌖ Về giữa</button>
+          Zoom <button onClick={() => zoomBy(1 / 1.25)} title={hint('zoom.out', 'Thu nhỏ')}>−</button> <b>{Math.round(zoom * 100)}%</b>{' '}
+          <button onClick={() => zoomBy(1.25)} title={hint('zoom.in', 'Phóng to')}>+</button> <button onClick={() => { setZoom(1); setPan(NO_PAN); }} title={hint('zoom.reset', 'Zoom 100% và đưa box về giữa ô')}>Vừa object</button>{' '}
+          <button onClick={() => setPan(NO_PAN)} disabled={!panned} style={panned ? { fontWeight: 700, color: '#a16207' } : undefined} title={hint('view.center', 'Đưa khung nhìn về giữa box (đang dời bằng chuột phải). Giữ chuột phải trên ô rồi kéo để dời khung nhìn.')}>⌖ Về giữa</button>
         </span>
         <span>
           Cỡ ô{' '}
@@ -1165,7 +1184,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
           Lát cắt +{' '}
           <Slider min={0} max={3} step={0.1} value={prefs.slabMargin} def={0.5} unit="m" decimals={1} onChange={(v) => updatePrefs({ ...prefs, slabMargin: v })} />
         </span>
-        <label title="Cho box nghiêng (roll / pitch): giữ Alt rồi kéo ở view Bên (pitch) / view Trước (roll), và Ground snap (G) nghiêng box song song mặt đường dốc. Tắt: Alt+kéo ở các view này chỉ xoay yaw và G chỉ dời z."><input type="checkbox" checked={prefs.tilt} onChange={(e) => updatePrefs({ ...prefs, tilt: e.target.checked })} /> nghiêng theo mặt đường</label>
+        <label title="Cho box nghiêng (roll / pitch): giữ Alt rồi kéo ở view Bên (pitch) / view Trước (roll), và Ground snap nghiêng box song song mặt đường dốc. Tắt: Alt+kéo ở các view này chỉ xoay yaw và Ground snap chỉ dời z."><input type="checkbox" checked={prefs.tilt} onChange={(e) => updatePrefs({ ...prefs, tilt: e.target.checked })} /> nghiêng theo mặt đường</label>
         </Group>
       </div>
       <div style={{ marginBottom: 6, display: 'flex', flexWrap: 'wrap', gap: '4px 12px', alignItems: 'center' }}>
@@ -1205,7 +1224,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
         })()}
       </details>
       <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>
-        Mẹo thao tác <Help text={"phím K / O / G / A / I tác dụng lên cột frame đang trỏ chuột (viền xanh) · xem/đổi phím ở tab \"Phím tắt\" · cuộn chuột trên ô để zoom mọi frame · giữ chuột phải rồi kéo để dời khung nhìn (mọi frame cùng dời), nút ⌖ Về giữa / phím 0 để đưa về giữa · kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo để xoay (view Trên: yaw · view Bên: pitch · view Trước: roll, nếu bật \"nghiêng theo mặt đường\") · sửa frame nào thì frame đó thành keyframe"} />
+        Mẹo thao tác <Help text={`phím tắt khoá KF / outside / ground snap / chấp nhận / bỏ qua gợi ý (${['kf.toggle', 'outside.from', 'ground.snap', 'suggest.accept', 'suggest.ignore'].map((id) => keyOf(id) ?? 'chưa gán').join(' / ')}) tác dụng lên cột frame đang trỏ chuột (viền xanh) · rê chuột lên nút để xem phím tắt, đổi phím ở tab "Phím tắt" · cuộn chuột trên ô để zoom mọi frame · giữ chuột phải rồi kéo để dời khung nhìn (mọi frame cùng dời), nút ⌖ Về giữa để đưa về giữa ·` + " kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo để xoay (view Trên: yaw · view Bên: pitch · view Trước: roll, nếu bật \"nghiêng theo mặt đường\") · sửa frame nào thì frame đó thành keyframe"} />
       </div>
       <div style={{ display: 'flex', gap: prefs.gap, overflowX: 'auto', justifyContent: 'safe center', padding: '2px 4px 6px' }}>
         {cols.map((c) => (

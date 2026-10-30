@@ -68,7 +68,7 @@ export function KeysPanel({ map, setMap }: { map: Keymap; setMap: (m: Keymap) =>
                     <button title="Gỡ phím này" style={{ border: 0, background: 'transparent', cursor: 'pointer' }} onClick={() => setMap(unassign(map, a.id, c))}>×</button>
                   </span>
                 ))}
-                {(map[a.id] ?? []).length === 0 && <i style={{ color: '#b00' }}>chưa gán </i>}
+                {(map[a.id] ?? []).length === 0 && <i style={{ color: '#888' }}>chưa gán </i>}
                 <button
                   onClick={() => { setCapturingId(capturingId === a.id ? null : a.id); setNote(''); }}
                   style={{ fontWeight: capturingId === a.id ? 700 : 400, background: capturingId === a.id ? '#ffe9a8' : undefined }}
