@@ -51,6 +51,19 @@ const STATUS_TEXT: Record<FrameState['status'], string> = {
 const EMPTY_CUBS: Cuboid[] = [];
 const ZOOM_MIN = 0.5, ZOOM_MAX = 8;
 const CELL_MIN = 110, CELL_MAX = 520;
+const VIEW_GAP = 4; // tab Ref: khoảng cách giữa 3 view xếp ngang
+/** Tab Ref: ở cỡ ô này khung nhìn rộng đúng bằng ở Batch Review; ô to hơn thì thấy thêm vùng xung quanh (giữ nguyên tỉ lệ px / m). */
+const REF_BASE = 400;
+/** Tab Ref: cỡ ô tự khớp chiều ngang (trang cuộn dọc nếu cao quá) hoặc chỉnh tay; ẩn được cột Gốc để cột Gộp chiếm cả chiều ngang. */
+interface RefViewPrefs { auto: boolean; size: number; orig: boolean }
+const REF_VIEW_KEY = 'cvla-ref-view', REF_CELL_MAX = 1000;
+function loadRefPrefs(): RefViewPrefs {
+  try {
+    const p = JSON.parse(kv.get(REF_VIEW_KEY) ?? '{}') as Partial<RefViewPrefs>;
+    const size = typeof p.size === 'number' && Number.isFinite(p.size) ? Math.min(REF_CELL_MAX, Math.max(CELL_MIN, p.size)) : 480;
+    return { auto: p.auto !== false, size, orig: p.orig !== false };
+  } catch { return { auto: true, size: 480, orig: true }; }
+}
 
 // --- tùy chọn hiển thị, nhớ theo từng người dùng (chỉ là tiện ích, không quan trọng nếu mất) ---
 interface Prefs { auto: boolean; size: number; slabMargin: number; perWin: number; keyOnly: boolean; tilt: boolean; gap: number; ground: boolean; suggest: boolean; egoPlane: boolean }
@@ -232,7 +245,8 @@ const CHIP_BTN: React.CSSProperties = { padding: '0 3px', lineHeight: 1, height:
 interface FileFlag { kind: IssueKind; state: FlagState; msg?: string; det: boolean }
 const NO_FLAGS: FileFlag[] = [];
 
-function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan, refl = null, onBelow, onRefPlane }: {
+function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan, refl = null, onBelow, onRefPlane, horizontal = false }: {
+  horizontal?: boolean; // tab Ref: 3 view Trên | Bên | Trước xếp ngang
   onRefPlane?: (f: number, d: number | null) => void; // tab Ref: mặt phản chiếu cao hơn đáy box bao nhiêu (m)
   refl?: RefState | null; // tab Ref: vẽ box ảo, mặt phản chiếu và điểm lấy đối xứng
   onBelow?: (f: number, n: number) => void; // số điểm dưới mặt đường trong chân box (để gợi ý bật ref)
@@ -354,7 +368,7 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
       // Phím khoá KF / outside / ground snap / chấp nhận / bỏ qua gợi ý tác dụng lên cột đang trỏ chuột; viền xanh cho biết cột nào sẽ nhận phím.
       onMouseEnter={(e) => { onHover(f); e.currentTarget.style.boxShadow = '0 0 0 3px #2563eb'; }}
       onMouseLeave={(e) => { onHover(null); e.currentTarget.style.boxShadow = ''; }}
-      style={{ border: `3px solid ${color}`, outline: selected ? '2px solid #111' : 'none', width: size, flex: 'none' }}
+      style={{ border: `3px solid ${color}`, outline: selected ? '2px solid #111' : 'none', width: horizontal ? size * 3 + 2 * VIEW_GAP : size, flex: 'none' }}
     >
       <div style={{ background: color, color: '#fff', padding: '1px 4px', fontSize: Math.max(11, Math.min(14, size / 14)), display: 'flex', alignItems: 'center', gap: 4 }}>
         <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={`frame ${f} · ${STATUS_TEXT[st.status]}`}>
@@ -394,7 +408,7 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
         {shownMotion && <span style={{ ...CHIP, background: '#ffe9c7', color: '#6b3a00' }} title={shownMotion.message}>⚠ {sym('M')} đi xa</span>}
         {snap?.warn && <span style={{ ...CHIP, background: '#eaf6d8', color: '#2d5a00' }} title={groundTip(snap)}>⏬ {groundAction(snap)}</span>}
       </div>
-      <div style={{ position: 'relative' }}>
+      <div style={{ position: 'relative', ...(horizontal ? { display: 'flex', gap: VIEW_GAP } : null) }}>
       {/* Kích thước box ở frame này (dài × rộng × cao, m), góc trái trên của cột ngay dưới nhãn view "Trên"; đang kéo thì hiện kích thước mới. */}
       {box && (
         <span style={{ position: 'absolute', left: 1, top: 16, zIndex: 2, pointerEvents: 'none', font: '11px system-ui, sans-serif', lineHeight: '14px', padding: '0 4px', background: 'rgba(11, 15, 20, 0.75)', color: '#e2e8f0', fontVariantNumeric: 'tabular-nums' }}>
@@ -489,6 +503,34 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
           <button onClick={(e) => { e.stopPropagation(); onGround(f); }} style={{ padding: '0 4px' }} title={hint('ground.snap', 'Dời box theo z để đáy chạm mặt đường')}>snap</button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Tab Ref: kéo cạnh phải (chia 3 vì 3 ô xếp ngang), cạnh dưới hoặc góc của một hàng để đổi cỡ ô; mọi hàng dùng chung cỡ. Thả chuột thì lưu. */
+function EdgeResize({ size, onResize, children }: { size: number; onResize: (size: number, save: boolean) => void; children: ReactNode }) {
+  const drag = useRef<{ x: number; y: number; s: number; mode: 'x' | 'y' | 'xy' } | null>(null);
+  const next = (e: React.PointerEvent) => {
+    const d = drag.current!;
+    const dx = (e.clientX - d.x) / 3, dy = e.clientY - d.y;
+    return d.s + (d.mode === 'x' ? dx : d.mode === 'y' ? dy : Math.max(dx, dy));
+  };
+  const grip = (mode: 'x' | 'y' | 'xy', style: React.CSSProperties) => (
+    <div
+      title="Kéo để đổi cỡ ô: tỉ lệ giữ nguyên nên ô to hơn thì thấy rộng hơn quanh object"
+      onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); drag.current = { x: e.clientX, y: e.clientY, s: size, mode }; }}
+      onPointerMove={(e) => { if (drag.current) onResize(next(e), false); }}
+      onPointerUp={(e) => { if (drag.current) { onResize(next(e), true); drag.current = null; } }}
+      onClick={(e) => e.stopPropagation()}
+      style={{ position: 'absolute', zIndex: 3, touchAction: 'none', background: 'rgba(192, 132, 252, .35)', borderRadius: 3, cursor: mode === 'x' ? 'ew-resize' : mode === 'y' ? 'ns-resize' : 'nwse-resize', ...style }}
+    />
+  );
+  return (
+    <div style={{ position: 'relative', display: 'inline-block' }}>
+      {children}
+      {grip('x', { top: 0, right: -9, width: 7, height: '100%' })}
+      {grip('y', { left: 0, bottom: -9, height: 7, width: '100%' })}
+      {grip('xy', { right: -11, bottom: -11, width: 11, height: 11 })}
     </div>
   );
 }
@@ -676,6 +718,8 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   const reportBelow = useCallback((f: number, n: number) => setBelow((m) => (m.get(f) === n ? m : new Map(m).set(f, n))), []);
   const refHint = !refView && !refS.on && !refS.dismissed ? frames.filter((f) => (below.get(f) ?? 0) >= DEFAULT_REFLECT.minBelow) : [];
   const [refOffset, setRefOffset] = useState<number | null>(null); // tab Ref: mặt phản chiếu cao hơn đáy box (m)
+  const [refPrefs, setRefPrefsState] = useState(loadRefPrefs);
+  const setRefPrefs = (p: RefViewPrefs) => { setRefPrefsState(p); try { kv.set(REF_VIEW_KEY, JSON.stringify(p)); } catch { /* bỏ qua */ } };
   const onRefPlane = useCallback((_f: number, d: number | null) => setRefOffset(d), []);
   const setRefMode = (mode: RefMode) => refStore.set(job.id, num, mode === 'custom' ? { mode, dh: refS.mode === 'custom' ? refS.dh : Math.round((refOffset ?? 0) * 100) / 100 } : { mode });
   const nudgeRef = (d: number) => refStore.set(job.id, num, { mode: 'custom', dh: Math.round(((refS.mode === 'custom' ? refS.dh : refOffset ?? 0) + d) * 100) / 100 });
@@ -1100,9 +1144,9 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   const selCol = cols.find((c) => c.f === selFrame) ?? null;
   const az = selCol?.ref ? azimuthDeg(selCol.ref) : null;
   /** Một cột frame (lưới Batch Review và hai cột của tab Ref dùng chung). */
-  const colEl = (c: (typeof cols)[number], key: string, sz: number, extra: { refl?: RefState | null; onBelow?: (f: number, n: number) => void; onRefPlane?: (f: number, d: number | null) => void } = {}) => (
+  const colEl = (c: (typeof cols)[number], key: string, sz: number, extra: { refl?: RefState | null; onBelow?: (f: number, n: number) => void; onRefPlane?: (f: number, d: number | null) => void; half?: number; locHalf?: number; horizontal?: boolean } = {}) => (
     <Column
-      key={key} f={c.f} size={sz} st={c.st} refCub={c.ref} half={half} locHalf={locHalf} selected={selFrame === c.f} pan={panEff} onPan={setPanClamped}
+      key={key} f={c.f} size={sz} st={c.st} refCub={c.ref} half={extra.half ?? half} locHalf={extra.locHalf ?? locHalf} horizontal={extra.horizontal} selected={selFrame === c.f} pan={panEff} onPan={setPanClamped}
       edited={edited.has(`${num}:${c.f}`)} warn={warn} fixed={!dyn} ignored={ign.has(ignoreKey(job.id, num, c.f))}
       onIgnore={(f, on) => ignoreFrames([f], on)}
       motion={c.mot} motionIgnored={ign.has(motionKey(job.id, num, c.f))}
@@ -1119,7 +1163,16 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
 
   if (refView) {
     const rc = cols[0]!;
-    const refSize = Math.max(CELL_MIN, Math.min(Math.floor((vp.w - 70) / 2), Math.floor((vp.h - 230) / 3)));
+    // Mỗi hàng là 3 view xếp ngang; hai hàng (Gốc trên, Ref dưới) cùng cỡ. Tự khớp: vừa chiều ngang và (nếu được) vừa chiều cao cả hai hàng.
+    const rows = refPrefs.orig ? 2 : 1;
+    const fitSize = Math.max(CELL_MIN, Math.min(REF_CELL_MAX, Math.floor((vp.w - 80 - 2 * VIEW_GAP) / 3), Math.floor((vp.h - 260) / rows) - 70));
+    const refSize = refPrefs.auto ? fitSize : refPrefs.size;
+    const refHalf = half * refSize / REF_BASE; // cùng tỉ lệ px / m: ô to hơn = tầm nhìn rộng hơn
+    const refGeo = { half: refHalf, locHalf: Math.max(locHalf, refHalf * 1.2), horizontal: true };
+    const resizeTo = (v: number, save: boolean) => {
+      const p = { ...refPrefs, auto: false, size: Math.round(Math.min(REF_CELL_MAX, Math.max(CELL_MIN, v))) };
+      if (save) setRefPrefs(p); else setRefPrefsState(p);
+    };
     const offset = refS.mode === 'custom' ? refS.dh : refOffset;
     return (
       <>
@@ -1152,14 +1205,32 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
           <button onClick={() => { refStore.set(job.id, num, { on: false }); onCloseRef?.(); }} title="Tắt ref mode cho object này">Tắt ref mode</button>
           {note && <span style={{ color: '#7a4b00' }}>{note}</span>}
         </div>
-        <div style={{ display: 'flex', gap: 16, justifyContent: 'safe center', overflowX: 'auto', padding: '2px 4px 6px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', alignItems: 'center', marginBottom: 6 }}>
+          <span>
+            Zoom <button onClick={() => zoomBy(1 / 1.25)} title={hint('zoom.out', 'Thu nhỏ')}>−</button> <b>{Math.round(zoom * 100)}%</b>{' '}
+            <button onClick={() => zoomBy(1.25)} title={hint('zoom.in', 'Phóng to')}>+</button>{' '}
+            <button onClick={() => { setZoom(1); setPan(NO_PAN); }} title={hint('zoom.reset', 'Zoom 100% và đưa box về giữa ô')}>Vừa object</button>
+          </span>
+          <span title="Cỡ mỗi ô view (px), hai hàng luôn cùng cỡ. Kéo cạnh phải / cạnh dưới / góc của một hàng để đổi cỡ: tỉ lệ px / m giữ nguyên nên ô to hơn thì thấy rộng hơn quanh object (zoom vẫn đổi tỉ lệ).">
+            Cỡ ô{' '}
+            <label><input type="checkbox" checked={refPrefs.auto} onChange={(e) => setRefPrefs({ ...refPrefs, auto: e.target.checked, size: refSize })} /> tự khớp màn hình</label>{' '}
+            <Slider min={CELL_MIN} max={REF_CELL_MAX} step={10} value={refSize} def={480} unit="px" disabled={refPrefs.auto} onChange={(v) => setRefPrefs({ ...refPrefs, auto: false, size: v })} />
+          </span>
+          <label title="Ẩn hàng Gốc, chỉ còn hàng Gộp đối xứng">
+            <input type="checkbox" checked={refPrefs.orig} onChange={(e) => setRefPrefs({ ...refPrefs, orig: e.target.checked })} /> hiện hàng Gốc
+          </label>
+          <span style={{ color: '#777', fontSize: 11 }}>tầm nhìn ±{refHalf.toFixed(1)} m</span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'safe center', overflowX: 'auto', padding: '2px 12px 12px 4px' }}>
+          {refPrefs.orig && (
+            <div>
+              <div style={{ fontWeight: 600 }}>Gốc</div>
+              <EdgeResize size={refSize} onResize={resizeTo}>{colEl(rc, 'orig', refSize, refGeo)}</EdgeResize>
+            </div>
+          )}
           <div>
-            <div style={{ textAlign: 'center', fontWeight: 600 }}>Gốc</div>
-            {colEl(rc, 'orig', refSize)}
-          </div>
-          <div>
-            <div style={{ textAlign: 'center', fontWeight: 600, color: '#6b21a8' }}>Gộp đối xứng (ref)</div>
-            {colEl(rc, 'ref', refSize, { refl: refS, onRefPlane })}
+            <div style={{ fontWeight: 600, color: '#6b21a8' }}>Gộp đối xứng (ref)</div>
+            <EdgeResize size={refSize} onResize={resizeTo}>{colEl(rc, 'ref', refSize, { ...refGeo, refl: refS, onRefPlane })}</EdgeResize>
           </div>
         </div>
         <p style={{ fontSize: 11, color: '#666', margin: '2px 0' }}>

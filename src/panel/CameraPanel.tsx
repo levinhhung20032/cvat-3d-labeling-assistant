@@ -234,19 +234,42 @@ export function CameraTab({ start, stop }: { start: number; stop: number }) {
   );
 }
 
+/** Cạnh / góc kéo được để đổi cỡ cửa sổ nổi: hướng x (−1 trái, 1 phải, 0 không) và y (−1 trên, 1 dưới, 0 không). */
+const EDGES: { dx: -1 | 0 | 1; dy: -1 | 0 | 1; cursor: string; style: React.CSSProperties }[] = [
+  { dx: 0, dy: -1, cursor: 'ns-resize', style: { top: -3, left: 8, right: 8, height: 7 } },
+  { dx: 0, dy: 1, cursor: 'ns-resize', style: { bottom: -3, left: 8, right: 8, height: 7 } },
+  { dx: -1, dy: 0, cursor: 'ew-resize', style: { left: -3, top: 8, bottom: 8, width: 7 } },
+  { dx: 1, dy: 0, cursor: 'ew-resize', style: { right: -3, top: 8, bottom: 8, width: 7 } },
+  { dx: -1, dy: -1, cursor: 'nwse-resize', style: { left: -3, top: -3, width: 12, height: 12 } },
+  { dx: 1, dy: 1, cursor: 'nwse-resize', style: { right: -3, bottom: -3, width: 12, height: 12 } },
+  { dx: 1, dy: -1, cursor: 'nesw-resize', style: { right: -3, top: -3, width: 12, height: 12 } },
+  { dx: -1, dy: 1, cursor: 'nesw-resize', style: { left: -3, bottom: -3, width: 12, height: 12 } },
+];
+const MIN_W = 240, MIN_H = 160;
+
 /**
- * Cửa sổ nổi nhỏ: kéo thanh tiêu đề để dời, kéo góc dưới phải để đổi cỡ; vị trí / cỡ nhớ trên máy này, luôn được kéo về trong khung tool.
+ * Cửa sổ nổi nhỏ: kéo thanh tiêu đề để dời, kéo bất kỳ cạnh / góc nào để đổi cỡ; vị trí / cỡ nhớ trên máy này, luôn được kéo về trong khung tool.
  * Vẽ qua portal ra ngoài `.cvla-root` (giao diện tối / xám đặt `filter` ở đó, làm `position: fixed` bám theo nội dung thay vì khung tool).
  */
 function FloatWin({ host, title, onDock, children }: { host: Element; title: ReactNode; onDock: () => void; children: ReactNode }) {
   const fitIn = (g: PopGeo): PopGeo => {
     const W = window.innerWidth, H = window.innerHeight;
-    const w = clamp(g.w, 240, Math.max(240, W - 8)), h = clamp(g.h, 160, Math.max(160, H - 8));
+    const w = clamp(g.w, MIN_W, Math.max(MIN_W, W - 8)), h = clamp(g.h, MIN_H, Math.max(MIN_H, H - 8));
     return { w, h, x: clamp(g.x, 0, Math.max(0, W - w)), y: clamp(g.y, 0, Math.max(0, H - h)) };
   };
   const [geo, setGeo] = useState<PopGeo>(() => fitIn(loadPopGeo() ?? { w: 440, h: 340, x: window.innerWidth - 456, y: window.innerHeight - 356 }));
-  const box = useRef<HTMLDivElement>(null);
   const drag = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
+  const size = useRef<{ px: number; py: number; g: PopGeo; dx: number; dy: number } | null>(null);
+  /** Kéo cạnh / góc: cạnh trái / trên dời theo chuột (cạnh đối diện đứng yên), cạnh phải / dưới kéo dài ra; không nhỏ hơn cỡ tối thiểu. */
+  const resized = (e: React.PointerEvent): PopGeo => {
+    const r = size.current!, mx = e.clientX - r.px, my = e.clientY - r.py;
+    let { x, y, w, h } = r.g;
+    if (r.dx === 1) w = Math.max(MIN_W, w + mx);
+    if (r.dx === -1) { const nw = Math.max(MIN_W, w - mx); x += w - nw; w = nw; }
+    if (r.dy === 1) h = Math.max(MIN_H, h + my);
+    if (r.dy === -1) { const nh = Math.max(MIN_H, h - my); y += h - nh; h = nh; }
+    return fitIn({ x, y, w, h });
+  };
   const save = (g: PopGeo) => { setGeo(g); savePopGeo(g); };
   useEffect(() => {
     const on = () => setGeo((g) => fitIn(g));
@@ -255,15 +278,21 @@ function FloatWin({ host, title, onDock, children }: { host: Element; title: Rea
   }, []);
   return createPortal(
     <div
-      ref={box}
-      // Thả chuột sau khi kéo góc đổi cỡ (resize của CSS): ghi lại cỡ mới.
-      onPointerUp={() => { const el = box.current; if (el && (el.offsetWidth !== geo.w || el.offsetHeight !== geo.h)) save(fitIn({ ...geo, w: el.offsetWidth, h: el.offsetHeight })); }}
       style={{
         position: 'fixed', left: geo.x, top: geo.y, width: geo.w, height: geo.h, zIndex: 60, boxSizing: 'border-box',
         display: 'flex', flexDirection: 'column', background: '#fff', color: '#111', font: '12px/1.4 system-ui',
-        border: '1px solid #1f2937', borderRadius: 6, boxShadow: '0 6px 24px rgba(0,0,0,.45)', resize: 'both', overflow: 'hidden', minWidth: 240, minHeight: 160,
+        border: '1px solid #1f2937', borderRadius: 6, boxShadow: '0 6px 24px rgba(0,0,0,.45)',
       }}
     >
+      {EDGES.map((ed) => (
+        <div
+          key={`${ed.dx}${ed.dy}`}
+          onPointerDown={(e) => { if (e.button !== 0) return; e.currentTarget.setPointerCapture(e.pointerId); size.current = { px: e.clientX, py: e.clientY, g: geo, dx: ed.dx, dy: ed.dy }; }}
+          onPointerMove={(e) => { if (size.current) setGeo(resized(e)); }}
+          onPointerUp={(e) => { if (size.current) { save(resized(e)); size.current = null; } }}
+          style={{ position: 'absolute', zIndex: 2, touchAction: 'none', cursor: ed.cursor, ...ed.style }}
+        />
+      ))}
       <div
         onPointerDown={(e) => {
           if (e.button !== 0 || (e.target as HTMLElement).closest('button')) return;
@@ -277,7 +306,7 @@ function FloatWin({ host, title, onDock, children }: { host: Element; title: Rea
         <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
         <button onClick={onDock} title="Gắn ảnh camera trở lại dưới các cột frame" style={{ padding: '0 6px' }}>⧈ Gắn lại</button>
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 4 }}>{children}</div>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 4, borderRadius: '0 0 6px 6px' }}>{children}</div>
     </div>,
     host,
   );
