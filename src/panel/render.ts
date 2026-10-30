@@ -67,6 +67,8 @@ const project = (view: View, u: number, v: number, w: number, k: number, c: numb
 export interface Pan { u: number; v: number; w: number }
 export const NO_PAN: Pan = { u: 0, v: 0, w: 0 };
 const VIEW_LABEL: Record<View, string> = { top: 'Trên', side: 'Bên', front: 'Trước' };
+/** Màu của ref mode: box ảo, mặt phản chiếu và điểm lấy đối xứng. */
+export const REF_COLOR = '#c084fc';
 
 /** Độ lệch trên màn hình (px) do dời khung nhìn: hình vẽ khi chưa dời cộng thêm (ox, oy). */
 export function panOffset(view: View, pan: Pan, k: number): [number, number] {
@@ -121,6 +123,7 @@ export function drawView(
   box: LocalBox | null, half: number, status: Status, active = false, misfit = false, ghost: LocalBox | null = null, ground: number | null = null, mark: { u: number; v: number; w: number } | null = null,
   scene: Scene = { zClip: half, slab: half * 0.5, colorHalf: half }, overlays: LocalBox[] = [], tiltBase: Pick<Cuboid, 'rx' | 'ry' | 'yaw'> | null = null,
   groundMarks: { u: number; v: number; w: number; used: boolean }[] = [], contactW: number | null = null, pan: Pan = NO_PAN, egoPlane: EgoPlane | null = null,
+  reflect: { pts: Local | null; plane: number } | null = null, // ref mode: điểm lật từ box ảo về box chính + độ cao w của mặt phản chiếu
 ) {
   ctx.fillStyle = '#0b0f14';
   ctx.fillRect(0, 0, size, size);
@@ -157,6 +160,16 @@ export function drawView(
         ctx.fillRect(x + ox - dot / 2, y + oy - dot / 2, dot, dot);
       }
     });
+  }
+  if (reflect?.pts) {
+    // Ref mode: điểm lấy đối xứng từ box ảo, vẽ chồng lên điểm thật bằng màu tím.
+    const r = reflect.pts;
+    ctx.fillStyle = REF_COLOR;
+    for (let i = 0; i < r.n; i++) {
+      if (!pointVisible(view, r.u[i]!, r.v[i]!, r.w[i]!, half, scene, pan)) continue;
+      const [x, y] = project(view, r.u[i]!, r.v[i]!, r.w[i]!, k, c);
+      ctx.fillRect(x + ox - dot / 2, y + oy - dot / 2, dot, dot);
+    }
   }
   // Mọi thứ còn lại (box, mặt đường, dấu…) vẽ theo khung nhìn đã dời; khung + nhãn view vẽ sau cùng, đứng yên.
   ctx.save();
@@ -203,6 +216,16 @@ export function drawView(
       ctx.lineWidth = 1.5;
       ctx.setLineDash([5, 4]);
       ctx.beginPath(); ctx.moveTo(-ox, gy); ctx.lineTo(size - ox, gy); ctx.stroke();
+      ctx.restore();
+    }
+    if (reflect && view !== 'top') {
+      // mặt phản chiếu (ref mode): tím nét gạch dài
+      const ry = c - reflect.plane * k;
+      ctx.save();
+      ctx.strokeStyle = REF_COLOR;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([8, 4]);
+      ctx.beginPath(); ctx.moveTo(-ox, ry); ctx.lineTo(size - ox, ry); ctx.stroke();
       ctx.restore();
     }
     if (view !== 'top' && (groundMarks.length || contactW !== null)) {

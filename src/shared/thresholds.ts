@@ -7,6 +7,7 @@ import { RULESET } from './qcrules';
 import { BIG, type Rule, type SectionCode } from './alertRules';
 import type { SymbolKind } from './symbols';
 import { splitConfig } from './splitId';
+import { DEFAULT_REFLECT } from './reflect';
 
 /**
  * Ngưỡng cảnh báo chỉnh tay (tab Threshold). Mọi luật đọc ngưỡng từ các cấu hình mặc định (`DEFAULT_QC_RULES`, `DEFAULT_FIT`…),
@@ -60,6 +61,8 @@ export const FIELDS: Field[] = [
   field('F.ratio', 'F', 'Tỉ lệ điểm ngoài / (trong + ngoài) tối thiểu', { min: 0, max: 1, step: 0.05 }, () => DEFAULT_FIT.ratio, (v) => { DEFAULT_FIT.ratio = v; }),
   field('F.clear', 'F', 'Bỏ lớp điểm sát đáy box (khi chưa đo được mặt đường)', { unit: 'm', min: 0, max: 1, step: 0.01 }, () => DEFAULT_FIT.groundClear, (v) => { DEFAULT_FIT.groundClear = v; }),
   field('G.sigma', 'G', 'Chỉ báo khi lệch > k × độ bất định', { unit: 'k', min: 0, max: 10, step: 0.1 }, () => DEFAULT_GROUND.sigmaK, (v) => { DEFAULT_GROUND.sigmaK = v; }),
+  field('G.refBelow', 'G', 'Gợi ý bật ref mode khi dưới mặt đường (trong chân box) có từ', { unit: 'điểm', min: 1, max: 10000, step: 1, int: true, help: 'Điểm nằm dưới mặt đường trong phạm vi chân box, sâu tới một chiều cao box: nhiều thì có thể là ảnh phản chiếu của vật' }, () => DEFAULT_REFLECT.minBelow, (v) => { DEFAULT_REFLECT.minBelow = v; }),
+  field('G.refClear', 'G', '… bỏ lớp sát mặt đường dày', { unit: 'm', min: 0, max: 1, step: 0.01 }, () => DEFAULT_REFLECT.clear, (v) => { DEFAULT_REFLECT.clear = v; }),
   field('G.range', 'G', 'Chỉ đo mặt đường trong bán kính', { unit: 'm', min: 5, max: 300, step: 5 }, () => DEFAULT_GROUND.maxRange, (v) => { DEFAULT_GROUND.maxRange = v; }),
 ];
 const BY_KEY = new Map(FIELDS.map((f) => [f.key, f]));

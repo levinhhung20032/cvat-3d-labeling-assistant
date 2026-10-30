@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ObjectRow } from '../shared/table';
 import type { CvatLabel, CvatTrack } from '../shared/types';
 import { sortedShapes, stateAt } from '../shared/interp';
@@ -9,6 +9,7 @@ import { sym, useSymbols } from './symbolStore';
 import { fmtIou, type OverlapPair } from '../shared/overlap';
 import { PENDING_STYLE } from './ui';
 import { seenStore, useSeen } from './seenStore';
+import { scrollToTopOfPanel } from './scrollTo';
 
 /** ID đã xem trong Batch Review: gạch chân. */
 const SEEN_STYLE = { textDecoration: 'underline', textDecorationThickness: 2, textUnderlineOffset: 2 } as const;
@@ -89,6 +90,9 @@ export function ObjectTable({ jobId, rows, hints, overlapFrames, overlapPairs, o
     });
     return out;
   }, [tracks, jobLabels]);
+  // Mở bảng (vd. từ Batch Review): cuộn để object đang chọn nằm ở đầu trang, dòng đã được tô sáng như vừa bấm 1 lần.
+  const selRow = useRef<HTMLTableRowElement>(null);
+  useLayoutEffect(() => { scrollToTopOfPanel(selRow.current); }, []);
   const ov = (r: ObjectRow) => overlapFrames.get(r.num) ?? 0;
   const h = (r: ObjectRow) => hints.get(r.num) ?? 0;
   const labels = useMemo(() => [...new Set(rows.map((r) => r.label))], [rows]);
@@ -143,7 +147,7 @@ export function ObjectTable({ jobId, rows, hints, overlapFrames, overlapPairs, o
         <tbody>
           {shown.map((r, i) => (
             <tr
-              key={r.num} onClick={() => onSelect(r.num)} onDoubleClick={() => onOpen(r.num, r.first)} aria-selected={r.num === selectedNum}
+              key={r.num} ref={r.num === selectedNum ? selRow : undefined} onClick={() => onSelect(r.num)} onDoubleClick={() => onOpen(r.num, r.first)} aria-selected={r.num === selectedNum}
               style={{ cursor: 'pointer', userSelect: 'none', borderTop: '1px solid #ddd', background: r.num === selectedNum ? SEL_BG : r.made === 'draft' ? '#dff5df' : r.made === 'server' ? '#e3ecff' : i % 2 ? ODD_BG : undefined }}
             >
               <td><b style={seen.has(r.id) ? SEEN_STYLE : undefined} title={seen.has(r.id) ? 'Đã xem trong Batch Review' : undefined}>{r.num}</b> {r.made === 'draft' ? <span title="Object do tool tạo, đang trong NHÁP (chưa có trên CVAT)" style={{ background: '#2e9d3b', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 mới</span> : r.made === 'server' ? <span title="Object do tool tạo và đã upload; chỉ loại này mới xóa được bằng tool" style={{ background: '#2f5fd0', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 tool</span> : <span style={{ color: "#999", fontSize: 10 }}>db {r.id}</span>}</td><td>{r.label}</td>

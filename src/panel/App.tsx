@@ -3,8 +3,9 @@ import { findOverlaps, groupPairs } from '../shared/overlap';
 import { applyDraft, buildDraft, checkDraft, draftKey, type SavedDraft } from '../shared/draft';
 import { hostScope, kv, onStorageHealth, storageHealth } from './storage';
 import { seenStore } from './seenStore';
+import { useRefState } from './refStore';
 import { api } from '../shared/api';
-import { useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react';
 import type { Cuboid } from '../shared/cuboid';
 import { upsertKeyframe } from '../shared/edit';
 import { actionFor, comboOf } from '../shared/keymap';
@@ -158,7 +159,7 @@ try { VERSION = api.runtime.getManifest().version; } catch { /* extension vừa 
 const EMPTY: Draft = { work: null, edited: new Set<string>(), undo: [], redo: [] };
 
 type State = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ok'; data: Data };
-type Tab = 'objects' | 'review' | 'shift' | 'qc' | 'dyn' | 'thr' | 'cam' | 'keys' | 'job';
+type Tab = 'objects' | 'review' | 'ref' | 'shift' | 'qc' | 'dyn' | 'thr' | 'cam' | 'keys' | 'job';
 /** Tải ưu tiên ngần này frame đầu; tải xong là mở được Batch Review (job ngắn hơn: cả job), phần còn lại tải và tính ngầm. */
 const UNLOCK_FRAMES = 6;
 
@@ -675,6 +676,17 @@ export function App() {
       if (computed.current > 0) setDoneNote(`Job ${data.job.id}: đã tải ${total - failed}/${total} frame${failed ? ` (${failed} frame tải lỗi, bỏ qua)` : ''}, đo xong mặt đường cho ${work.tracks.length} object (trong bán kính ${DEFAULT_GROUND.maxRange} m quanh ego), đã tính trôi box (${driftAll.size} object có trôi). Mọi số liệu trong bảng đã đầy đủ.`);
     }
   }, [data, work, passView, ready, doneJob, driftAll]);
+  // Mở Batch Review (từ bảng object đã cuộn xuống dưới, từ QC, từ CVAT…): luôn bắt đầu ở đầu trang, không giữ chỗ cuộn của tab trước.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => { if (tab === 'review' || tab === 'ref') rootRef.current?.scrollIntoView({ block: 'start' }); }, [tab]);
+  // Tab Ref chỉ có khi object đang chọn bật ref mode; tắt (hoặc đổi sang object không bật) thì về Batch Review.
+  const refS = useRefState(data?.job.id ?? 0, selectedNum);
+  const [refFrame, setRefFrame] = useState(0);
+  useEffect(() => { if (tab === 'ref' && !refS.on) setTab('review'); }, [tab, refS.on]);
+  const openRef = (f?: number) => {
+    setRefFrame(f ?? selFrameRef.current ?? startFrame);
+    if (readyRef.current) setTab('ref');
+  };
   const openReview = () => {
     if (readyRef.current) setTab('review');
     else setToast(`Batch Review mở được khi ${Math.min(UNLOCK_FRAMES, passView.total)} frame đầu đã tải xong (xem tiến độ phía trên).`);
@@ -700,7 +712,7 @@ export function App() {
     } catch { /* bỏ qua */ }
   }, [data?.job.id]);
   useEffect(() => {
-    if (!resumeTab || (resumeTab === 'review' && !ready)) return; // Batch Review: chờ tới khi mở được
+    if (!resumeTab || ((resumeTab === 'review' || resumeTab === 'ref') && !ready)) return; // Batch Review / Ref: chờ tới khi mở được
     setTab(resumeTab);
     setResumeTab(null);
   }, [resumeTab, ready]);
@@ -735,9 +747,9 @@ export function App() {
 
   const tabBtn = (t: Tab, label: string) => (
     <button
-      onClick={() => (t === 'review' ? openReview() : setTab(t))}
-      disabled={t === 'review' && !ready}
-      title={t === 'review' && !ready ? 'Mở được khi đã tải xong point cloud mọi frame và tính xong mặt đường / trôi box' : undefined}
+      onClick={() => (t === 'review' ? openReview() : t === 'ref' ? openRef() : setTab(t))}
+      disabled={(t === 'review' || t === 'ref') && !ready}
+      title={(t === 'review' || t === 'ref') && !ready ? 'Mở được khi đã tải xong point cloud mọi frame và tính xong mặt đường / trôi box' : t === 'ref' ? `Reflection mode của object #${selectedNum} (frame đang chọn ở Batch Review)` : undefined}
       className={tab === t ? 'cvla-tab cvla-tab-on' : 'cvla-tab'}
     >
       {label}
@@ -745,7 +757,7 @@ export function App() {
   );
 
   return (
-    <div className={skin === 'dark' ? 'cvla-root cvla-dark' : skin === 'gray' ? 'cvla-root cvla-gray' : 'cvla-root'} style={{ font: '13px/1.4 system-ui', padding: 10, color: '#111' }}>
+    <div ref={rootRef} className={skin === 'dark' ? 'cvla-root cvla-dark' : skin === 'gray' ? 'cvla-root cvla-gray' : 'cvla-root'} style={{ font: '13px/1.4 system-ui', padding: 10, color: '#111' }}>
       <style>{STYLE}</style>
       <div className="cvla-head">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
@@ -769,6 +781,7 @@ export function App() {
       <div style={{ margin: '6px 0 0', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4 }}>
         {tabBtn('objects', 'Bảng object')}
         {tabBtn('review', 'Batch Review')}
+        {refS.on && selectedNum !== null && tabBtn('ref', `Ref #${selectedNum}`)}
         {tabBtn('shift', 'Ca / KPI')}
         {tabBtn('qc', 'QC')}
         {tabBtn('dyn', 'Dynamic size')}
@@ -936,8 +949,9 @@ export function App() {
           onOpen={(num, frame) => { selectFromTool(num); setStartFrame(frame); openReview(); }}
         />
       )}
-      {data && work && tab === 'review' && (
+      {data && work && (tab === 'review' || tab === 'ref') && (
         <BatchReview
+          key={tab} refView={tab === 'ref'} onOpenRef={openRef} onCloseRef={() => setTab('review')}
           overlaps={overlaps} drift={driftAll}
           labels={data.labels} job={data.job} ann={work} rows={rows} selectedNum={selectedNum} setSelectedNum={selectFromTool}
           onSel={(f) => { selFrameRef.current = f; }}
@@ -946,7 +960,7 @@ export function App() {
           onView={(f) => {
             viewFrames.current = f;
             if (f.length) setStartFrame(f[0]!);
-          }} initialFrame={startFrame} edited={draft.edited} focus={focus}
+          }} initialFrame={tab === 'ref' ? refFrame : startFrame} edited={draft.edited} focus={focus}
           onEdit={(idx, frame, cub, sizeAll) => { dispatch({ t: 'edit', idx, frame, cub, sizeAll }); shiftStore.edit(data.job.id, idx + 1); }}
           onTrack={(idx, track, frames) => { dispatch({ t: 'track', idx, track, frames }); shiftStore.edit(data.job.id, idx + 1); }}
           onSplit={(idx, resume) => {

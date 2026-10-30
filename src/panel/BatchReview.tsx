@@ -19,7 +19,7 @@ import { parseLabelSpecs } from '../shared/attributes';
 import { AttributePanel } from './AttributePanel';
 import { gpuActive } from './gpu';
 import { Help, PENDING_STYLE, Pill, Slider } from './ui';
-import { clampPan, drawView, type EgoPlane, localize, NO_PAN, panBy, panOffset, rotateLocal, STATUS_COLOR, type Local, type Pan, type Scene, type View } from './render';
+import { clampPan, drawView, type EgoPlane, localize, NO_PAN, panBy, panOffset, rotateLocal, REF_COLOR, STATUS_COLOR, type Local, type Pan, type Scene, type View } from './render';
 import { Cancelled, pointClouds } from './stores';
 import { issueKey, ignoreKey, ignoreStore, motionKey, overlapKey, shiftStore, useIgnored } from './shiftStore';
 import { CameraPanel } from './CameraPanel';
@@ -32,6 +32,8 @@ import { thresholdStore, useThresholdVersion } from './thresholdStore';
 import { sym, useSymbols } from './symbolStore';
 import { findLongOutsideGaps, SPLIT_OUTSIDE_FRAMES, type OutsideGap } from '../shared/splitId';
 import { confirmSnap, DEFAULT_GROUND, groundSnap, tiltFromPlane, type GroundResult, type GroundSector } from '../shared/ground';
+import { DEFAULT_REFLECT, mirrorBox, mirroredPoints, pointsBelow, refPlane, type PlaneSource, type RefMode, type RefState } from '../shared/reflect';
+import { refStore, useRefState } from './refStore';
 import { motionJump, type MotionWarning } from '../shared/motion';
 import { trackIssues, type FrameIssue, type IssueKind } from '../shared/qcrules';
 import { flagKey, flagState, type FlagMark, type FlagState } from '../shared/qcimport';
@@ -82,7 +84,8 @@ function cursorFor(view: View, hit: Hit, alt = false): string {
 
 interface DragState { hit: NonNullable<Hit>; x0: number; y0: number; base: LocalBox; moved: boolean }
 
-function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, tiltOn, autoSnap, onPreview, onCommit, onZoom, pan, onPan }: {
+function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, tiltOn, autoSnap, onPreview, onCommit, onZoom, pan, onPan, reflect }: {
+  reflect: { pts: Local | null; plane: number } | null; // ref mode (chỉ ở tab Ref)
   egoPlane: EgoPlane | null; // mặt phẳng Oxy của ego trong hệ của khung nhìn (null: công tắc tắt)
   scene: Scene; overlays: LocalBox[]; tiltOn: boolean; frame: Mat3 | null; // frame: khung nhìn căn theo box nghiêng (null nếu box không nghiêng)
   mark: { u: number; v: number; w: number } | null;
@@ -102,8 +105,8 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
     const ctx = ref.current?.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawView(ctx, size, view, loc, box, half, st.status, !!drag.current, misfit, ghost, ground, mark, scene, overlays, st.cuboid, groundMarks, contactW, pan, egoPlane);
-  }, [view, size, dpr, loc, st.status, st.cuboid, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, pan]);
+    drawView(ctx, size, view, loc, box, half, st.status, !!drag.current, misfit, ghost, ground, mark, scene, overlays, st.cuboid, groundMarks, contactW, pan, egoPlane, reflect);
+  }, [view, size, dpr, loc, st.status, st.cuboid, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, pan, reflect]);
 
   // Cuộn chuột trên ô = phóng to/thu nhỏ mọi frame (listener gốc để chặn cuộn trang).
   const zoomRef = useRef(onZoom);
@@ -203,6 +206,8 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
 }
 
 const NO_ISSUES: FrameIssue[] = [];
+const REF_MODE_TEXT: Record<RefMode, string> = { bottom: 'mặt dưới box', road: 'mặt đường', custom: 'Custom' };
+const PLANE_TEXT: Record<PlaneSource, string> = { bottom: 'mặt dưới box', road: 'mặt đường đo được', ego: 'z = 0 của ego (chưa đo được mặt đường)', custom: 'tự chỉnh' };
 const NO_MARKS: GroundSector[] = [];
 
 const cm = (m: number) => Math.round(Math.abs(m) * 100);
@@ -227,7 +232,10 @@ const CHIP_BTN: React.CSSProperties = { padding: '0 3px', lineHeight: 1, height:
 interface FileFlag { kind: IssueKind; state: FlagState; msg?: string; det: boolean }
 const NO_FLAGS: FileFlag[] = [];
 
-function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan }: {
+function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan, refl = null, onBelow, onRefPlane }: {
+  onRefPlane?: (f: number, d: number | null) => void; // tab Ref: mặt phản chiếu cao hơn đáy box bao nhiêu (m)
+  refl?: RefState | null; // tab Ref: vẽ box ảo, mặt phản chiếu và điểm lấy đối xứng
+  onBelow?: (f: number, n: number) => void; // số điểm dưới mặt đường trong chân box (để gợi ý bật ref)
   onFocusFrame: (f: number) => void;
   pan: Pan; onPan: (p: Pan) => void;
   fileFlags: FileFlag[]; onMarkFlag: (f: number, kind: IssueKind, mark: FlagMark | null) => void;
@@ -320,7 +328,23 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
     return { u, v, w };
   }, [shownMotion, st.cuboid, M]);
   const box = preview ?? (st.cuboid ? identityBox(st.cuboid) : null);
-  const overlays = useMemo(() => (refCub ? overlayCubs.map((o) => boxV(localBoxOf(refCub, o))) : []), [refCub, overlayCubs, M]);
+  // Ref mode: mặt đường dưới object (đo được ở bước đếm điểm / Ground snap; tab Ref đo thêm nếu chưa có), z = 0 của ego, rồi mặt phản chiếu.
+  const ptsView = M ? locView : loc;
+  const egoW = st.cuboid ? -st.cuboid.z : null;
+  const roadW = useMemo(() => {
+    const known = fitGround?.c ?? groundOv?.groundW ?? null;
+    if (known !== null || !refl || refl.mode !== 'road' || !loc || !st.cuboid) return known;
+    return groundSnap(loc, st.cuboid.sx, st.cuboid.sy, st.cuboid.sz, { cu: 0, cv: 0, cw: 0, range: Math.hypot(st.cuboid.x, st.cuboid.y) })?.groundW ?? null;
+  }, [fitGround, groundOv, refl?.mode, loc, st.cuboid]);
+  const plane = refl && box ? refPlane(box, refl, roadW, egoW) : null;
+  const reflect = useMemo(() => (plane && box && ptsView ? { pts: mirroredPoints(ptsView, box, plane.w), plane: plane.w } : null), [plane?.w, box, ptsView]);
+  const below = useMemo(() => (onBelow && !refl && ptsView && st.cuboid ? pointsBelow(ptsView, identityBox(st.cuboid), roadW, egoW) : 0), [!!onBelow, refl, ptsView, st.cuboid, roadW, egoW, thrVer]);
+  useEffect(() => { onBelow?.(f, below); }, [f, below]);
+  useEffect(() => { onRefPlane?.(f, plane && box ? plane.w - (box.cw - box.sz / 2) : null); }, [f, plane?.w, box?.cw, box?.sz]);
+  const overlays = useMemo(() => {
+    const o = refCub ? overlayCubs.map((x) => boxV(localBoxOf(refCub, x))) : [];
+    return plane && box ? [...o, { ...mirrorBox(box, plane.w), color: REF_COLOR }] : o;
+  }, [refCub, overlayCubs, M, plane?.w, plane ? box : null]); // ref tắt: không phụ thuộc box (box tạo mới mỗi lần vẽ)
   const color = STATUS_COLOR[st.status];
   return (
     <div
@@ -378,9 +402,14 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
         </span>
       )}
       {VIEWS.map((v) => (
-        <Cell key={v} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} pan={pan} onPan={onPan} />
+        <Cell key={v} reflect={reflect} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} pan={pan} onPan={onPan} />
       ))}
       </div>
+      {reflect && plane && (
+        <div style={{ fontSize: 11, padding: '1px 4px', background: '#f3e8ff', color: '#4c1d95' }} title="Điểm trong box ảo (tím nét đứt) được lật qua mặt phản chiếu (vạch tím) và vẽ chồng lên box chính bằng màu tím">
+          ref: {reflect.pts?.n ?? 0} điểm gộp · mặt phản chiếu: {PLANE_TEXT[plane.src]} ({plane.w >= (box ? box.cw - box.sz / 2 : 0) ? '+' : ''}{((plane.w - (box ? box.cw - box.sz / 2 : 0)) * 100).toFixed(0)} cm so với đáy box)
+        </div>
+      )}
       {!pc && (
         <div style={{ fontSize: 11, padding: 2 }}>
           {err ? <>Lỗi tải frame: {err.slice(0, 120)} <button onClick={(e) => { e.stopPropagation(); setRetryN((x) => x + 1); }} style={{ padding: '0 4px' }}>↻ thử lại</button></> : 'đang tải…'}
@@ -511,7 +540,9 @@ function Group({ id, title, bg, children }: { id: string; title: ReactNode; bg?:
   );
 }
 
-export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, selectedNum, setSelectedNum, initialFrame, edited, onEdit, onTrack, focus, onView, onSel, onHoverFrame, labels, overlaps }: {
+export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, selectedNum, setSelectedNum, initialFrame, edited, onEdit, onTrack, focus, onView, onSel, onHoverFrame, labels, overlaps, refView = false, onOpenRef, onCloseRef }: {
+  refView?: boolean; // tab Ref: một frame (initialFrame), hai cột Gốc / Gộp đối xứng
+  onOpenRef?: (frame?: number) => void; onCloseRef?: () => void;
   overlaps: OverlapItem[]; // chồng lấn của cả job (đã bỏ cặp được bỏ qua)
   onSplit: (trackIndex: number, resume: number) => number | null; // tách ID tại frame resume; trả số thứ tự object mới, null nếu không tách được
   onHoverFrame: (f: number | null) => void;
@@ -588,7 +619,8 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     const cur = track ? stateAt(track, f).cuboid : null;
     onEdit(num - 1, f, cub, !dyn && !!cur && !sameSize(cur, cub));
   };
-  const frames = pageFrames(list, k, prefs.perWin, overlap);
+  const [refF, setRefF] = useState(initialFrame); // tab Ref: frame đang xem
+  const frames = refView ? [refF] : pageFrames(list, k, prefs.perWin, overlap);
   const framesKey = frames.join(',');
   // Đổi cách chia trang / khoảng xem / object: giữ nguyên frame đang xem thay vì nhảy.
   const anchorRef = useRef(frames[0] ?? start);
@@ -618,7 +650,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     const n = prefs.keyOnly ? list.filter((f) => f >= a && f <= b).length : b - a + 1;
     if (n >= 2) updatePrefs({ ...prefs, perWin: Math.min(30, n) });
   };
-  useEffect(() => { onView(frames); }, [framesKey]);
+  useEffect(() => { if (!refView) onView(frames); }, [framesKey]);
   // Object xem trước đó và cửa sổ lúc rời đi (nút ↶). Đổi object bằng bất kỳ cách nào (ô ID, ↑/↓, bảng object, CVAT) đều ghi lại;
   // nhớ qua lúc rời tab Batch Review (vd. mở ID khác từ bảng object thì ↶ vẫn về ID trước đó).
   const mem = objMem?.job === job.id ? objMem : null;
@@ -630,13 +662,23 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     here.current = { num, at: frames[0] ?? start };
     objMem = { job: job.id, here: here.current, back: b };
   }, [num, framesKey]);
-  /** Sửa ô Object ID: sang object đó và cửa sổ về frame đầu job. */
+  /** Sửa ô Object ID hoặc phím object trước / sau: sang object đó và cửa sổ về frame đầu job. */
   const pickId = (n: number) => {
     if (n === num) return;
     forceFirst.current = true;
     if (viewFrom !== '') setViewFrom('');
     setSelectedNum(n);
   };
+  // Ref mode của object đang chọn; ở Batch Review, cột nào có nhiều điểm dưới mặt đường (có thể là ảnh phản chiếu) thì gợi ý bật.
+  const refS = useRefState(job.id, num);
+  const [below, setBelow] = useState<Map<number, number>>(new Map());
+  useEffect(() => setBelow(new Map()), [num]);
+  const reportBelow = useCallback((f: number, n: number) => setBelow((m) => (m.get(f) === n ? m : new Map(m).set(f, n))), []);
+  const refHint = !refView && !refS.on && !refS.dismissed ? frames.filter((f) => (below.get(f) ?? 0) >= DEFAULT_REFLECT.minBelow) : [];
+  const [refOffset, setRefOffset] = useState<number | null>(null); // tab Ref: mặt phản chiếu cao hơn đáy box (m)
+  const onRefPlane = useCallback((_f: number, d: number | null) => setRefOffset(d), []);
+  const setRefMode = (mode: RefMode) => refStore.set(job.id, num, mode === 'custom' ? { mode, dh: refS.mode === 'custom' ? refS.dh : Math.round((refOffset ?? 0) * 100) / 100 } : { mode });
+  const nudgeRef = (d: number) => refStore.set(job.id, num, { mode: 'custom', dh: Math.round(((refS.mode === 'custom' ? refS.dh : refOffset ?? 0) + d) * 100) / 100 });
   const canBack = !!back && back.num <= max && back.num !== num;
   const goBack = () => {
     if (!back || !canBack) { setNote('Chưa có object nào xem trước đó.'); return; }
@@ -1025,8 +1067,8 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
         case 'outside.window': outsideRange(); break;
         case 'outside.pick': togglePick(); break;
         case 'view.center': setPan(NO_PAN); break;
-        case 'obj.next': if (num < max) setSelectedNum(num + 1); break;
-        case 'obj.prev': if (num > 1) setSelectedNum(num - 1); break;
+        case 'obj.next': if (num < max) pickId(num + 1); break;
+        case 'obj.prev': if (num > 1) pickId(num - 1); break;
         case 'obj.back': goBack(); break;
         case 'sel.next': setSelFrame(cs[Math.min(cs.length - 1, (selFrame === null ? -1 : cs.indexOf(selFrame)) + 1)] ?? null); break;
         case 'sel.prev': setSelFrame(cs[Math.max(0, (selFrame === null ? cs.length : cs.indexOf(selFrame)) - 1)] ?? null); break;
@@ -1057,6 +1099,76 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   if (!track) return <p>Job chưa có object.</p>;
   const selCol = cols.find((c) => c.f === selFrame) ?? null;
   const az = selCol?.ref ? azimuthDeg(selCol.ref) : null;
+  /** Một cột frame (lưới Batch Review và hai cột của tab Ref dùng chung). */
+  const colEl = (c: (typeof cols)[number], key: string, sz: number, extra: { refl?: RefState | null; onBelow?: (f: number, n: number) => void; onRefPlane?: (f: number, d: number | null) => void } = {}) => (
+    <Column
+      key={key} f={c.f} size={sz} st={c.st} refCub={c.ref} half={half} locHalf={locHalf} selected={selFrame === c.f} pan={panEff} onPan={setPanClamped}
+      edited={edited.has(`${num}:${c.f}`)} warn={warn} fixed={!dyn} ignored={ign.has(ignoreKey(job.id, num, c.f))}
+      onIgnore={(f, on) => ignoreFrames([f], on)}
+      motion={c.mot} motionIgnored={ign.has(motionKey(job.id, num, c.f))}
+      onIgnoreMotion={ignoreMotion}
+      autoSnap={autoSnap && prefs.ground} groundOv={series.get(c.f) ?? null} groundOn={prefs.ground} egoOn={prefs.egoPlane} suggestOn={prefs.suggest} onGround={(f) => { if (!groundFrame(f)) setNote(`Không snap được frame ${f}: ${snapWhy.current || 'không rõ lý do'}.`); }}
+      onSnap={(f, g) => setSnaps((m) => (m.get(f) === g ? m : new Map(m).set(f, g)))}
+      onSuggest={(f, s) => setSugs((m) => (m.get(f) === s ? m : new Map(m).set(f, s)))} onAccept={accept}
+      onFit={(f, r) => setFits((m) => (m.get(f) === r ? m : new Map(m).set(f, r)))} onSelect={() => onPickSelect(c.f)}
+      onLoaded={(f) => setLoaded((s) => new Set(s).add(f))}
+      onCommit={commit} onZoom={zoomBy} onToggleKf={toggleKf} overlap={ovAt.get(c.f) ?? []} overlayCubs={ovCubs.get(c.f) ?? EMPTY_CUBS} onIgnoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], true); setNote(`Đã bỏ qua cặp #${Math.min(num, o)}–#${Math.max(num, o)} (mọi frame).`); }} onOpenObject={setSelectedNum} tiltOn={prefs.tilt} onFocusFrame={onFocusFrame} fileFlags={(fileFlags.get(c.f) ?? NO_FLAGS).filter((x) => !x.det)} onMarkFlag={markFlagAsk} issues={issueMap.get(c.f) ?? NO_ISSUES} issueIgnored={(k) => ign.has(issueKey(job.id, num, c.f, k))} onIgnoreIssue={ignoreIssueAsk} qcOn={qcOn} qcNote={qcNotes[qcKey(job.id, num, c.f)] ?? ''} onQcNote={(f, t) => qcStore.set(job.id, num, f, t)} onToggleOutside={toggleOutside} onHover={(f) => { hoverRef.current = f; onHoverFrame(f); }} scene={scene}
+      refl={extra.refl ?? null} onBelow={extra.onBelow} onRefPlane={extra.onRefPlane}
+    />
+  );
+
+  if (refView) {
+    const rc = cols[0]!;
+    const refSize = Math.max(CELL_MIN, Math.min(Math.floor((vp.w - 70) / 2), Math.floor((vp.h - 230) / 3)));
+    const offset = refS.mode === 'custom' ? refS.dh : refOffset;
+    return (
+      <>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', alignItems: 'center', marginBottom: 6, padding: '4px 8px', background: '#f6f0ff', border: '1px solid #d8c4f5', borderRadius: 4 }}>
+          <b>Ref mode · object #{num}</b>
+          <span>
+            frame <button disabled={refF <= start} onClick={() => setRefF(refF - 1)} title="Frame trước">◀</button>{' '}
+            <input
+              type="number" min={start} max={stop} value={refF} style={{ width: 64 }}
+              onChange={(e) => { const v = Math.round(Number(e.target.value)); if (Number.isFinite(v)) setRefF(Math.min(stop, Math.max(start, v))); }}
+            />{' '}
+            <button disabled={refF >= stop} onClick={() => setRefF(refF + 1)} title="Frame sau">▶</button>
+          </span>
+          <span title="Mặt phẳng nằm ngang dùng để lấy đối xứng. Mặt đường: đo dưới object ở frame này; không đo được thì z = 0 của ego. Tự chỉnh độ cao là chuyển sang Custom.">
+            Mặt phản chiếu:{' '}
+            {(['bottom', 'road', 'custom'] as const).map((m) => (
+              <label key={m} style={{ marginRight: 6 }}><input type="radio" checked={refS.mode === m} onChange={() => setRefMode(m)} /> {REF_MODE_TEXT[m]}</label>
+            ))}
+          </span>
+          <span title="Độ cao mặt phản chiếu so với đáy box (+ cao hơn, − thấp hơn). Chỉnh là chuyển sang Custom; Custom đi theo box khi box dời.">
+            cao hơn đáy box{' '}
+            <button onClick={() => nudgeRef(-0.05)}>−</button>{' '}
+            <input
+              type="number" step={0.01} value={offset === null ? '' : offset.toFixed(2)} style={{ width: 64 }}
+              onChange={(e) => { const v = Number(e.target.value); if (e.target.value.trim() !== '' && Number.isFinite(v)) refStore.set(job.id, num, { mode: 'custom', dh: Math.max(-5, Math.min(5, v)) }); }}
+            /> m{' '}
+            <button onClick={() => nudgeRef(0.05)}>+</button>
+          </span>
+          <button onClick={onCloseRef}>← Batch Review</button>
+          <button onClick={() => { refStore.set(job.id, num, { on: false }); onCloseRef?.(); }} title="Tắt ref mode cho object này">Tắt ref mode</button>
+          {note && <span style={{ color: '#7a4b00' }}>{note}</span>}
+        </div>
+        <div style={{ display: 'flex', gap: 16, justifyContent: 'safe center', overflowX: 'auto', padding: '2px 4px 6px' }}>
+          <div>
+            <div style={{ textAlign: 'center', fontWeight: 600 }}>Gốc</div>
+            {colEl(rc, 'orig', refSize)}
+          </div>
+          <div>
+            <div style={{ textAlign: 'center', fontWeight: 600, color: '#6b21a8' }}>Gộp đối xứng (ref)</div>
+            {colEl(rc, 'ref', refSize, { refl: refS, onRefPlane })}
+          </div>
+        </div>
+        <p style={{ fontSize: 11, color: '#666', margin: '2px 0' }}>
+          Box ảo (tím nét đứt) đối xứng với box chính qua mặt phản chiếu (vạch tím); điểm trong box ảo được lật lại và vẽ chồng lên box chính bằng màu tím.
+          Chỉ để xem, không đổi dữ liệu nhãn. Sửa box ở cột nào cũng được (frame sửa thành keyframe như ở Batch Review).
+        </p>
+      </>
+    );
+  }
 
   return (
     <>
@@ -1192,6 +1304,12 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
           <button disabled={!canBack} onClick={goBack} title={hint('obj.back', canBack ? `Về object #${back!.num} vừa xem (cửa sổ từ frame ${back!.at})` : 'Về object xem trước đó (chưa có)')}>↶</button>
         </span>
         <span>
+          <label title={`Reflection mode cho riêng object #${num}: dựng box ảo đối xứng với box qua mặt phản chiếu (mặc định mặt dưới box) và gộp điểm phản chiếu vào box chính để hình vật nét hơn. Bật thì có tab Ref cạnh tab Batch Review.`} style={{ fontWeight: 600 }}>
+            <input type="checkbox" checked={refS.on} onChange={(e) => refStore.set(job.id, num, { on: e.target.checked })} /> ref mode
+          </label>
+          {refS.on && <button onClick={() => onOpenRef?.(selFrame ?? cols.find((c) => c.st.cuboid)?.f)} style={{ marginLeft: 4 }} title="Mở tab Ref ở frame đang chọn (chưa chọn thì frame đầu có box của cửa sổ)">Mở tab Ref</button>}
+        </span>
+        <span>
           <button disabled={k === 0} onClick={() => setK(0)} title={hint('win.first', 'Về cửa sổ đầu tiên')}>|◀</button>{' '}
           <button disabled={k === 0} onClick={() => setK(k - 1)} title={hint('win.prev', 'Cửa sổ frame trước')}>◀</button>{' '}
           <span style={{ display: 'inline-block', minWidth: '6.5em', textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>Cửa sổ {k + 1}/{nWin}</span>{' '}
@@ -1241,6 +1359,13 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
         )}
         <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>cửa sổ: {frames.filter((f) => pointClouds.has(f)).length}/{frames.length} · {gpuActive() ? 'GPU ✓ · ' : ''}đã tải: {loadedFrames}/{stop - start + 1}{pointClouds.secondsPerFrame() !== null && loadedFrames < stop - start + 1 ? ` · ~${pointClouds.secondsPerFrame()!.toFixed(1)} s/frame` : ''}</span>
         {note && <span style={{ color: '#7a4b00' }}>{note}</span>}
+        {refHint.length > 0 && (
+          <span style={{ background: '#f3e8ff', color: '#4c1d95', padding: '1px 6px', borderRadius: 8 }} title={`Dưới mặt đường, trong chân box, có từ ${DEFAULT_REFLECT.minBelow} điểm (ngưỡng ở tab Threshold, mục Đáy lơ lửng / chìm): có thể là ảnh phản chiếu của vật. Ref mode gộp các điểm đó vào box để hình vật nét hơn.`}>
+            💡 nhiều điểm dưới mặt đường ở frame {refHint.join(', ')}: bật ref mode?{' '}
+            <button onClick={() => { refStore.set(job.id, num, { on: true }); onOpenRef?.(refHint[0]); }} style={{ padding: '0 4px' }}>Bật</button>{' '}
+            <button onClick={() => refStore.set(job.id, num, { dismissed: true })} style={{ padding: '0 4px' }} title="Không gợi ý ref mode cho object này nữa">Bỏ qua</button>
+          </span>
+        )}
       </div>
       <details open style={{ margin: '0 0 6px', background: '#f8fbff', border: '1px solid #cfe0f5', padding: '2px 6px' }}>
         <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
@@ -1269,21 +1394,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
         Mẹo thao tác <Help text={`phím tắt khoá KF / outside / ground snap / chấp nhận / bỏ qua gợi ý (${['kf.toggle', 'outside.from', 'ground.snap', 'suggest.accept', 'suggest.ignore'].map((id) => keyOf(id) ?? 'chưa gán').join(' / ')}) tác dụng lên cột frame đang trỏ chuột (viền xanh) · rê chuột lên nút để xem phím tắt, đổi phím ở tab "Phím tắt" · cuộn chuột trên ô để zoom mọi frame · giữ chuột phải rồi kéo để dời khung nhìn (mọi frame cùng dời), nút ⌖ Về giữa để đưa về giữa ·` + " kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo để xoay (view Trên: yaw · view Bên: pitch · view Trước: roll, nếu bật \"nghiêng theo mặt đường\") · sửa frame nào thì frame đó thành keyframe"} />
       </div>
       <div style={{ display: 'flex', gap: prefs.gap, overflowX: 'auto', justifyContent: 'safe center', padding: '2px 4px 6px' }}>
-        {cols.map((c) => (
-          <Column
-            key={c.f} f={c.f} size={size} st={c.st} refCub={c.ref} half={half} locHalf={locHalf} selected={selFrame === c.f} pan={panEff} onPan={setPanClamped}
-            edited={edited.has(`${num}:${c.f}`)} warn={warn} fixed={!dyn} ignored={ign.has(ignoreKey(job.id, num, c.f))}
-            onIgnore={(f, on) => ignoreFrames([f], on)}
-            motion={c.mot} motionIgnored={ign.has(motionKey(job.id, num, c.f))}
-            onIgnoreMotion={ignoreMotion}
-            autoSnap={autoSnap && prefs.ground} groundOv={series.get(c.f) ?? null} groundOn={prefs.ground} egoOn={prefs.egoPlane} suggestOn={prefs.suggest} onGround={(f) => { if (!groundFrame(f)) setNote(`Không snap được frame ${f}: ${snapWhy.current || 'không rõ lý do'}.`); }}
-            onSnap={(f, g) => setSnaps((m) => (m.get(f) === g ? m : new Map(m).set(f, g)))}
-            onSuggest={(f, s) => setSugs((m) => (m.get(f) === s ? m : new Map(m).set(f, s)))} onAccept={accept}
-            onFit={(f, r) => setFits((m) => (m.get(f) === r ? m : new Map(m).set(f, r)))} onSelect={() => onPickSelect(c.f)}
-            onLoaded={(f) => setLoaded((s) => new Set(s).add(f))}
-            onCommit={commit} onZoom={zoomBy} onToggleKf={toggleKf} overlap={ovAt.get(c.f) ?? []} overlayCubs={ovCubs.get(c.f) ?? EMPTY_CUBS} onIgnoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], true); setNote(`Đã bỏ qua cặp #${Math.min(num, o)}–#${Math.max(num, o)} (mọi frame).`); }} onOpenObject={setSelectedNum} tiltOn={prefs.tilt} onFocusFrame={onFocusFrame} fileFlags={(fileFlags.get(c.f) ?? NO_FLAGS).filter((x) => !x.det)} onMarkFlag={markFlagAsk} issues={issueMap.get(c.f) ?? NO_ISSUES} issueIgnored={(k) => ign.has(issueKey(job.id, num, c.f, k))} onIgnoreIssue={ignoreIssueAsk} qcOn={qcOn} qcNote={qcNotes[qcKey(job.id, num, c.f)] ?? ''} onQcNote={(f, t) => qcStore.set(job.id, num, f, t)} onToggleOutside={toggleOutside} onHover={(f) => { hoverRef.current = f; onHoverFrame(f); }} scene={scene}
-          />
-        ))}
+        {cols.map((c) => colEl(c, String(c.f), size, { onBelow: !refS.on && !refS.dismissed ? reportBelow : undefined }))}
       </div>
       <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>
         Viền: <span style={{ color: STATUS_COLOR.key }}>■ keyframe</span> <span style={{ color: STATUS_COLOR.interp }}>■ nội suy</span>{' '}
