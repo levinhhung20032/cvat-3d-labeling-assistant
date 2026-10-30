@@ -38,10 +38,10 @@ import { DeleteDialog } from './DeleteDialog';
 import { madeStore, useMadeIds } from './madeStore';
 import { defaultDyn, dynClassStore, useDynClasses, useDynRules } from './dynClassStore';
 import { resolveDyn } from '../shared/dynrule';
-import { SIZE_SYNC } from '../shared/qcrules';
+import { ATTRS_OF, SIZE_SYNC } from '../shared/qcrules';
 import { ShiftPanel } from './ShiftPanel';
 import { attrKey, issueKey, motionKey, overlapKey, shiftStore, useIgnored, useShifts } from './shiftStore';
-import { parseLabelSpecs } from '../shared/attributes';
+import { getAttr, parseLabelSpecs } from '../shared/attributes';
 import { suggestAttributes } from '../shared/attrSuggest';
 import { fmtDuration, shiftName, computeKpi } from '../shared/shift';
 import { emitAction, isCapturing, useKeymap } from './actions';
@@ -449,8 +449,13 @@ export function App() {
   const dynMap = useDynClasses(dynJobId);
   const dynRules = useDynRules(dynJobId);
   useMemo(() => {
-    if (!data) { SIZE_SYNC.fn = null; return; }
+    if (!data) { SIZE_SYNC.fn = null; ATTRS_OF.fn = null; return; }
     const specs = parseLabelSpecs(data.labels);
+    ATTRS_OF.fn = (track, f) => {
+      const o: Record<string, string> = {};
+      for (const a of specs.get(track.label_id)?.attrs ?? []) o[a.name.trim().toLowerCase()] = getAttr(track, f, a) ?? a.def;
+      return o;
+    };
     SIZE_SYNC.fn = (track, label, num) => {
       let own: boolean | null = null;
       try { const v = num !== undefined ? kv.get(`cvla-dyn:${data.job.id}:${num}`) : null; if (v === '1') own = true; else if (v === '0') own = false; } catch { /* bỏ qua */ }
@@ -915,7 +920,8 @@ export function App() {
       {data && work && tab === 'objects' && (
         <ObjectTable
           jobId={data.job.id} onDelete={deleteMade} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs} incomplete={passView.incomplete}
-          tracks={work.tracks} start={data.job.start_frame} stop={data.job.stop_frame} cvatFrame={focus?.frame ?? null}
+          tracks={work.tracks} labels={data.labels} start={data.job.start_frame} stop={data.job.stop_frame} cvatFrame={focus?.frame ?? null}
+          selectedNum={selectedNum} onSelect={selectFromTool}
           onOpen={(num, first) => {
             selectFromTool(num);
             setStartFrame(first ?? data.job.start_frame);

@@ -4,6 +4,8 @@ import {
   fieldsOf, isChanged, resetAll, resetSection, SECTIONS, sectionChanged, setValue, type Field, type SectionId,
 } from '../shared/thresholds';
 import { metricsOf, METRIC_BY_ID, type MetricDef, type Op, type Rule, type SectionCode, type Target } from '../shared/alertRules';
+import { parseLabelSpecs } from '../shared/attributes';
+import { ruleValues } from '../shared/dynrule';
 import { DynClassTable } from './DynSizePanel';
 import { SYMBOL_DEFAULTS, type SymbolKind } from '../shared/symbols';
 import { symbolStore, sym, useSymbols } from './symbolStore';
@@ -61,7 +63,10 @@ function SymbolInput({ kind }: { kind: SymbolKind }) {
   );
 }
 
-const targetKey = (t: Target) => (t.t === 'all' ? 'all' : t.t === 'class' ? `c:${t.name}` : `o:${t.num}`);
+// Ô đối tượng: rule theo attribute hiện là class của nó ở ô này, attribute = giá trị chọn ở ô thứ hai.
+const targetKey = (t: Target) => (t.t === 'all' ? 'all' : t.t === 'class' || t.t === 'attr' ? `c:${t.name}` : `o:${t.num}`);
+const SEP = String.fromCharCode(1); // ngăn cách tên attribute và giá trị trong value của ô chọn
+const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /** Một rule: đối tượng, thuộc tính, quy tắc (>, >=, <, <=, =, !=), ngưỡng, nút xoá. Chọn bằng dropbox. */
 function RuleRow({ r, metrics, labels, tracks, jobId }: { r: Rule; metrics: MetricDef[]; labels: CvatLabel[]; tracks: CvatTrack[]; jobId: number }) {
@@ -71,7 +76,19 @@ function RuleRow({ r, metrics, labels, tracks, jobId }: { r: Rule; metrics: Metr
   useEffect(() => { setText(r.value === null ? '' : String(r.value)); setBad(false); }, [r.value, r.metric]);
   const nameOf = (labelId: number) => labels.find((l) => l.id === labelId)?.name ?? '?';
   const classNames = labels.map((l) => l.name);
-  const hasClass = r.target.t !== 'class' || classNames.some((n) => n.trim().toLowerCase() === (r.target as { name: string }).name.trim().toLowerCase());
+  const hasClass = (r.target.t !== 'class' && r.target.t !== 'attr') || classNames.some((n) => sameName(n, (r.target as { name: string }).name));
+  // Attribute có giá trị rời rạc (select / radio / checkbox) của class đang chọn: chọn từ class rồi mới tới attribute = giá trị.
+  const cls = r.target.t === 'class' || r.target.t === 'attr' ? r.target.name : null;
+  const attrOpts = cls && m.targets.includes('attr')
+    ? [...parseLabelSpecs(labels).values()].find((sp) => sameName(sp.name, cls))?.attrs.map((a) => ({ name: a.name, values: ruleValues(a) })).filter((a) => a.values.length) ?? []
+    : [];
+  const attrKey = r.target.t === 'attr' ? `${r.target.attr}${SEP}${r.target.value}` : '';
+  const setAttr = (k: string) => {
+    if (!cls) return;
+    if (!k) { thresholdStore.updateRule(r.id, { target: { t: 'class', name: cls } }); return; }
+    const [attr = '', value = ''] = k.split(SEP);
+    thresholdStore.updateRule(r.id, { target: { t: 'attr', name: cls, attr, value } });
+  };
 
   const setMetric = (id: string) => {
     const nm = METRIC_BY_ID.get(id as never);
@@ -93,10 +110,23 @@ function RuleRow({ r, metrics, labels, tracks, jobId }: { r: Rule; metrics: Metr
     <tr style={{ background: r.value === null ? '#f3f3f3' : undefined }}>
       <td><select value={targetKey(r.target)} onChange={(e) => setTarget(e.target.value)} title="Đối tượng áp dụng rule">
         <option value="all">Tất cả object</option>
-        {!hasClass && r.target.t === 'class' && <option value={targetKey(r.target)}>Class: {r.target.name} (job này không có)</option>}
+        {!hasClass && (r.target.t === 'class' || r.target.t === 'attr') && <option value={targetKey(r.target)}>Class: {r.target.name} (job này không có)</option>}
         {m.targets.includes('class') && <optgroup label="Class của job">{classNames.map((n) => <option key={n} value={`c:${n}`}>Class: {n}</option>)}</optgroup>}
         {m.targets.includes('object') && <optgroup label="Object">{tracks.map((t, i) => <option key={i} value={`o:${i + 1}`}>#{i + 1} · {nameOf(t.label_id)}</option>)}</optgroup>}
-      </select></td>
+      </select>
+      {(attrOpts.length > 0 || r.target.t === 'attr') && (
+        <select value={attrKey} onChange={(e) => setAttr(e.target.value)} style={{ marginLeft: 4 }} title="Thu hẹp rule về các object của class có attribute = giá trị này (ở đúng frame đang xét). Rule theo attribute ưu tiên hơn rule của class và của tất cả object.">
+          <option value="">cả class</option>
+          {r.target.t === 'attr' && !attrOpts.some((a) => a.name === (r.target as { attr: string }).attr && a.values.includes((r.target as { value: string }).value)) && (
+            <option value={attrKey}>{r.target.attr} = {r.target.value} (job này không có)</option>
+          )}
+          {attrOpts.map((a) => (
+            <optgroup key={a.name} label={a.name}>
+              {a.values.map((v) => <option key={v} value={`${a.name}${SEP}${v}`}>{a.name} = {v}</option>)}
+            </optgroup>
+          ))}
+        </select>
+      )}</td>
       <td><select value={r.metric} onChange={(e) => setMetric(e.target.value)} title={m.help ?? 'Thuộc tính đo'}>
         {metrics.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
       </select></td>
@@ -182,7 +212,12 @@ export function ThresholdPanel({ jobId, labels, tracks }: { jobId: number; label
         <button onClick={() => { resetAll(); thresholdStore.changed(); }} disabled={!SECTIONS.some((s) => sectionChanged(s.id))}>↺ Tham số</button>{' '}
         <button onClick={() => symbolStore.reset()} title="Về ký hiệu mặc định (đi xa bất thường = Y)">↺ Ký hiệu lỗi</button>
       </p>
-      <p style={{ margin: '2px 0', color: '#777', fontSize: 11 }}>Ô chữ đậm đầu mỗi mục = ký hiệu lỗi, sửa được. Tên class trong dropbox lấy từ nhãn của job này.</p>
+      <p style={{ margin: '2px 0', color: '#777', fontSize: 11 }}>Ô chữ đậm đầu mỗi mục = ký hiệu lỗi, sửa được. Tên class và attribute trong dropbox lấy từ nhãn của job này.</p>
+      <p style={{ margin: '2px 0', color: '#456', fontSize: 12 }}>
+        <b>Ưu tiên</b>: nhiều rule cùng thuộc tính và cùng chiều (&gt; / &gt;= hoặc &lt; / &lt;=) cùng khớp một object thì chỉ rule cụ thể nhất có hiệu lực:
+        một object &gt; class · attribute &gt; class &gt; tất cả object. Ví dụ có rule Vehicle "Dài &gt; 5.5" thì rule "Tất cả object: Dài &gt; 2" không áp cho Vehicle,
+        nhưng rule "Tất cả object: Dài &lt; 0.3" vẫn áp. Object khớp rule của từ hai attribute khác nhau trở lên (vd. age = child và pose = sitting) thì xét từ rule của class.
+      </p>
       {SECTIONS.map((s) => (
         <Section key={s.id} id={s.id} code={s.code} title={s.title} about={s.about} rules={rules} labels={labels} tracks={tracks} jobId={jobId}>
           {s.id === 'S' && (

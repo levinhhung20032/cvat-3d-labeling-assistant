@@ -15,8 +15,8 @@ import { splitConfig } from './splitId';
  */
 export type SectionId = SectionCode;
 export const SECTIONS: { id: SectionId; title: string; about: string; code?: SymbolKind }[] = [
-  { id: 'S', code: 'S', title: 'Scale không đồng bộ', about: 'Kích thước các box của một object phải khớp kích thước chuẩn (trung vị của object). Rule: lệch bao nhiêu thì báo.' },
-  { id: 'K', code: 'K', title: 'Kích thước ngoài ngưỡng', about: 'Dài × rộng × cao của box. Rule đặt cho tất cả, một class hoặc một object: ví dụ Dài > ngưỡng thì báo.' },
+  { id: 'S', code: 'S', title: 'Scale không đồng bộ', about: 'Size không đồng bộ: object TẮT Dynamic size phải cùng một kích thước ở mọi frame. Frame có dài, rộng hoặc cao khác kích thước chung của object (trung vị các frame) quá dung sai thì báo. Rule: chọn đối tượng và dung sai.' },
+  { id: 'K', code: 'K', title: 'Kích thước ngoài ngưỡng', about: 'Dài × rộng × cao của box. Rule đặt cho tất cả, một class, class · attribute = giá trị (vd. Vehicle · type = truck) hoặc một object: ví dụ Dài > ngưỡng thì báo.' },
   { id: 'Z', code: 'Z', title: 'Độ cao tâm box', about: 'z của tâm box (m, gốc ở mặt đất dưới xe).' },
   { id: 'H', code: 'H', title: 'Đổi hướng đột ngột', about: 'Yaw đổi giữa hai frame liền nhau.' },
   { id: 'D', code: 'D', title: 'Quá xa', about: 'Khoảng cách 3D từ tâm box tới gốc toạ độ.' },

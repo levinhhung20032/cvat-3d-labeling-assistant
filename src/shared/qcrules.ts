@@ -27,6 +27,11 @@ export const RULESET: { rules: Rule[] | null; job: number } = { rules: null, job
  * công tắc riêng của JOB đang mở. Chưa đặt (test, chưa mở job) thì dùng `scaleSyncGroups`.
  */
 export const SIZE_SYNC: { fn: ((track: CvatTrack, label: string, num?: number) => boolean) | null } = { fn: null };
+/**
+ * Giá trị attribute của object ở một frame (khoá = tên attribute viết thường), cho rule theo attribute. Panel đặt theo nhãn của JOB đang mở;
+ * chưa đặt thì rule theo attribute không khớp object nào.
+ */
+export const ATTRS_OF: { fn: ((track: CvatTrack, frame: number) => Record<string, string>) | null } = { fn: null };
 export interface QcRuleConfig {
   size: Record<ClassKey, ClassSize>;
   sizeEps: number;
@@ -97,6 +102,7 @@ export function trackIssues(track: CvatTrack, label: string, frames: number[], c
   const syncOn = SIZE_SYNC.fn ? SIZE_SYNC.fn(track, label, num) : !RULESET.rules && !!ck && cfg.scaleSyncGroups.includes(ck);
   const ref = syncOn ? medianSize([...boxes.values()]) : null;
   const tol = cfg.scaleSyncTol + 1e-9; // tránh sai số số thực (4.24 − 4.23 > 0.01)
+  const needAttrs = !!RULESET.rules?.some((r) => r.target.t === 'attr') && !!ATTRS_OF.fn; // chỉ đọc attribute khi có rule theo attribute
   for (const [f, c] of boxes) {
     if (RULESET.rules) {
       // Theo rule người dùng nhập: đo từng thuộc tính của box rồi để rule quyết định.
@@ -104,7 +110,8 @@ export function trackIssues(track: CvatTrack, label: string, frames: number[], c
       const p = boxes.get(f - 1);
       if (p) v.yawJump = Math.abs(wrapDeg(c.yaw - p.yaw));
       if (ref) v.sizeDev = Math.max(Math.abs(c.sx - ref.sx), Math.abs(c.sy - ref.sy), Math.abs(c.sz - ref.sz));
-      for (const h of ruleHits(RULESET.rules, { job: RULESET.job, label, num }, v)) add(f, h.code as IssueKind, h.message);
+      const attrs = needAttrs ? ATTRS_OF.fn!(track, f) : undefined;
+      for (const h of ruleHits(RULESET.rules, { job: RULESET.job, label, num, attrs }, v)) add(f, h.code as IssueKind, h.message);
       continue;
     }
     const lim = ck ? cfg.size[ck] : null;

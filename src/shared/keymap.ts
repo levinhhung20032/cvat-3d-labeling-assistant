@@ -9,6 +9,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'win.fromStart', label: '⟲ từ đầu: cửa sổ hiện quay về đầu job', defaults: [] },
   { id: 'obj.prev', label: 'Object trước (ID − 1)', defaults: ['ArrowUp'] },
   { id: 'obj.next', label: 'Object sau (ID + 1)', defaults: ['ArrowDown'] },
+  { id: 'obj.back', label: '↶ Về object xem trước đó (đúng cửa sổ đang xem lúc rời đi)', defaults: [] },
   { id: 'sel.prev', label: 'Chọn cột frame bên trái', defaults: [','] },
   { id: 'sel.next', label: 'Chọn cột frame bên phải', defaults: ['.'] },
   { id: 'dyn.ownReset', label: '↺ theo class: bỏ công tắc Dynamic size riêng của object, quay về theo attribute / class', defaults: [] },

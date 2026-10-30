@@ -23,6 +23,7 @@ import { clampPan, drawView, type EgoPlane, localize, NO_PAN, panBy, panOffset, 
 import { Cancelled, pointClouds } from './stores';
 import { issueKey, ignoreKey, ignoreStore, motionKey, overlapKey, shiftStore, useIgnored } from './shiftStore';
 import { CameraPanel } from './CameraPanel';
+import { useCameraShow } from './cameraStore';
 import { qcStore, useQcMode, useQcNotes } from './qcStore';
 import { qcKey } from '../shared/qc';
 import { onAction, useKeyHint, useKeyOf } from './actions';
@@ -369,9 +370,17 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
         {shownMotion && <span style={{ ...CHIP, background: '#ffe9c7', color: '#6b3a00' }} title={shownMotion.message}>⚠ {sym('M')} đi xa</span>}
         {snap?.warn && <span style={{ ...CHIP, background: '#eaf6d8', color: '#2d5a00' }} title={groundTip(snap)}>⏬ {groundAction(snap)}</span>}
       </div>
+      <div style={{ position: 'relative' }}>
+      {/* Kích thước box ở frame này (dài × rộng × cao, m), góc trái trên của cột ngay dưới nhãn view "Trên"; đang kéo thì hiện kích thước mới. */}
+      {box && (
+        <span style={{ position: 'absolute', left: 1, top: 16, zIndex: 2, pointerEvents: 'none', font: '11px system-ui, sans-serif', lineHeight: '14px', padding: '0 4px', background: 'rgba(11, 15, 20, 0.75)', color: '#e2e8f0', fontVariantNumeric: 'tabular-nums' }}>
+          {box.sx.toFixed(2)} × {box.sy.toFixed(2)} × {box.sz.toFixed(2)}
+        </span>
+      )}
       {VIEWS.map((v) => (
         <Cell key={v} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} pan={pan} onPan={onPan} />
       ))}
+      </div>
       {!pc && (
         <div style={{ fontSize: 11, padding: 2 }}>
           {err ? <>Lỗi tải frame: {err.slice(0, 120)} <button onClick={(e) => { e.stopPropagation(); setRetryN((x) => x + 1); }} style={{ padding: '0 4px' }}>↻ thử lại</button></> : 'đang tải…'}
@@ -455,6 +464,10 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
   );
 }
 
+/** Object đang / vừa xem trong Batch Review và frame đầu cửa sổ lúc đó (nút ↶), giữ qua lúc rời tab. */
+interface ObjPos { num: number; at: number }
+let objMem: { job: number; here: ObjPos; back: ObjPos | null } | null = null;
+
 /** Ô nhập ID object (ID hiển thị như giao diện CVAT). */
 function IdBox({ value, max, onCommit }: { value: number; max: number; onCommit: (n: number) => void }) {
   const [text, setText] = useState(String(value));
@@ -523,7 +536,8 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   // Danh sách frame cần xem: cả job hoặc khoảng [từ, đến] tự chọn; tùy chọn chỉ giữ keyframe của object đang chọn.
   const [viewFrom, setViewFrom] = useState('');
   const viewTo = ''; // khoảng xem luôn chạy tới hết job; cửa sổ [a, b] chọn bằng hai ô a → b (a bắt đầu cửa sổ, b - a + 1 = số frame)
-  const forceFirst = useRef(false); // vừa nhập điểm xuất phát a: về trang đầu
+  const forceFirst = useRef(false); // vừa nhập điểm xuất phát a / vừa sửa ô Object ID: về trang đầu
+  const pendingAt = useRef<number | null>(null); // nút ↶: đổi object rồi về cửa sổ chứa frame này
   const list = useMemo(() => {
     const a = Math.max(start, Math.min(stop, Number.isInteger(Number(viewFrom)) && viewFrom !== '' ? Number(viewFrom) : start));
     const b = Math.max(a, Math.min(stop, Number.isInteger(Number(viewTo)) && viewTo !== '' ? Number(viewTo) : stop));
@@ -553,6 +567,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   const [rangeFrom, setRangeFrom] = useState('');
   const [rangeTo, setRangeTo] = useState('');
   const vp = useViewport();
+  const [camShow] = useCameraShow();
   useSymbols();
   const row = rows.find((r) => r.num === num);
   // Dynamic size theo từng object (nhớ cục bộ). Mặc định: bật cho nhãn co giãn, tắt cho Vehicle / Obstacle.
@@ -580,8 +595,10 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   anchorRef.current = frames[0] ?? start;
   const listKey = `${list.length}:${list[0]}:${list[list.length - 1]}`;
   useEffect(() => {
-    if (forceFirst.current) { forceFirst.current = false; setK(0); return; }
-    setK(pageOf(list, anchorRef.current, prefs.perWin, overlap));
+    if (forceFirst.current) { forceFirst.current = false; pendingAt.current = null; setK(0); return; }
+    const at = pendingAt.current ?? anchorRef.current;
+    pendingAt.current = null;
+    setK(pageOf(list, at, prefs.perWin, overlap));
   }, [prefs.perWin, prefs.keyOnly, listKey, num]);
   // Hai ô a → b luôn hiện cửa sổ đang xem; nhập a = điểm xuất phát (b tự thành a + số frame - 1), sửa b = đổi số frame hiển thị.
   const [winA, setWinA] = useState('');
@@ -602,6 +619,31 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     if (n >= 2) updatePrefs({ ...prefs, perWin: Math.min(30, n) });
   };
   useEffect(() => { onView(frames); }, [framesKey]);
+  // Object xem trước đó và cửa sổ lúc rời đi (nút ↶). Đổi object bằng bất kỳ cách nào (ô ID, ↑/↓, bảng object, CVAT) đều ghi lại;
+  // nhớ qua lúc rời tab Batch Review (vd. mở ID khác từ bảng object thì ↶ vẫn về ID trước đó).
+  const mem = objMem?.job === job.id ? objMem : null;
+  const here = useRef(mem?.here ?? { num, at: frames[0] ?? start });
+  const [back, setBack] = useState<ObjPos | null>(mem?.back ?? null);
+  useEffect(() => {
+    let b = back;
+    if (here.current.num !== num) { b = here.current; setBack(b); }
+    here.current = { num, at: frames[0] ?? start };
+    objMem = { job: job.id, here: here.current, back: b };
+  }, [num, framesKey]);
+  /** Sửa ô Object ID: sang object đó và cửa sổ về frame đầu job. */
+  const pickId = (n: number) => {
+    if (n === num) return;
+    forceFirst.current = true;
+    if (viewFrom !== '') setViewFrom('');
+    setSelectedNum(n);
+  };
+  const canBack = !!back && back.num <= max && back.num !== num;
+  const goBack = () => {
+    if (!back || !canBack) { setNote('Chưa có object nào xem trước đó.'); return; }
+    pendingAt.current = back.at;
+    if (viewFrom !== '' && Number(viewFrom) > back.at) setViewFrom('');
+    setSelectedNum(back.num);
+  };
   // Chồng lấn của object đang chọn ở các frame đang xem, và box của object kia để vẽ lên ô.
   const ovAt = useMemo(() => {
     const m = new Map<number, { other: number; ratio: number }[]>();
@@ -985,6 +1027,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
         case 'view.center': setPan(NO_PAN); break;
         case 'obj.next': if (num < max) setSelectedNum(num + 1); break;
         case 'obj.prev': if (num > 1) setSelectedNum(num - 1); break;
+        case 'obj.back': goBack(); break;
         case 'sel.next': setSelFrame(cs[Math.min(cs.length - 1, (selFrame === null ? -1 : cs.indexOf(selFrame)) + 1)] ?? null); break;
         case 'sel.prev': setSelFrame(cs[Math.max(0, (selFrame === null ? cs.length : cs.indexOf(selFrame)) - 1)] ?? null); break;
         case 'outside.from': {
@@ -1008,7 +1051,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
         }
       }
     }),
-    [num, max, nWin, selFrame, track, k, cols, sugs, ign, snaps, rangeFrom, rangeTo, frames, pick, viewFrom, own, dyn],
+    [num, max, nWin, selFrame, track, k, cols, sugs, ign, snaps, rangeFrom, rangeTo, frames, pick, viewFrom, own, dyn, back],
   );
 
   if (!track) return <p>Job chưa có object.</p>;
@@ -1144,7 +1187,10 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
         )}
         </Group>
         <Group id="6" title={<>Object & cửa sổ</>}>
-        <span><IdBox value={num} max={max} onCommit={setSelectedNum} /></span>
+        <span>
+          <IdBox value={num} max={max} onCommit={pickId} />{' '}
+          <button disabled={!canBack} onClick={goBack} title={hint('obj.back', canBack ? `Về object #${back!.num} vừa xem (cửa sổ từ frame ${back!.at})` : 'Về object xem trước đó (chưa có)')}>↶</button>
+        </span>
         <span>
           <button disabled={k === 0} onClick={() => setK(0)} title={hint('win.first', 'Về cửa sổ đầu tiên')}>|◀</button>{' '}
           <button disabled={k === 0} onClick={() => setK(k - 1)} title={hint('win.prev', 'Cửa sổ frame trước')}>◀</button>{' '}
@@ -1262,7 +1308,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
           </div>
         </div>
       )}
-      {selCol ? <CameraPanel frame={selCol.f} azimuth={az} /> : <p style={{ color: '#666' }}>Bấm vào một cột (tiêu đề frame) để xem ảnh camera của frame đó.</p>}
+      {camShow ? <CameraPanel frame={selCol?.f ?? null} azimuth={az} /> : <p style={{ color: '#666' }}>Ảnh camera đang tắt (bật lại ở tab Camera).</p>}
     </>
   );
 }

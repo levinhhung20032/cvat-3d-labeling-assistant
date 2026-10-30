@@ -5,15 +5,15 @@ import { DEFAULT_FIT } from '../src/shared/fit';
 import { DEFAULT_GROUND } from '../src/shared/ground';
 import { DEFAULT_MOTION } from '../src/shared/motion';
 import { allowedIou, DEFAULT_OVERLAP } from '../src/shared/overlap';
-import { SIZE_SYNC, trackIssues } from '../src/shared/qcrules';
+import { ATTRS_OF, SIZE_SYNC, trackIssues } from '../src/shared/qcrules';
 import { findLongOutsideGaps, splitConfig } from '../src/shared/splitId';
-import { cmp, METRICS, newRuleId, parseRules, validRule, BIG, type MetricId, type Op, type Rule, type Target } from '../src/shared/alertRules';
+import { cmp, effectiveRules, METRICS, METRIC_BY_ID, newRuleId, parseRules, validRule, BIG, type MetricId, type Op, type Rule, type Target } from '../src/shared/alertRules';
 import { applyPersisted, backgroundConfigKey, FIELDS, installRules, resetAll, setValue, toPersisted } from '../src/shared/thresholds';
 import { dynDefaultFor, dynForJob, mergeDynSettings, parseSettings } from '../src/shared/settings';
 import { shape, track } from './fixtures';
 import type { CvatTrack } from '../src/shared/types';
 
-afterEach(() => { resetAll(); installRules([], 0); SIZE_SYNC.fn = null; });
+afterEach(() => { resetAll(); installRules([], 0); SIZE_SYNC.fn = null; ATTRS_OF.fn = null; });
 
 const rule = (metric: MetricId, op: Op, value: number | null, target: Target = { t: 'all' }): Rule => ({ id: newRuleId(), metric, op, value, target });
 const cub = (sx: number, sy: number, sz: number, z = 0.8, x = 10, yaw = 0) => serializeCuboid({ x, y: 0, z, rx: 0, ry: 0, yaw, sx, sy, sz }, Array(16).fill(0));
@@ -87,6 +87,60 @@ describe('rule trên từng box: đối tượng, thuộc tính, quy tắc, ngư
     SIZE_SYNC.fn = (_t, label) => label === 'Cyclist';
     expect(kinds(t, 'Cyclist')).toContain('S');
     expect(kinds(t, 'Vehicle')).not.toContain('S');
+  });
+
+  it('S = size không đồng bộ: ngưỡng là dung sai, chỉ quy tắc > / >=; size giống nhau ở mọi frame thì không báo', () => {
+    expect(METRIC_BY_ID.get('sizeDev')!.ops).toEqual(['>', '>=']);
+    expect(validRule(rule('sizeDev', '<', 0.01))).toBe(false);
+    SIZE_SYNC.fn = () => true;
+    installRules([rule('sizeDev', '>', 0.01)], 1);
+    expect(kinds(boxTrack(4, 1.8, 1.6), 'Vehicle')).toEqual([]);
+    const t = track(1, [0, 1, 2].map((f) => ({ ...shape(f, false), points: cub(f === 2 ? 4.3 : 4, 1.8, 1.6) })));
+    expect([...trackIssues(t, 'Vehicle', [0, 1, 2], undefined, 1)].map(([f, l]) => [f, l.map((i) => i.kind)])).toEqual([[2, ['S']]]);
+  });
+});
+
+describe('ưu tiên rule: một object > class · attribute > class > tất cả object', () => {
+  const attrs = (o: Record<string, string>) => { ATTRS_OF.fn = () => o; };
+  it('rule class thắng rule tất cả cùng thuộc tính + cùng chiều; chiều ngược lại vẫn áp', () => {
+    installRules([rule('length', '>', 2), rule('length', '>', 5.5, { t: 'class', name: 'Vehicle' }), rule('length', '<', 3)], 1);
+    expect(kinds(boxTrack(4, 1.8, 1.6), 'Vehicle')).toEqual([]); // 4 > 2 nhưng rule của Vehicle (> 5.5) ghi đè
+    expect(kinds(boxTrack(4, 1.8, 1.6), 'Pedestrian')).toEqual(['K', 'K', 'K']); // Pedestrian không có rule riêng
+    expect(kinds(boxTrack(2.5, 1.8, 1.6), 'Vehicle')).toEqual(['K', 'K', 'K']); // < 3 của "tất cả" vẫn áp
+  });
+
+  it('rule theo attribute thắng rule class; khác giá trị attribute thì về rule class', () => {
+    installRules([rule('length', '>', 5.5, { t: 'class', name: 'Vehicle' }), rule('length', '>', 12, { t: 'attr', name: 'Vehicle', attr: 'type', value: 'truck' })], 1);
+    attrs({ type: 'truck' });
+    expect(kinds(boxTrack(8, 2.4, 3), 'Vehicle')).toEqual([]);
+    attrs({ type: 'car' });
+    expect(kinds(boxTrack(8, 2.4, 3), 'Vehicle')).toEqual(['K', 'K', 'K']);
+    const m = trackIssues(boxTrack(8, 2.4, 3), 'Vehicle', [0], undefined, 1).get(0)![0]!.message;
+    expect(m).toContain('rule Vehicle');
+  });
+
+  it('khớp rule của hai attribute khác nhau: xét từ class', () => {
+    const rs = [
+      rule('height', '>', 1.9, { t: 'class', name: 'Pedestrian' }),
+      rule('height', '>', 1.4, { t: 'attr', name: 'Pedestrian', attr: 'age', value: 'child' }),
+      rule('height', '>', 1.2, { t: 'attr', name: 'Pedestrian', attr: 'pose', value: 'sitting' }),
+    ];
+    const ctx = { job: 1, label: 'Pedestrian', attrs: { age: 'child', pose: 'sitting' } };
+    expect(effectiveRules(rs, ctx).map((r) => r.target.t)).toEqual(['class']);
+    expect(effectiveRules(rs, { ...ctx, attrs: { age: 'child', pose: 'standing' } }).map((r) => r.value)).toEqual([1.4]);
+    expect(effectiveRules([rs[1]!, rs[2]!], ctx)).toEqual([]); // không có rule class, không có rule "tất cả": không báo
+  });
+
+  it('rule một object cao nhất; rule theo attribute lưu / đọc lại được, trường lạ bị bỏ', () => {
+    const own = rule('length', '>', 20, { t: 'object', job: 1, num: 1 });
+    installRules([rule('length', '>', 5, { t: 'attr', name: 'Vehicle', attr: 'type', value: 'truck' }), own], 1);
+    attrs({ type: 'truck' });
+    expect(kinds(boxTrack(8, 2.4, 3), 'Vehicle', 1)).toEqual([]);
+    expect(kinds(boxTrack(8, 2.4, 3), 'Vehicle', 2)).toEqual(['K', 'K', 'K']);
+    const raw = JSON.parse(JSON.stringify([{ ...rule('length', '>', 5, { t: 'attr', name: 'Vehicle', attr: 'type', value: 'truck' }), extra: 1 }]));
+    raw[0].target.junk = 'x';
+    expect(parseRules(raw)[0]!.target).toEqual({ t: 'attr', name: 'Vehicle', attr: 'type', value: 'truck' });
+    expect(validRule({ ...raw[0], target: { t: 'attr', name: 'Vehicle', attr: '', value: 'x' } })).toBe(false);
   });
 });
 

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ObjectRow } from '../shared/table';
-import type { CvatTrack } from '../shared/types';
-import { stateAt } from '../shared/interp';
+import type { CvatLabel, CvatTrack } from '../shared/types';
+import { sortedShapes, stateAt } from '../shared/interp';
+import { getAttr, parseLabelSpecs } from '../shared/attributes';
 import { DEFAULT_GROUND } from '../shared/ground';
 import { ISSUE_NAMES } from '../shared/qcrules';
 import { sym, useSymbols } from './symbolStore';
@@ -12,7 +13,10 @@ import { seenStore, useSeen } from './seenStore';
 /** ID đã xem trong Batch Review: gạch chân. */
 const SEEN_STYLE = { textDecoration: 'underline', textDecorationThickness: 2, textUnderlineOffset: 2 } as const;
 
-type SortKey = 'num' | 'assigned' | 'outside' | 'missing' | 'jumps' | 'issues' | 'drift' | 'hints' | 'overlap' | 'dist';
+type SortKey = 'num' | 'assigned' | 'outside' | 'missing' | 'jumps' | 'issues' | 'drift' | 'overlap' | 'dist';
+/** Dòng đang chọn và dòng so le (giao diện tối / xám đảo màu cả trang nên màu sáng vẫn dùng được). */
+const SEL_BG = '#bcd7ff';
+const ODD_BG = '#f1f4f8';
 /** Khoảng cách tâm box tới ego (gốc toạ độ, trên mặt phẳng ngang) và frame đo. */
 interface Dist { d: number; frame: number }
 
@@ -23,8 +27,10 @@ const issueTip = (by: Record<string, number>) => {
   return lines.length ? lines.join(String.fromCharCode(10)) : 'Không có lỗi luật QC';
 };
 
-export function ObjectTable({ jobId, rows, hints, overlapFrames, overlapPairs, onOpen, onDelete, incomplete, tracks, start, stop, cvatFrame }: {
+export function ObjectTable({ jobId, rows, hints, overlapFrames, overlapPairs, onOpen, onSelect, selectedNum, onDelete, incomplete, tracks, labels: jobLabels, start, stop, cvatFrame }: {
   jobId: number;
+  labels: CvatLabel[];
+  selectedNum: number | null; onSelect: (num: number) => void; // bấm 1 lần: chọn dòng (chọn object); bấm đúp: mở Batch Review (onOpen)
   onDelete: (r: ObjectRow) => void; rows: ObjectRow[]; hints: Map<number, number>; overlapFrames: Map<number, number>; overlapPairs: OverlapPair[]; onOpen: (num: number, first: number | null) => void;
   incomplete: ReadonlySet<number>; // object còn frame chưa tải / chưa tính ít điểm: ô "luật QC" (có phần ít điểm P) chưa đáng tin
   tracks: CvatTrack[]; start: number; stop: number;
@@ -68,12 +74,27 @@ export function ObjectTable({ jobId, rows, hints, overlapFrames, overlapPairs, o
     if (x === undefined || y === undefined) return x === undefined ? (y === undefined ? a.num - b.num : 1) : -1;
     return distAsc ? x - y : y - x;
   };
+  // Attribute của từng object: attribute tĩnh lấy giá trị của track; attribute đổi theo frame liệt kê các giá trị lần lượt xuất hiện ở các keyframe có box.
+  const attrsOf = useMemo(() => {
+    const specs = parseLabelSpecs(jobLabels);
+    const out = new Map<number, { name: string; value: string }[]>();
+    tracks.forEach((t, i) => {
+      const keys = sortedShapes(t).filter((s) => !s.outside).map((s) => s.frame);
+      out.set(i + 1, (specs.get(t.label_id)?.attrs ?? []).map((a) => {
+        if (!a.mutable || !keys.length) return { name: a.name, value: getAttr(t, keys[0] ?? 0, a) ?? a.def };
+        const seq: string[] = [];
+        for (const f of keys) { const v = getAttr(t, f, a) ?? a.def; if (seq[seq.length - 1] !== v) seq.push(v); }
+        return { name: a.name, value: seq.join(' → ') };
+      }));
+    });
+    return out;
+  }, [tracks, jobLabels]);
   const ov = (r: ObjectRow) => overlapFrames.get(r.num) ?? 0;
   const h = (r: ObjectRow) => hints.get(r.num) ?? 0;
   const labels = useMemo(() => [...new Set(rows.map((r) => r.label))], [rows]);
   const shown = useMemo(() => {
     const r = rows.filter((x) => (!label || x.label === label) && (!onlyMissing || x.missing > 0) && (!onlyJumps || x.jumps > 0) && (!onlyMade || x.made !== null) && (!onlyHints || h(x) > 0) && (!onlyOverlap || ov(x) > 0));
-    return r.sort((a, b) => (sort === 'num' ? a.num - b.num : sort === 'dist' ? byDist(a, b) : sort === 'hints' ? h(b) - h(a) : sort === 'overlap' ? ov(b) - ov(a) : b[sort] - a[sort]));
+    return r.sort((a, b) => (sort === 'num' ? a.num - b.num : sort === 'dist' ? byDist(a, b) : sort === 'overlap' ? ov(b) - ov(a) : b[sort] - a[sort]));
   }, [rows, hints, overlapFrames, label, sort, onlyMissing, onlyJumps, onlyHints, onlyOverlap, onlyMade, dist, distAsc]);
   const th = (k: SortKey, text: string, title?: string) => (
     <th style={{ cursor: 'pointer', textAlign: 'left' }} onClick={() => { if (k === 'dist' && sort === 'dist') setDistAsc((x) => !x); else { setSort(k); if (k === 'dist') setDistAsc(true); } }} title={title}>{text}{sort === k ? (k === 'dist' && distAsc ? ' ▴' : ' ▾') : ''}</th>
@@ -93,6 +114,7 @@ export function ObjectTable({ jobId, rows, hints, overlapFrames, overlapPairs, o
         <label title="Object có thuộc tính (attribute) khác với gợi ý theo kích thước box"><input type="checkbox" checked={onlyHints} onChange={(e) => setOnlyHints(e.target.checked)} /> chỉ ID có gợi ý thuộc tính</label>{' '}
         <label title="Object chồng lên object khác (xét chéo giữa các ID) ở ít nhất một frame"><input type="checkbox" checked={onlyOverlap} onChange={(e) => setOnlyOverlap(e.target.checked)} /> chỉ ID có chồng lấn</label>{' '}
         — {shown.length}/{rows.length} object
+        <span style={{ color: '#777', fontSize: 11, marginLeft: 8 }}>bấm 1 lần để chọn dòng, bấm đúp để mở Batch Review</span>
         {seen.size > 0 && (
           <span style={{ marginLeft: 10 }} title="ID gạch chân = object đã mở xem trong Batch Review (lưu theo job)">
             <span style={SEEN_STYLE}>ID</span> đã xem: {rows.filter((r) => seen.has(r.id)).length}{' '}
@@ -116,24 +138,35 @@ export function ObjectTable({ jobId, rows, hints, overlapFrames, overlapPairs, o
       </div>
       <table style={{ borderCollapse: 'collapse', width: '100%' }}>
         <thead>
-          <tr>{th('num', 'ID')}<th style={{ textAlign: 'left' }}>Nhãn</th>{th('assigned', 'Được gán')}{th('outside', 'Outside')}{th('missing', 'Outside thiếu KF')}{th('jumps', '⚠ đi xa')}{th('issues', incomplete.size ? '⚠ luật QC ⏳' : '⚠ luật QC', incomplete.size ? `${incomplete.size} object chưa đủ dữ liệu (viền vàng). ${pendingTip}` : undefined)}{th('drift', '⚠ trôi box')}{th('hints', '💡 thuộc tính')}{th('overlap', '⚠ chồng lấn')}{th('dist', '📏 cách ego (m)', distMode === 'frame' ? `Khoảng cách tới ego tại frame ${distFrame}; — = không có box ở frame đó (luôn xếp cuối)` : 'Khoảng cách gần nhất tới ego trên cả track')}<th style={{ textAlign: 'left' }}>Khoảng frame</th><th>KF</th><th /></tr>
+          <tr>{th('num', 'ID')}<th style={{ textAlign: 'left' }}>Nhãn</th><th style={{ textAlign: 'left' }} title="Attribute của object; attribute đổi theo frame hiện các giá trị lần lượt (a → b)">Attribute</th>{th('assigned', 'Được gán')}{th('outside', 'Outside')}{th('missing', 'Outside thiếu KF')}{th('jumps', '⚠ đi xa')}{th('issues', incomplete.size ? '⚠ luật QC ⏳' : '⚠ luật QC', incomplete.size ? `${incomplete.size} object chưa đủ dữ liệu (viền vàng). ${pendingTip}` : undefined)}{th('drift', '⚠ trôi box')}{th('overlap', '⚠ chồng lấn')}{th('dist', '📏 cách ego (m)', distMode === 'frame' ? `Khoảng cách tới ego tại frame ${distFrame}; — = không có box ở frame đó (luôn xếp cuối)` : 'Khoảng cách gần nhất tới ego trên cả track')}<th style={{ textAlign: 'left' }}>Khoảng frame</th><th>KF</th><th /></tr>
         </thead>
         <tbody>
-          {shown.map((r) => (
-            <tr key={r.num} onClick={() => onOpen(r.num, r.first)} style={{ cursor: 'pointer', borderTop: '1px solid #ddd', background: r.made === 'draft' ? '#dff5df' : r.made === 'server' ? '#e3ecff' : undefined }}>
-              <td><b style={seen.has(r.id) ? SEEN_STYLE : undefined} title={seen.has(r.id) ? 'Đã xem trong Batch Review' : undefined}>{r.num}</b> {r.made === 'draft' ? <span title="Object do tool tạo, đang trong NHÁP (chưa có trên CVAT)" style={{ background: '#2e9d3b', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 mới</span> : r.made === 'server' ? <span title="Object do tool tạo và đã upload; chỉ loại này mới xóa được bằng tool" style={{ background: '#2f5fd0', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 tool</span> : <span style={{ color: "#999", fontSize: 10 }}>db {r.id}</span>}</td><td>{r.label}</td><td>{r.assigned}</td><td>{r.outside}</td>
+          {shown.map((r, i) => (
+            <tr
+              key={r.num} onClick={() => onSelect(r.num)} onDoubleClick={() => onOpen(r.num, r.first)} aria-selected={r.num === selectedNum}
+              style={{ cursor: 'pointer', userSelect: 'none', borderTop: '1px solid #ddd', background: r.num === selectedNum ? SEL_BG : r.made === 'draft' ? '#dff5df' : r.made === 'server' ? '#e3ecff' : i % 2 ? ODD_BG : undefined }}
+            >
+              <td><b style={seen.has(r.id) ? SEEN_STYLE : undefined} title={seen.has(r.id) ? 'Đã xem trong Batch Review' : undefined}>{r.num}</b> {r.made === 'draft' ? <span title="Object do tool tạo, đang trong NHÁP (chưa có trên CVAT)" style={{ background: '#2e9d3b', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 mới</span> : r.made === 'server' ? <span title="Object do tool tạo và đã upload; chỉ loại này mới xóa được bằng tool" style={{ background: '#2f5fd0', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 tool</span> : <span style={{ color: "#999", fontSize: 10 }}>db {r.id}</span>}</td><td>{r.label}</td>
+              {(() => {
+                const at = attrsOf.get(r.num) ?? [];
+                return (
+                  <td style={{ fontSize: 11, maxWidth: 260 }} title={at.map((a) => `${a.name} = ${a.value}`).join(String.fromCharCode(10)) || 'Nhãn này không có attribute'}>
+                    {at.length ? at.map((a, j) => <span key={a.name}>{j > 0 && ', '}<span style={{ color: '#666' }}>{a.name}</span> {a.value || '—'}</span>) : <span style={{ color: '#999' }}>—</span>}
+                  </td>
+                );
+              })()}
+              <td>{r.assigned}</td><td>{r.outside}</td>
               <td style={{ color: r.missing ? '#b00' : undefined, fontWeight: r.missing ? 700 : 400 }}>{r.missing}</td>
               <td style={{ color: r.jumps ? '#a05a00' : undefined, fontWeight: r.jumps ? 700 : 400 }}>{r.jumps}</td>
               <td style={{ color: r.issues ? '#a0006e' : undefined, fontWeight: r.issues ? 700 : 400, ...(incomplete.has(r.num) ? PENDING_STYLE : null) }} title={incomplete.has(r.num) ? `${pendingTip}\n${issueTip(r.issuesByKind)}` : issueTip(r.issuesByKind)}>{r.issues}</td>
               <td style={{ color: r.drift ? '#a0006e' : undefined, fontWeight: r.drift ? 700 : 400 }} title={r.drift ? `Toạ độ ego của box không đổi trong khi xe chạy (box đi theo xe), frame ${r.driftFrames.join(', ')}` : 'Không có trôi box'}>{r.drift}</td>
-              <td style={{ color: h(r) ? '#006b7a' : undefined, fontWeight: h(r) ? 700 : 400 }}>{h(r)}</td>
               <td style={{ color: ov(r) ? '#b45a00' : undefined, fontWeight: ov(r) ? 700 : 400 }} title={overlapPairs.filter((p) => p.a === r.num || p.b === r.num).map((p) => `#${p.a}–#${p.b}: frame ${p.frames.join(', ')} (tối đa ${fmtIou(p.max)})`).join('\n')}>{ov(r)}</td>
               {(() => {
                 const d = dist.get(r.num);
                 return <td style={{ color: d && d.d > far ? '#999' : undefined }} title={d ? `${d.d.toFixed(2)} m tại frame ${d.frame}${d.d > far ? ` — ngoài ${far} m: không đo mặt đường` : ''}` : distMode === 'frame' ? `Không có box ở frame ${distFrame}` : 'Không có box'}>{d ? d.d.toFixed(1) : '—'}</td>;
               })()}
               <td>{r.first === null ? '—' : `${r.first}–${r.last}`}</td><td>{r.keyframes}</td>
-              <td>{r.made !== null && <button onClick={(e) => { e.stopPropagation(); onDelete(r); }} title={r.made === 'draft' ? 'Xóa object này khỏi nháp (chưa lên CVAT nên không ảnh hưởng server)' : 'Xóa object do tool tạo khỏi CVAT (xác nhận ở màn hình upload)'}>🗑</button>}</td>
+              <td>{r.made !== null && <button onDoubleClick={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onDelete(r); }} title={r.made === 'draft' ? 'Xóa object này khỏi nháp (chưa lên CVAT nên không ảnh hưởng server)' : 'Xóa object do tool tạo khỏi CVAT (xác nhận ở màn hình upload)'}>🗑</button>}</td>
             </tr>
           ))}
         </tbody>
