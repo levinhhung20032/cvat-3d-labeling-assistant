@@ -2,10 +2,11 @@ export interface PointCloud {
   count: number;
   xyz: Float32Array; // x,y,z xen kẽ
   rgb: Uint32Array | null;
+  intensity: Float32Array | null; // chỉ có khi parsePcd(…, keepIntensity = true) và file có trường intensity (thang của máy quét, vd. 0–255)
 }
 
 /** Đọc PCD v0.7 nhị phân (đã thấy: FIELDS x y z rgb, SIZE 4 4 4 4, DATA binary). */
-export function parsePcd(buf: ArrayBuffer, keepRgb = true): PointCloud {
+export function parsePcd(buf: ArrayBuffer, keepRgb = true, keepIntensity = false): PointCloud {
   const bytes = new Uint8Array(buf);
   const head = new TextDecoder().decode(bytes.subarray(0, Math.min(bytes.length, 2048)));
   const m = /DATA\s+(\w+)\n/.exec(head);
@@ -23,6 +24,9 @@ export function parsePcd(buf: ArrayBuffer, keepRgb = true): PointCloud {
   const iz = fields.indexOf('z');
   if (ix < 0 || iy < 0 || iz < 0) throw new Error('Thiếu trường x/y/z');
   const ic = keepRgb ? fields.indexOf('rgb') : -1;
+  const types = field('TYPE');
+  const ii = keepIntensity ? fields.indexOf('intensity') : -1;
+  const inten = ii >= 0 && sizes[ii] === 4 && types?.[ii] === 'F' ? new Float32Array(count) : null;
   const start = m.index + m[0].length;
   if (bytes.length < start + count * stride) throw new Error('PCD bị cắt cụt');
   const xyz = new Float32Array(count * 3);
@@ -33,7 +37,8 @@ export function parsePcd(buf: ArrayBuffer, keepRgb = true): PointCloud {
     const f32 = new Float32Array(buf, start, (count * stride) / 4);
     const w = stride / 4, ox = offsets[ix]! / 4, oy = offsets[iy]! / 4, oz = offsets[iz]! / 4;
     for (let i = 0, j = 0; i < count; i++, j += w) { xyz[i * 3] = f32[j + ox]!; xyz[i * 3 + 1] = f32[j + oy]!; xyz[i * 3 + 2] = f32[j + oz]!; }
-    return { count, xyz, rgb };
+    if (inten) { const oi = offsets[ii]! / 4; for (let i = 0, j = 0; i < count; i++, j += w) inten[i] = f32[j + oi]!; }
+    return { count, xyz, rgb, intensity: inten };
   }
   const dv = new DataView(buf, start);
   for (let i = 0; i < count; i++) {
@@ -42,6 +47,7 @@ export function parsePcd(buf: ArrayBuffer, keepRgb = true): PointCloud {
     xyz[i * 3 + 1] = dv.getFloat32(o + offsets[iy]!, true);
     xyz[i * 3 + 2] = dv.getFloat32(o + offsets[iz]!, true);
     if (rgb) rgb[i] = dv.getUint32(o + offsets[ic]!, true);
+    if (inten) inten[i] = dv.getFloat32(o + offsets[ii]!, true);
   }
-  return { count, xyz, rgb };
+  return { count, xyz, rgb, intensity: inten };
 }

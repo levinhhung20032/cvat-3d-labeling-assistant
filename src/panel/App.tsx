@@ -154,7 +154,8 @@ function reducer(s: Draft, a: Action): Draft {
 }
 
 let VERSION = '?';
-try { VERSION = api.runtime.getManifest().version; } catch { /* extension vừa được Reload */ }
+// version_name (vd. "1.5.0 beta") nếu có: manifest chỉ nhận số ở "version"
+try { const m = api.runtime.getManifest() as chrome.runtime.Manifest & { version_name?: string }; VERSION = m.version_name ?? m.version; } catch { /* extension vừa được Reload */ }
 
 const EMPTY: Draft = { work: null, edited: new Set<string>(), undo: [], redo: [] };
 

@@ -4,15 +4,20 @@ import { drawPointsGpu } from './gpu';
 import { cornerInView, handleOffset, isTilted, type LocalBox, type View } from '../shared/edit';
 import type { Status } from '../shared/interp';
 import type { PointCloud } from '../shared/pcd';
+import { DEFAULT_GROUND } from '../shared/ground';
+import { pooledGround, pwWOf, roadOf, segOf } from './groundSeg';
 
 export type { View };
 
 /** Điểm trong hệ tọa độ của object: u dọc hướng box, v sang trái, w lên. */
-export interface Local { u: Float32Array; v: Float32Array; w: Float32Array; n: number }
+export interface Local { u: Float32Array; v: Float32Array; w: Float32Array; n: number; g?: Uint8Array; pwW?: number | null; pool?: { u: Float32Array; v: Float32Array; w: Float32Array; n: number } | null; pwRoad?: { a: number; b: number; c: number; rms: number; n: number } | null }
 
-export function localize(pc: PointCloud, c: Cuboid, half: number): Local {
+/** `f`: số frame của point cloud — có thì (mức 4, G.pwPool > 0) gộp thêm điểm mặt đất của các frame lân cận vào `pool`; `pool` ép bật / tắt. */
+export function localize(pc: PointCloud, c: Cuboid, half: number, f?: number, pool: boolean = DEFAULT_GROUND.pw >= 4): Local {
   const cos = Math.cos(c.yaw), sin = Math.sin(c.yaw);
   const u = new Float32Array(pc.count), v = new Float32Array(pc.count), w = new Float32Array(pc.count);
+  const seg = segOf(pc); // Patchwork++ (null khi tắt): nhãn mặt đất đi theo từng điểm
+  const g = seg ? new Uint8Array(pc.count) : undefined;
   let n = 0;
   const p = pc.xyz;
   for (let i = 0; i < pc.count; i++) {
@@ -25,9 +30,11 @@ export function localize(pc: PointCloud, c: Cuboid, half: number): Local {
     const a = dx * cos + dy * sin;
     const b = -dx * sin + dy * cos;
     if (a > half || a < -half || b > half || b < -half) continue;
-    u[n] = a; v[n] = b; w[n] = dz; n++;
+    u[n] = a; v[n] = b; w[n] = dz; if (g) g[n] = seg!.label[i]!; n++;
   }
-  return { u, v, w, n };
+  const road = roadOf(seg, c);
+  const pooled = pool && seg && f !== undefined && DEFAULT_GROUND.pwPool > 0 ? pooledGround(f, c, DEFAULT_GROUND.pwPool, DEFAULT_GROUND.pwFarRadius) : null;
+  return { u, v, w, n, g: g?.subarray(0, n), pwW: road ? road.c : pwWOf(seg, c), pwRoad: road, pool: pooled };
 }
 
 /** Quay điểm đã lọc (hệ yaw) sang khung nhìn căn theo box nghiêng. */
@@ -37,7 +44,7 @@ export function rotateLocal(l: Local, m: Mat3): Local {
     const a = l.u[i]!, b = l.v[i]!, c = l.w[i]!;
     u[i] = m[0] * a + m[1] * b + m[2] * c; v[i] = m[3] * a + m[4] * b + m[5] * c; w[i] = m[6] * a + m[7] * b + m[8] * c;
   }
-  return { u, v, w, n: l.n };
+  return { u, v, w, n: l.n, g: l.g, pwW: l.pwW, pwRoad: l.pwRoad };
 }
 
 export const STATUS_COLOR: Record<Status, string> = {
@@ -131,6 +138,7 @@ export function drawView(
   scene: Scene = { zClip: half, slab: half * 0.5, colorHalf: half }, overlays: LocalBox[] = [], tiltBase: Pick<Cuboid, 'rx' | 'ry' | 'yaw'> | null = null,
   groundMarks: { u: number; v: number; w: number; used: boolean }[] = [], contactW: number | null = null, pan: Pan = NO_PAN, egoPlane: EgoPlane | null = null,
   reflect: { pts: Local | null; plane: number } | null = null, // ref mode: điểm lật từ box ảo về box chính + độ cao w của mặt phản chiếu
+  pwPlane: EgoPlane | null = null, // mặt đường Patchwork++ gợi ý (tím), cùng dạng với egoPlane
 ) {
   ctx.fillStyle = '#0b0f14';
   ctx.fillRect(0, 0, size, size);
@@ -218,6 +226,21 @@ export function drawView(
       ctx.setLineDash([]);
       ctx.font = `${Math.max(9, Math.round(size / 20))}px sans-serif`;
       ctx.fillText('Oxy ego (z=0)', x0 + 4, yAt(x0) - 3);
+      ctx.restore();
+    }
+    if (pwPlane && view !== 'top') {
+      // mặt đường do Patchwork++ gợi ý (fit từ các điểm mặt đất quanh box, gộp cả frame lân cận): tím nét đứt dài, nghiêng theo mặt phẳng fit
+      const x0 = -ox, x1 = size - ox;
+      const yAt = (x: number) => c - egoPlaneW(pwPlane, view, (x - c) / k) * k;
+      ctx.save();
+      ctx.strokeStyle = REF_COLOR;
+      ctx.fillStyle = REF_COLOR;
+      ctx.lineWidth = 1.8;
+      ctx.setLineDash([9, 4]);
+      ctx.beginPath(); ctx.moveTo(x0, yAt(x0)); ctx.lineTo(x1, yAt(x1)); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = `${Math.max(9, Math.round(size / 20))}px sans-serif`;
+      ctx.fillText('Patchwork++', x0 + 4, yAt(x0) + Math.max(11, Math.round(size / 18)));
       ctx.restore();
     }
     if (ground !== null && view !== 'top') {

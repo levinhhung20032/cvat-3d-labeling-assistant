@@ -74,7 +74,7 @@ export class CloudLoader {
   constructor(
     private cap: number, private maxTotal: number, private maxBackground: number, private maxIdle = maxBackground,
     private load: (n: number) => Promise<ArrayBuffer> = (n) => fetchBinary('frame', n),
-    private parse: (b: ArrayBuffer) => PointCloud = (b) => parsePcd(b, false),
+    private parse: (b: ArrayBuffer) => PointCloud = (b) => parsePcd(b, false, true), // đọc cả intensity (RNR của Patchwork++)
     private now: () => number = () => performance.now(),
   ) {}
 

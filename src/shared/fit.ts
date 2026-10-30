@@ -1,7 +1,13 @@
 import { DEFAULT_GROUND, groundSnap } from './ground';
 
 /** Điểm trong hệ tọa độ của box: u dọc hướng box, v sang trái, w lên; gốc = tâm box. */
-export interface LocalPoints { u: Float32Array; v: Float32Array; w: Float32Array; n: number }
+export interface LocalPoints {
+  u: Float32Array; v: Float32Array; w: Float32Array; n: number;
+  g?: Uint8Array; // nhãn Patchwork++ từng điểm (PW_*), có khi G.pw bật
+  pwW?: number | null; // độ cao mặt đất Patchwork++ dưới tâm box (w, so với tâm box)
+  pool?: { u: Float32Array; v: Float32Array; w: Float32Array; n: number } | null; // điểm mặt đất gộp từ các frame lân cận (đã đưa về hệ box của frame này)
+  pwRoad?: { a: number; b: number; c: number; rms: number; n: number } | null; // mặt đường Patchwork++ w = a·u + b·v + c trong hệ box, từ các ô mặt đất lân cận
+}
 
 /** Mặt đường đo được dưới object (hệ box: w = a·u + b·v + c là mặt trên lớp điểm mặt đường) và bề dày dải bỏ qua phía trên nó. */
 export interface FitGround { a: number; b: number; c: number; clear: number }

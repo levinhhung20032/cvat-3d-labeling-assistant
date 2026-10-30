@@ -20,6 +20,8 @@ import { AttributePanel } from './AttributePanel';
 import { gpuActive } from './gpu';
 import { Help, PENDING_STYLE, Pill, Slider } from './ui';
 import { ControlLayout, GripCtx } from './ControlLayout';
+import { PwCompare } from './PwCompare';
+import { setPoolSource, setSegForced } from './groundSeg';
 import { clampPan, drawView, type EgoPlane, hexRgb, localize, NO_PAN, panBy, panOffset, rotateLocal, REF_COLOR, STATUS_COLOR, type Local, type Pan, type Scene, type View } from './render';
 import { Cancelled, pointClouds } from './stores';
 import { issueKey, ignoreKey, ignoreStore, motionKey, overlapKey, shiftStore, useIgnored } from './shiftStore';
@@ -32,7 +34,7 @@ import { DEFAULT_FIT, fitGroundOf, fitReport, type FitReport } from '../shared/f
 import { thresholdStore, useThresholdVersion } from './thresholdStore';
 import { sym, useSymbols } from './symbolStore';
 import { findLongOutsideGaps, SPLIT_OUTSIDE_FRAMES, type OutsideGap } from '../shared/splitId';
-import { confirmSnap, DEFAULT_GROUND, groundSnap, tiltFromPlane, type GroundResult, type GroundSector } from '../shared/ground';
+import { confirmSnap, DEFAULT_GROUND, enforceConsistency, groundSnap, pwGroundPlane, type ConsistencyItem, tiltFromPlane, type GroundResult, type GroundSector } from '../shared/ground';
 import { DEFAULT_REFLECT, mirrorBox, mirroredPoints, pointsBelow, refPlane, type PlaneSource, type RefMode, type RefState } from '../shared/reflect';
 import { refStore, useRefState } from './refStore';
 import { motionJump, type MotionWarning } from '../shared/motion';
@@ -66,10 +68,12 @@ function loadRefPrefs(): RefViewPrefs {
   } catch { return { auto: true, size: 480, orig: true }; }
 }
 
+setPoolSource((g) => pointClouds.peek(g)); // gộp điểm mặt đất của frame lân cận (mức 4) lấy từ các frame đã tải
+
 // --- tùy chọn hiển thị, nhớ theo từng người dùng (chỉ là tiện ích, không quan trọng nếu mất) ---
 // ptColor: '#rrggbb' hoặc '' (tô theo độ cao); ptAlpha: độ đậm 0.1–1; ptSize: hệ số cỡ điểm.
-interface Prefs { auto: boolean; size: number; slabMargin: number; perWin: number; keyOnly: boolean; tilt: boolean; gap: number; ground: boolean; suggest: boolean; egoPlane: boolean; ptColor: string; ptAlpha: number; ptSize: number }
-const PREFS_DEFAULT: Prefs = { auto: true, size: 200, slabMargin: 0.5, perWin: 6, keyOnly: false, tilt: true, gap: 28, ground: true, suggest: true, egoPlane: false, ptColor: '', ptAlpha: 1, ptSize: 1 };
+interface Prefs { auto: boolean; size: number; slabMargin: number; perWin: number; keyOnly: boolean; tilt: boolean; gap: number; ground: boolean; suggest: boolean; egoPlane: boolean; ptColor: string; ptAlpha: number; ptSize: number; pwShow: boolean }
+const PREFS_DEFAULT: Prefs = { auto: true, size: 200, slabMargin: 0.5, perWin: 6, keyOnly: false, tilt: true, gap: 28, ground: true, suggest: true, egoPlane: false, ptColor: '', ptAlpha: 1, ptSize: 1, pwShow: false };
 const loadPrefs = (): Prefs => {
   try {
     const p = JSON.parse(kv.get('cvla-prefs') ?? '{}') as Partial<Prefs>;
@@ -77,7 +81,7 @@ const loadPrefs = (): Prefs => {
     return {
       auto: p.auto ?? true, size: num(p.size, 200, CELL_MIN, CELL_MAX), slabMargin: num(p.slabMargin, 0.5, 0, 3),
       perWin: Math.round(num(p.perWin, 6, 2, 30)), keyOnly: p.keyOnly === true, tilt: p.tilt !== false, gap: Math.round(num(p.gap, 28, 4, 80)), ground: p.ground !== false, suggest: p.suggest !== false, egoPlane: p.egoPlane === true,
-      ptColor: typeof p.ptColor === 'string' && hexRgb(p.ptColor) ? p.ptColor : '', ptAlpha: num(p.ptAlpha, 1, 0.1, 1), ptSize: num(p.ptSize, 1, 0.5, 4),
+      ptColor: typeof p.ptColor === 'string' && hexRgb(p.ptColor) ? p.ptColor : '', ptAlpha: num(p.ptAlpha, 1, 0.1, 1), ptSize: num(p.ptSize, 1, 0.5, 4), pwShow: p.pwShow === true,
     };
   } catch { return { ...PREFS_DEFAULT }; }
 };
@@ -120,7 +124,8 @@ function cursorFor(view: View, hit: Hit, alt = false): string {
 
 interface DragState { hit: NonNullable<Hit>; x0: number; y0: number; base: LocalBox; moved: boolean }
 
-function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, tiltOn, autoSnap, onPreview, onCommit, onZoom, pan, onPan, reflect }: {
+function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, tiltOn, autoSnap, onPreview, onCommit, onZoom, pan, onPan, reflect, pwPlane }: {
+  pwPlane: EgoPlane | null; // mặt đường Patchwork++ gợi ý (tím) trong hệ của khung nhìn
   reflect: { pts: Local | null; plane: number } | null; // ref mode (chỉ ở tab Ref)
   egoPlane: EgoPlane | null; // mặt phẳng Oxy của ego trong hệ của khung nhìn (null: công tắc tắt)
   scene: Scene; overlays: LocalBox[]; tiltOn: boolean; frame: Mat3 | null; // frame: khung nhìn căn theo box nghiêng (null nếu box không nghiêng)
@@ -141,8 +146,8 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
     const ctx = ref.current?.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawView(ctx, size, view, loc, box, half, st.status, !!drag.current, misfit, ghost, ground, mark, scene, overlays, st.cuboid, groundMarks, contactW, pan, egoPlane, reflect);
-  }, [view, size, dpr, loc, st.status, st.cuboid, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, pan, reflect]);
+    drawView(ctx, size, view, loc, box, half, st.status, !!drag.current, misfit, ghost, ground, mark, scene, overlays, st.cuboid, groundMarks, contactW, pan, egoPlane, reflect, pwPlane);
+  }, [view, size, dpr, loc, st.status, st.cuboid, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, pan, reflect, pwPlane]);
 
   // Cuộn chuột trên ô = phóng to/thu nhỏ mọi frame (listener gốc để chặn cuộn trang).
   const zoomRef = useRef(onZoom);
@@ -270,8 +275,9 @@ const CHIP_BTN: React.CSSProperties = { padding: '0 3px', lineHeight: 1, height:
 interface FileFlag { kind: IssueKind; state: FlagState; msg?: string; det: boolean }
 const NO_FLAGS: FileFlag[] = [];
 
-function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan, refl = null, onBelow, onRefPlane, horizontal = false }: {
+function Column({ pwShow = false, groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan, refl = null, onBelow, onRefPlane, horizontal = false }: {
   horizontal?: boolean; // tab Ref: 3 view Trên | Bên | Trước xếp ngang
+  pwShow?: boolean; // hiện mặt đường Patchwork++ gợi ý (vạch tím) ở view Bên / Trước
   onRefPlane?: (f: number, d: number | null) => void; // tab Ref: mặt phản chiếu cao hơn đáy box bao nhiêu (m)
   refl?: RefState | null; // tab Ref: vẽ box ảo, mặt phản chiếu và điểm lấy đối xứng
   onBelow?: (f: number, n: number) => void; // số điểm dưới mặt đường trong chân box (để gợi ý bật ref)
@@ -317,7 +323,7 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
     if (pcRef.current && pointClouds.invalidated(f)) { pcRef.current = null; setPc(null); setRetryN((x) => x + 1); }
   }), [f]);
   // Lọc điểm một lần ở phạm vi lớn nhất (thu nhỏ tối đa) để phóng to/thu nhỏ không phải lọc lại.
-  const loc = useMemo(() => (pc && refCub ? localize(pc, refCub, locHalf) : null), [pc, refCub, locHalf]);
+  const loc = useMemo(() => (pc && refCub ? localize(pc, refCub, locHalf, f, DEFAULT_GROUND.pw >= 4 || pwShow) : null), [pc, refCub, locHalf, f, pwShow]);
   // Khung nhìn căn theo box: box nghiêng thì điểm, box gợi ý, vật khác... đều quay sang khung riêng của box để mọi view thấy box thẳng.
   const M = useMemo(() => (st.cuboid ? viewFrame(st.cuboid) : null), [st.cuboid]);
   const locView = useMemo(() => (loc && M ? rotateLocal(loc, M) : loc), [loc, M]);
@@ -326,6 +332,14 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
     () => (egoOn && st.cuboid ? (M ? [M[2], M[5], M[8], -st.cuboid.z] : [0, 0, 1, -st.cuboid.z]) : null),
     [egoOn, st.cuboid, M],
   );
+  // Mặt đường Patchwork++ gợi ý: mặt phẳng fit từ các điểm mặt đất quanh box (gộp cả frame lân cận), + G.pwLift; viết trong hệ của khung nhìn.
+  const pwPlane = useMemo<EgoPlane | null>(() => {
+    if (!pwShow || !loc || !st.cuboid) return null;
+    const pl = pwGroundPlane(loc, st.cuboid.sx, st.cuboid.sy);
+    if (!pl) return null;
+    const n = M ? apply(M, [-pl.a, -pl.b, 1]) : [-pl.a, -pl.b, 1];
+    return [n[0]!, n[1]!, n[2]!, pl.c + DEFAULT_GROUND.pwLift];
+  }, [pwShow, loc, st.cuboid, M]);
   const boxV = <T extends LocalBox | null>(b: T): T => {
     if (!b || !M) return b;
     const [cu, cv, cw] = apply(M, [b.cu, b.cv, b.cw]);
@@ -443,7 +457,7 @@ function Column({ groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, hal
       </div>
       <div style={{ position: 'relative', ...(horizontal ? { display: 'flex', gap: VIEW_GAP } : null) }}>
       {VIEWS.map((v) => (
-        <Cell key={v} reflect={reflect} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} pan={pan} onPan={onPan} />
+        <Cell key={v} reflect={reflect} pwPlane={pwPlane} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} pan={pan} onPan={onPan} />
       ))}
       </div>
       {reflect && plane && (
@@ -632,7 +646,8 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   const { start_frame: start, stop_frame: stop } = job;
   const hint = useKeyHint();
   const keyOf = useKeyOf();
-  const [prefs, setPrefs] = useState(loadPrefs);
+  const [prefs, setPrefs] = useState(() => { const p = loadPrefs(); setSegForced(p.pwShow); return p; });
+  const [showCmp, setShowCmp] = useState(false);
   const thrVer = useThresholdVersion(); // ngưỡng cảnh báo chỉnh tay (tab Threshold) đổi thì tính lại cảnh báo
   const max = ann.tracks.length;
   const num = selectedNum ?? 1;
@@ -777,7 +792,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   }, [ovAt, framesKey, ann]);
   useEffect(() => { onSel(selFrame); }, [selFrame]);
 
-  const updatePrefs = (p: Prefs) => { setPrefs(p); savePrefs(p); };
+  const updatePrefs = (p: Prefs) => { setSegForced(p.pwShow); setPrefs(p); savePrefs(p); };
   const zoomBy = (factor: number) => setZoom((z) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z * factor)));
   useEffect(() => { setZoom(1); }, [num]);
 
@@ -888,6 +903,13 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     return { byKind: [...byKind].sort(([a], [b]) => a.localeCompare(b)), far };
   }, [issueMap, ign, job.id, num, track, row?.label, start, stop, thrVer]);
   const goFrame = (f: number) => { setK(Math.min(nWin - 1, pageOf(list, f, prefs.perWin, overlap))); setSelFrame(f); };
+  // Bảng so sánh Patchwork++: nhảy tới (object, frame); object khác thì đổi object rồi về cửa sổ chứa frame đó (như nút ↶).
+  const jumpTo = (n: number, f: number) => {
+    if (n === num) { goFrame(f); return; }
+    pendingAt.current = f;
+    if (viewFrom !== '' && Number(viewFrom) > f) setViewFrom('');
+    setSelectedNum(n);
+  };
   const cols = useMemo(
     () => frames.map((f) => ({
       f,
@@ -1038,7 +1060,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     const pc = pointClouds.peek(f);
     if (!pc) { snapWhy.current = 'point cloud của frame này chưa có trong bộ nhớ'; return false; }
     const c0 = st.cuboid;
-    if (!confirmSnap(localize(pc, c0, 16), c0.sx, c0.sy, c0.sz, { cu: 0, cv: 0, cw: 0, range: Math.hypot(c0.x, c0.y) }, g)) { snapWhy.current = 'đo lại tại chỗ cho ra mặt đường khác (hai lần đo không khớp)'; return false; }
+    if (!confirmSnap(localize(pc, c0, 16, f), c0.sx, c0.sy, c0.sz, { cu: 0, cv: 0, cw: 0, range: Math.hypot(c0.x, c0.y) }, g)) { snapWhy.current = 'đo lại tại chỗ cho ra mặt đường khác (hai lần đo không khớp)'; return false; }
     // Mặt dốc: nghiêng box song song mặt đường (roll / pitch) nếu bật và dốc đủ rõ; không thì chỉ dời z.
     if (prefs.tilt && g.method === 'plane' && g.plane && g.dzTilt !== undefined && (g.slopeDeg ?? 0) >= 1) {
       const t = tiltFromPlane(g.plane.a, g.plane.b, st.cuboid.yaw);
@@ -1090,18 +1112,24 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     let live = true;
     const timer = window.setTimeout(async () => {
       const grounds = new Map<number, GroundResult | null>();
+      const consItems: ConsistencyItem[] = [];
       const fits = new Map<number, FitReport>();
       let checked = 0;
       for (let f = start; f <= stop && live; f++) {
         const c = stateAt(track, f).cuboid;
         const pc = c ? pointClouds.peek(f) : undefined;
         if (!c || !pc) continue; // chưa tải point cloud thì chưa đo frame đó
-        const loc = localize(pc, c, 16);
+        const loc = localize(pc, c, 16, f);
         checked++;
         const g = groundSnap(loc, c.sx, c.sy, c.sz, { cu: 0, cv: 0, cw: 0, range: Math.hypot(c.x, c.y) });
-        if (prefs.ground) grounds.set(f, g);
+        if (prefs.ground) { grounds.set(f, g); consItems.push({ f, z: c.z, range: Math.hypot(c.x, c.y), g }); }
         if (warn) fits.set(f, fitReport(loc, c.sx, c.sy, c.sz, DEFAULT_FIT, fitGroundOf(g)));
         if (checked % 3 === 0) await new Promise((r) => window.setTimeout(r, 0));
+      }
+      if (prefs.ground && DEFAULT_GROUND.pw >= 4) {
+        // mức 4: loại ước lượng Patchwork++ lệch so với mặt đường các frame kề của cùng object
+        const checked2 = enforceConsistency(consItems);
+        consItems.forEach((it, i) => grounds.set(it.f, checked2[i]!));
       }
       if (live) { setSeries(prefs.ground ? grounds : new Map()); setFitSeries({ fits, checked }); }
     }, 300);
@@ -1185,7 +1213,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
       onIgnore={(f, on) => ignoreFrames([f], on)}
       motion={c.mot} motionIgnored={ign.has(motionKey(job.id, num, c.f))}
       onIgnoreMotion={ignoreMotion}
-      autoSnap={autoSnap && prefs.ground} groundOv={series.get(c.f) ?? null} groundOn={prefs.ground} egoOn={prefs.egoPlane} suggestOn={prefs.suggest} onGround={(f) => { if (!groundFrame(f)) setNote(`Không snap được frame ${f}: ${snapWhy.current || 'không rõ lý do'}.`); }}
+      autoSnap={autoSnap && prefs.ground} pwShow={prefs.pwShow} groundOv={series.get(c.f) ?? null} groundOn={prefs.ground} egoOn={prefs.egoPlane} suggestOn={prefs.suggest} onGround={(f) => { if (!groundFrame(f)) setNote(`Không snap được frame ${f}: ${snapWhy.current || 'không rõ lý do'}.`); }}
       onSnap={(f, g) => setSnaps((m) => (m.get(f) === g ? m : new Map(m).set(f, g)))}
       onSuggest={(f, s) => setSugs((m) => (m.get(f) === s ? m : new Map(m).set(f, s)))} onAccept={accept}
       onFit={(f, r) => setFits((m) => (m.get(f) === r ? m : new Map(m).set(f, r)))} onSelect={() => onPickSelect(c.f)}
@@ -1341,6 +1369,9 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
           <label title="sg size = gợi ý kích thước box: khi box lệch cụm điểm, đề xuất box mới (nét đứt xanh lơ, nút ✔ nhận) kèm cảnh báo ⚠ lệch. Tắt: không có gợi ý và không có cảnh báo lệch (⚠ ít điểm vẫn hiện)." style={{ fontWeight: 600 }}>
             <input type="checkbox" checked={prefs.suggest} onChange={(e) => updatePrefs({ ...prefs, suggest: e.target.checked })} /> sg size
           </label>
+          <label title="gr pw = hiện mặt đường do Patchwork++ gợi ý: vạch tím nét đứt ở view Bên / Trước của mọi frame, là mặt phẳng fit từ các điểm Patchwork++ gán là mặt đất quanh box (gộp ±G.pwPool frame lân cận, bỏ vùng quanh chân box) + G.pwLift. Không cần đặt G.pw: chỉ để xem; đáy box so với vạch tím cho biết Patchwork++ nghĩ box cao / thấp hơn mặt đường bao nhiêu. Frame thiếu điểm mặt đất quanh box thì không có vạch.">
+            <input type="checkbox" checked={prefs.pwShow} onChange={(e) => updatePrefs({ ...prefs, pwShow: e.target.checked })} /> gr pw
+          </label>
           <label title="gr z=0 = hiện mặt đường ego (Oxy): mặt phẳng Oxy (z = 0, mặt đường dưới xe) vẽ bằng vạch vàng chấm ở view Bên / Trước của MỌI frame, theo z của box ở frame đó (box nghiêng thì vạch nghiêng theo). Để so box với mặt đường chung của cả cảnh; không ảnh hưởng cảnh báo hay dữ liệu.">
             <input type="checkbox" checked={prefs.egoPlane} onChange={(e) => updatePrefs({ ...prefs, egoPlane: e.target.checked })} /> gr z=0
           </label>
@@ -1350,6 +1381,8 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
           <label title="gr lock = tự bám mặt đất khi kéo: sau mỗi lần dời / đổi cỡ box bằng chuột, tự đặt lại độ cao cho đáy chạm mặt đường tại vị trí mới">
             <input type="checkbox" checked={autoSnap} disabled={!prefs.ground} onChange={(e) => setAutoSnap(e.target.checked)} /> gr lock
           </label>
+          <button onClick={() => setShowCmp((v) => !v)} aria-pressed={showCmp} style={showCmp ? { fontWeight: 700 } : undefined}
+            title="So sánh cách đo mặt đường cũ với Patchwork++ cho lỗi G (đáy lơ lửng / chìm): tỉ lệ báo theo tầm, ca mơ hồ, ca không đo được, và danh sách frame hai cách kết luận khác nhau.">⚖ So sánh Patchwork++</button>
           </Group>
         ),
         '1': (
@@ -1475,6 +1508,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
           </Group>
         ),
       }} />
+      {showCmp && <PwCompare ann={ann} start={start} stop={stop} num={num} onJump={jumpTo} onClose={() => setShowCmp(false)} />}
       <div style={{ marginBottom: 6, display: 'flex', flexWrap: 'wrap', gap: '4px 12px', alignItems: 'center' }}>
         {row && (
           <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>

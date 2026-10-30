@@ -19,3 +19,4 @@ graphify-out/
 
 # Đề xuất nội bộ, không đưa lên GitHub
 sg_size.txt
+test/fixtures/pw_scenes.json

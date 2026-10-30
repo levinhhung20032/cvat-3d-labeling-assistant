@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react';
 import { newRuleId, parseRules, type Rule } from '../shared/alertRules';
 import { applyPersisted, installRules, toPersisted } from '../shared/thresholds';
 import { kv, whenStorageReady } from './storage';
+import { resetGroundSeg } from './groundSeg';
 
 /**
  * Rule cảnh báo và tham số kỹ thuật (tab Threshold), lưu cục bộ trong extension (không rời máy, không có con số nào kèm sẵn).
@@ -47,6 +48,7 @@ export const thresholdStore = {
   setJob(jobId: number) {
     if (jobId === curJob) return;
     curJob = jobId;
+    resetGroundSeg(); // ngưỡng Patchwork++ học theo từng job
     apply();
     bump();
   },
