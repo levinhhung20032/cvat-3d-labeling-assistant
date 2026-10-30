@@ -45,7 +45,7 @@ export function removeInnerKeyframes(track: CvatTrack, a: number, b: number): Tr
 }
 
 /**
- * "Khoá tất cả thành keyframe": ghi giá trị hiển thị hiện tại của mọi frame có box trong [a, b]
+ * "Khoá hết thành keyframe" khi upload: ghi giá trị hiển thị hiện tại của mọi frame có box trong [a, b]
  * thành keyframe. Hình dạng đường đi không đổi, chỉ thêm keyframe.
  */
 export function bakeKeyframes(track: CvatTrack, a: number, b: number): TrackChange {

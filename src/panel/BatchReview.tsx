@@ -9,7 +9,7 @@ import {
 import { referenceCuboid, stateAt, type FrameState } from '../shared/interp';
 import { upsertKeyframe as upsertKf } from '../shared/edit';
 import {
-  bakeKeyframes, removeInnerKeyframes, restoreFrom, setOutsideFrom, setOutsideRange, toggleKeyframe,
+  removeInnerKeyframes, restoreFrom, setOutsideFrom, setOutsideRange, toggleKeyframe,
   type TrackChange,
 } from '../shared/keyframes';
 import type { PointCloud } from '../shared/pcd';
@@ -825,10 +825,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     const r = range();
     if (r && track) apply(removeInnerKeyframes(track, r[0], r[1]), `Đã mở khoá ${'{n}'} keyframe ở giữa ${r[0]}–${r[1]} (giữ hai đầu mút). Hoàn tác được.`, 'Không có keyframe nào ở giữa khoảng này để gỡ.');
   };
-  const lockAll = (whole: boolean) => {
-    const r = whole ? ([start, stop] as [number, number]) : range();
-    if (r && track) apply(bakeKeyframes(track, r[0], r[1]), `Đã khoá ${'{n}'} frame thành keyframe (${r[0]}–${r[1]}). Hoàn tác được.`, 'Mọi frame có box trong khoảng này đã là keyframe.');
-  };
+  const selSt = track && selFrame !== null ? stateAt(track, selFrame) : null;
   useEffect(() => { setNote(''); }, [num, k]);
   /** Chấp nhận gợi ý: áp box đề xuất thành keyframe (vào nháp, hoàn tác được). */
   const accept = (f: number, s: Suggestion) => {
@@ -1024,9 +1021,12 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
           <button onClick={() => { setRangeFrom(String(frames[0])); setRangeTo(String(frames[frames.length - 1])); }} title="Đặt phạm vi tác động bằng đúng cửa sổ đang hiển thị" style={{ padding: '0 5px' }}>= cửa sổ</button>
         </span>
         </span>
+        <button
+          disabled={!selSt?.cuboid}
+          onClick={() => selFrame !== null && toggleKf(selFrame)}
+          title="Phím K. Khoá frame đang chọn thành keyframe (giá trị giữ nguyên); frame đang là keyframe thì mở khoá về nội suy. Chọn frame bằng cách bấm tiêu đề cột."
+        >{selSt?.status === 'key' ? '🔓 Mở khoá' : '🔒 Khoá'} frame {selFrame ?? '…'} (K)</button>
         <button onClick={unlockInner} title="Gỡ mọi keyframe nằm hẳn bên trong khoảng, giữ hai đầu mút; frame về nội suy">🔓 Mở khoá KF giữa (Alt+K)</button>
-        <button onClick={() => lockAll(false)} title="Biến mọi frame có box trong khoảng thành keyframe (giá trị giữ nguyên)">🔒 Khoá tất cả thành KF</button>
-        <button onClick={() => lockAll(true)} title="Như trên nhưng cho cả track">🔒 Cả track</button>
 
         </Group>
         <Group id="4" title={<>Outside</>} bg="#fff4f4">
