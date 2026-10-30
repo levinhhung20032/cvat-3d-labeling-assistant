@@ -81,7 +81,7 @@ describe('phím tắt cho mọi nút của Batch Review', () => {
   it("nút mới mặc định chưa gán · ② Ctrl+O, ③ Ctrl+Alt+O · bản lưu cũ nhận mặc định mới · không trùng phím mặc định", () => {
     {
     const m = defaultKeymap();
-    for (const id of ['win.first', 'win.last', 'win.fromStart', 'dyn.ownReset', 'size.unify', 'range.window', 'view.center']) expect(m[id]).toEqual([]);
+    for (const id of ['win.first', 'win.last', 'win.fromStart', 'dyn.ownReset', 'size.unify', 'view.center']) expect(m[id]).toEqual([]);
     expect(m['outside.window']).toEqual(['ctrl+o']);
     expect(m['outside.pick']).toEqual(['ctrl+alt+o']);
     expect(comboOf(ev('o', { ctrlKey: true, altKey: true }))).toBe('ctrl+alt+o');

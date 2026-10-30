@@ -829,7 +829,6 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     if (r && track) apply(removeInnerKeyframes(track, r[0], r[1]), `Đã mở khoá ${'{n}'} keyframe ở giữa ${r[0]}–${r[1]} (giữ hai đầu mút). Hoàn tác được.`, 'Không có keyframe nào ở giữa khoảng này để gỡ.');
   };
   const selSt = track && selFrame !== null ? stateAt(track, selFrame) : null;
-  const rangeToWindow = () => { setRangeFrom(String(frames[0])); setRangeTo(String(frames[frames.length - 1])); };
   /** ③ Select range: bật / hủy chế độ chọn khoảng bằng hai tiêu đề cột. */
   const togglePick = () => {
     if (pick) { setPick(null); setNote('Đã hủy chọn khoảng.'); } else { setPick({ first: null }); setNote('Chọn khoảng: bấm tiêu đề cột ĐẦU khoảng (Esc để hủy).'); }
@@ -981,7 +980,6 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
         case 'win.fromStart': if (viewFrom !== '') { forceFirst.current = true; setViewFrom(''); } break;
         case 'dyn.ownReset': if (own !== null) clearOwnDyn(); else setNote('Object này chưa có công tắc Dynamic size riêng.'); break;
         case 'size.unify': if (!dyn) unifySize(); else setNote('Dynamic size đang bật: đồng bộ size chỉ dùng khi tắt Dynamic size.'); break;
-        case 'range.window': rangeToWindow(); break;
         case 'outside.window': outsideRange(); break;
         case 'outside.pick': togglePick(); break;
         case 'view.center': setPan(NO_PAN); break;
@@ -1022,20 +1020,18 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
       {/* 3 hàng cố định (chủ dự án 2026-10-30): Keyframe & kích thước + Outside · Gợi ý & mặt đất + QC · Object & cửa sổ + Hiển thị.
           Hai cột thẳng hàng ở mọi hàng; nội dung dài xuống dòng TRONG nhóm, không đẩy nhóm sang hàng khác. */}
       <div style={{ marginBottom: 6, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 6, alignItems: 'stretch' }}>
-        <Group id="3" title={<>Keyframe & kích thước <Help text="🔒 / 🔓 trên tiêu đề cột hoặc nút 🔒 frame: khoá / mở khoá frame đang chọn. 🔓 KF giữa: mở khoá keyframe ở giữa Phạm vi tác động. Rê chuột lên nút để xem phím tắt." /></>} bg="#f4f4f4">
-        <label title={`Chỉ áp dụng cho object #${num} đang chọn, không đổi cả class. BẬT: kích thước nội suy giữa các keyframe. TẮT (static): đổi kích thước ở một frame thì áp cho mọi keyframe của object. Hiện đang ${dynWhy}. Mặc định theo class / attribute đặt ở tab Dynamic size.`} style={{ fontWeight: 600 }}>
+        <Group id="3" title={<>Keyframe & kích thước <Help text="🔒 / 🔓 trên tiêu đề cột hoặc nút 🔒 frame: khoá / mở khoá frame đang chọn. 🔓 KF giữa: mở khoá keyframe ở giữa Phạm vi. Rê chuột lên nút để xem phím tắt." /></>} bg="#f4f4f4">
+        <label title={`Chỉ áp dụng cho object #${num} đang chọn, không đổi cả class. BẬT: kích thước nội suy giữa các keyframe. TẮT (static): đổi kích thước ở một frame thì áp cho mọi keyframe của object. Hiện đang: ${dynWhy}. Mặc định theo class / attribute đặt ở tab Dynamic size.`} style={{ fontWeight: 600 }}>
           <input type="checkbox" checked={dyn} onChange={(e) => setDyn(e.target.checked)} /> Dynamic size · #{num}
         </label>
-        <span style={{ color: '#567', fontSize: 11 }} title="Nguồn quyết định dynamic size của object này">({dynWhy})</span>
-        {own !== null && <button onClick={clearOwnDyn} title={hint('dyn.ownReset', 'Bỏ công tắc riêng, quay về theo attribute / class (tab Dynamic size)')}>↺ theo class</button>}
-        {!dyn && <button disabled={selFrame === null} onClick={() => unifySize()} title={hint('size.unify', 'Lấy kích thước của frame đang chọn áp cho mọi keyframe của object (hoàn tác được)')}>Đồng bộ size theo frame {selFrame ?? '…'}</button>}
+        {own !== null && <button onClick={clearOwnDyn} title={hint('dyn.ownReset', 'Theo class: bỏ công tắc riêng, quay về theo attribute / class (tab Dynamic size)')}>↺</button>}
+        {!dyn && <button disabled={selFrame === null} onClick={() => unifySize()} title={hint('size.unify', `Đồng bộ size: lấy kích thước của frame đang chọn (${selFrame ?? 'chưa chọn, bấm tiêu đề cột'}) áp cho mọi keyframe của object (hoàn tác được)`)}>Đồng bộ</button>}
         <span style={{ whiteSpace: 'nowrap' }}>
-        <b title="Khoảng frame mà các nút Keyframe và Outside bên cạnh tác động (khác với khoảng đang hiển thị ở nhóm Object & cửa sổ). Mặc định bằng cửa sổ đang xem.">Phạm vi tác động</b>{' '}
+        <b title="Khoảng frame mà các nút Keyframe và Outside bên cạnh tác động (khác với khoảng đang hiển thị ở nhóm Object & cửa sổ). Mặc định bằng cửa sổ đang xem, tự đặt lại khi đổi cửa sổ.">Phạm vi</b>{' '}
         <span>
           frame{' '}
           <input value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} size={3} style={{ width: 44 }} /> →{' '}
-          <input value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} size={3} style={{ width: 44 }} />{' '}
-          <button onClick={rangeToWindow} title={hint('range.window', 'Đặt phạm vi tác động bằng đúng cửa sổ đang hiển thị')} style={{ padding: '0 5px' }}>= cửa sổ</button>
+          <input value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} size={3} style={{ width: 44 }} />
         </span>
         </span>
         <button
@@ -1045,7 +1041,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
             ? 'Mở khoá frame đang chọn: keyframe về nội suy. Chọn frame bằng cách bấm tiêu đề cột.'
             : 'Khoá frame đang chọn thành keyframe (giá trị giữ nguyên). Chọn frame bằng cách bấm tiêu đề cột.')}
         >{selSt?.status === 'key' ? '🔓' : '🔒'} frame {selFrame ?? '…'}</button>
-        <button onClick={unlockInner} title={hint('kf.unlockInner', 'Mở khoá keyframe ở giữa: gỡ mọi keyframe nằm hẳn bên trong Phạm vi tác động, giữ hai đầu mút; frame về nội suy')}>🔓 KF giữa</button>
+        <button onClick={unlockInner} title={hint('kf.unlockInner', 'Mở khoá keyframe ở giữa: gỡ mọi keyframe nằm hẳn bên trong Phạm vi, giữ hai đầu mút; frame về nội suy')}>🔓 KF giữa</button>
 
         </Group>
         <Group id="4" title={<>Outside</>} bg="#fff4f4">
