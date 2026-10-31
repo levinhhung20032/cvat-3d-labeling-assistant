@@ -9,7 +9,7 @@ export interface GroundAdvice {
   detail: string; // văn bản cho tooltip
 }
 
-const LABEL: Record<GroundKind, string> = { measured: 'đo riêng', ego: 'ego z=0', pw: 'Patchwork++' };
+const LABEL: Record<GroundKind, string> = { measured: 'local', ego: 'ego', pw: 'patchwork++' };
 const usable = (g: GroundResult | null | undefined): g is GroundResult => !!g && g.confident && !g.ambiguous && !g.inconsistent;
 const fmtCm = (m: number) => `${m >= 0 ? '+' : '−'}${Math.round(Math.abs(m) * 100)} cm`;
 

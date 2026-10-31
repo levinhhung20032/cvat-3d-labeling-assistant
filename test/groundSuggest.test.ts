@@ -26,7 +26,7 @@ describe('gợi ý nguồn mặt đường', () => {
     const a = adviseGround({ measured: res(-0.75), pw: res(-0.75 - (agree + 0.3)), ego: egoGround(0.75, 1.5) }, agree);
     expect(a.kind).toBe('measured');
     expect(a.conflict).toBe(true);
-    expect(a.detail).toContain('Patchwork++');
+    expect(a.detail).toContain('patchwork++');
   });
   it('dzCm liệt kê từng nguồn đo được', () => {
     const a = adviseGround({ measured: res(-0.65), pw: null, ego: egoGround(0.75, 1.5) }, agree);

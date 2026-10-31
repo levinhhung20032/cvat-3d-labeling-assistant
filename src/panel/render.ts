@@ -61,6 +61,20 @@ const PALETTE = Array.from({ length: BUCKETS }, (_, i) => `hsl(${220 - (i * 200)
  */
 export type EgoPlane = [number, number, number, number];
 /** Độ cao w của mặt phẳng ego tại vị trí s trên trục ngang của ô (u ở view Bên, v ở view Trước; trục còn lại lấy 0, giữa lát cắt). */
+/** Nhãn tên mặt đường: chữ 10px như nhãn view (Trên / Bên / Trước), nền mờ trong suốt để nhìn xuyên qua point cloud. `right`: x là mép phải của nhãn. */
+function surfaceTag(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, side: 'above' | 'below', color: string, right = false): void {
+  ctx.save();
+  ctx.setLineDash([]);
+  ctx.font = '10px system-ui, sans-serif';
+  const w = ctx.measureText(text).width + 6, h = 12;
+  const left = right ? x - w : x, top = side === 'above' ? y - h : y;
+  ctx.fillStyle = 'rgba(11, 15, 20, 0.35)';
+  ctx.fillRect(left, top, w, h);
+  ctx.fillStyle = color;
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, left + 3, top + h / 2 + 0.5);
+  ctx.restore();
+}
 export const egoPlaneW = (p: EgoPlane, view: View, s: number): number => (p[3] - (view === 'side' ? p[0] : p[1]) * s) / p[2];
 
 /** Chiếu điểm (u, v, w) của object lên ô. */
@@ -224,9 +238,8 @@ export function drawView(
       ctx.setLineDash([2, 4]);
       ctx.beginPath(); ctx.moveTo(x0, yAt(x0)); ctx.lineTo(x1, yAt(x1)); ctx.stroke();
       ctx.setLineDash([]);
-      ctx.font = `${Math.max(9, Math.round(size / 20))}px sans-serif`;
-      ctx.fillText('Oxy ego (z=0)', x0 + 4, yAt(x0) - 3);
       ctx.restore();
+      surfaceTag(ctx, 'ego', x0 + 4, yAt(x0) - 2, 'above', '#ffd400');
     }
     if (pwPlane && view !== 'top') {
       // mặt đường do Patchwork++ gợi ý (fit từ các điểm mặt đất quanh box, gộp cả frame lân cận): tím nét đứt dài, nghiêng theo mặt phẳng fit
@@ -239,9 +252,8 @@ export function drawView(
       ctx.setLineDash([9, 4]);
       ctx.beginPath(); ctx.moveTo(x0, yAt(x0)); ctx.lineTo(x1, yAt(x1)); ctx.stroke();
       ctx.setLineDash([]);
-      ctx.font = `${Math.max(9, Math.round(size / 20))}px sans-serif`;
-      ctx.fillText('Patchwork++', x0 + 4, yAt(x0) + Math.max(11, Math.round(size / 18)));
       ctx.restore();
+      surfaceTag(ctx, 'patchwork++', x0 + 4, yAt(x0) + 2, 'below', REF_COLOR);
     }
     if (ground !== null && view !== 'top') {
       // mặt đường ước lượng (xanh lá nét đứt) để so với đáy box
@@ -252,6 +264,7 @@ export function drawView(
       ctx.setLineDash([5, 4]);
       ctx.beginPath(); ctx.moveTo(-ox, gy); ctx.lineTo(size - ox, gy); ctx.stroke();
       ctx.restore();
+      surfaceTag(ctx, 'local', size - ox - 4, gy - 2, 'above', '#7cfc00', true);
     }
     if (reflect && view !== 'top') {
       // mặt phản chiếu (ref mode): tím nét gạch dài

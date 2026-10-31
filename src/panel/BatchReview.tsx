@@ -131,11 +131,11 @@ function cursorFor(view: View, hit: Hit, alt = false): string {
 const cm = (m: number) => Math.round(Math.abs(m) * 100);
 /** Ba nguồn mặt đường chọn được. Ground snap / lock chỉ chạy khi frame chọn ĐÚNG 1 nguồn; chọn nhiều thì chỉ hiển thị, không snap / lock. */
 const GROUND_LABEL: Record<GroundKind, { short: string; full: string; tip: string }> = {
-  measured: { short: 'đo', full: 'Đo riêng (sg gr)', tip: `Đo mặt đường riêng cho object ở đúng frame này (lớp thấp nhất có mật độ ở 8 cung quanh box + lớp tiếp xúc dưới gầm), không dự đoán từ frame khác. Báo ⏬ khi đáy cao hơn mặt đường quá ${cm(DEFAULT_GROUND.floatTol)} cm hoặc thấp hơn quá ${cm(DEFAULT_GROUND.sinkTol)} cm và vượt độ bất định của phép đo.` },
-  ego: { short: 'z=0', full: 'Ego z=0 (gr z=0)', tip: 'Mặt phẳng Oxy của ego (z = 0, mặt đường dưới xe): vạch vàng chấm ở view Bên / Trước, theo z của box ở frame này. Snap / lock (nếu chọn nguồn này) đặt đáy box lên z = 0.' },
-  pw: { short: 'pw', full: 'Patchwork++ (gr pw)', tip: 'Mặt đường fit từ các điểm Patchwork++ gán là mặt đất quanh box (vạch tím nét đứt ở view Bên / Trước). Snap / lock đặt đáy box lên mặt này; frame thiếu điểm mặt đất quanh box thì không có vạch.' },
+  measured: { short: 'local', full: 'local (đo riêng)', tip: `Đo mặt đường riêng cho object ở đúng frame này (lớp thấp nhất có mật độ ở 8 cung quanh box + lớp tiếp xúc dưới gầm), không dự đoán từ frame khác. Báo ⏬ khi đáy cao hơn mặt đường quá ${cm(DEFAULT_GROUND.floatTol)} cm hoặc thấp hơn quá ${cm(DEFAULT_GROUND.sinkTol)} cm và vượt độ bất định của phép đo.` },
+  ego: { short: 'ego', full: 'ego (z = 0)', tip: 'Mặt phẳng Oxy của ego (z = 0, mặt đường dưới xe): vạch vàng chấm ở view Bên / Trước, theo z của box ở frame này. Snap / lock (nếu chọn nguồn này) đặt đáy box lên z = 0.' },
+  pw: { short: 'patchwork++', full: 'patchwork++', tip: 'Mặt đường fit từ các điểm Patchwork++ gán là mặt đất quanh box (vạch tím nét đứt ở view Bên / Trước). Snap / lock đặt đáy box lên mặt này; frame thiếu điểm mặt đất quanh box thì không có vạch.' },
 };
-const GROUND_OPT: Record<GroundKind, string> = { measured: 'Đo riêng', ego: 'Ego z=0', pw: 'Patchwork++' };
+const GROUND_OPT: Record<GroundKind, string> = { measured: 'local', ego: 'ego', pw: 'patchwork++' };
 /** Chọn ĐÚNG 1 nguồn mặt đường (Ground snap / lock dùng nguồn này). */
 function GroundPick({ kind, onChange, label, title }: { kind: GroundKind; onChange: (k: GroundKind) => void; label?: string; title?: string }) {
   return (
