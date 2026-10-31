@@ -18,6 +18,8 @@ type SortKey = 'num' | 'assigned' | 'outside' | 'missing' | 'jumps' | 'issues' |
 /** Dòng đang chọn và dòng so le (giao diện tối / xám đảo màu cả trang nên màu sáng vẫn dùng được). */
 const SEL_BG = '#bcd7ff';
 const ODD_BG = '#f1f4f8';
+// Tiêu đề cột dính ngay dưới thanh đầu trang (.cvla-head) khi cuộn xuống; `top` do ObjectTable đo; nền đặc để dòng bên dưới không lộ ra.
+const HEAD_CELL: React.CSSProperties = { position: 'sticky', top: 0, zIndex: 5, background: '#fff', boxShadow: '0 1px 0 #c5ccd6' };
 /** Khoảng cách tâm box tới ego (gốc toạ độ, trên mặt phẳng ngang) và frame đo. */
 interface Dist { d: number; frame: number }
 
@@ -100,8 +102,22 @@ export function ObjectTable({ jobId, rows, hints, overlapFrames, overlapPairs, o
     const r = rows.filter((x) => (!label || x.label === label) && (!onlyMissing || x.missing > 0) && (!onlyJumps || x.jumps > 0) && (!onlyMade || x.made !== null) && (!onlyHints || h(x) > 0) && (!onlyOverlap || ov(x) > 0));
     return r.sort((a, b) => (sort === 'num' ? a.num - b.num : sort === 'dist' ? byDist(a, b) : sort === 'overlap' ? ov(b) - ov(a) : b[sort] - a[sort]));
   }, [rows, hints, overlapFrames, label, sort, onlyMissing, onlyJumps, onlyHints, onlyOverlap, onlyMade, dist, distAsc]);
+  // Đo chiều cao thanh đầu trang cố định để tiêu đề cột dính ngay dưới nó (đổi khi thanh đầu trang xuống dòng).
+  const tableRef = useRef<HTMLTableElement>(null);
+  const [headTop, setHeadTop] = useState(0);
+  useLayoutEffect(() => {
+    const head = (tableRef.current?.getRootNode() as Document | ShadowRoot | undefined)?.querySelector?.('.cvla-head') as HTMLElement | null | undefined;
+    if (!head) return;
+    const upd = () => setHeadTop(Math.round(head.getBoundingClientRect().height));
+    upd();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(upd);
+    ro.observe(head);
+    return () => ro.disconnect();
+  }, []);
+  const headCell: React.CSSProperties = { ...HEAD_CELL, top: headTop };
   const th = (k: SortKey, text: string, title?: string) => (
-    <th style={{ cursor: 'pointer', textAlign: 'left' }} onClick={() => { if (k === 'dist' && sort === 'dist') setDistAsc((x) => !x); else { setSort(k); if (k === 'dist') setDistAsc(true); } }} title={title}>{text}{sort === k ? (k === 'dist' && distAsc ? ' ▴' : ' ▾') : ''}</th>
+    <th style={{ ...headCell, cursor: 'pointer', textAlign: 'left' }} onClick={() => { if (k === 'dist' && sort === 'dist') setDistAsc((x) => !x); else { setSort(k); if (k === 'dist') setDistAsc(true); } }} title={title}>{text}{sort === k ? (k === 'dist' && distAsc ? ' ▴' : ' ▾') : ''}</th>
   );
   const far = DEFAULT_GROUND.maxRange;
   const pendingTip = 'Chưa đủ dữ liệu: object còn frame đang tải ngầm / chưa tính ít điểm (P), con số có thể còn tăng; viền vàng tự mất khi tính xong.';
@@ -140,9 +156,9 @@ export function ObjectTable({ jobId, rows, hints, overlapFrames, overlapPairs, o
           </>
         )}
       </div>
-      <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+      <table ref={tableRef} style={{ borderCollapse: 'collapse', width: '100%' }}>
         <thead>
-          <tr>{th('num', 'ID')}<th style={{ textAlign: 'left' }}>Nhãn</th><th style={{ textAlign: 'left' }} title="Attribute của object; attribute đổi theo frame hiện các giá trị lần lượt (a → b)">Attribute</th>{th('assigned', 'Được gán')}{th('outside', 'Outside')}{th('missing', 'Outside thiếu KF')}{th('jumps', '⚠ đi xa')}{th('issues', incomplete.size ? '⚠ luật QC ⏳' : '⚠ luật QC', incomplete.size ? `${incomplete.size} object chưa đủ dữ liệu (viền vàng). ${pendingTip}` : undefined)}{th('drift', '⚠ trôi box')}{th('overlap', '⚠ chồng lấn')}{th('dist', '📏 cách ego (m)', distMode === 'frame' ? `Khoảng cách tới ego tại frame ${distFrame}; — = không có box ở frame đó (luôn xếp cuối)` : 'Khoảng cách gần nhất tới ego trên cả track')}<th style={{ textAlign: 'left' }}>Khoảng frame</th><th>KF</th><th /></tr>
+          <tr>{th('num', 'ID')}<th style={{ ...headCell, textAlign: 'left' }}>Nhãn</th><th style={{ ...headCell, textAlign: 'left' }} title="Attribute của object; attribute đổi theo frame hiện các giá trị lần lượt (a → b)">Attribute</th>{th('assigned', 'Được gán')}{th('outside', 'Outside')}{th('missing', 'Outside thiếu KF')}{th('jumps', '⚠ đi xa')}{th('issues', incomplete.size ? '⚠ luật QC ⏳' : '⚠ luật QC', incomplete.size ? `${incomplete.size} object chưa đủ dữ liệu (viền vàng). ${pendingTip}` : undefined)}{th('drift', '⚠ trôi box')}{th('overlap', '⚠ chồng lấn')}{th('dist', '📏 cách ego (m)', distMode === 'frame' ? `Khoảng cách tới ego tại frame ${distFrame}; — = không có box ở frame đó (luôn xếp cuối)` : 'Khoảng cách gần nhất tới ego trên cả track')}<th style={{ ...headCell, textAlign: 'left' }}>Khoảng frame</th><th style={headCell}>KF</th><th style={headCell} /></tr>
         </thead>
         <tbody>
           {shown.map((r, i) => (
@@ -156,6 +172,7 @@ export function ObjectTable({ jobId, rows, hints, overlapFrames, overlapPairs, o
                 return (
                   <td style={{ fontSize: 11, maxWidth: 260 }} title={at.map((a) => `${a.name} = ${a.value}`).join(String.fromCharCode(10)) || 'Nhãn này không có attribute'}>
                     {at.length ? at.map((a, j) => <span key={a.name}>{j > 0 && ', '}<span style={{ color: '#666' }}>{a.name}</span> {a.value || '—'}</span>) : <span style={{ color: '#999' }}>—</span>}
+                    {h(r) > 0 && <b style={{ color: '#c2410c', marginLeft: 4, fontSize: 13 }} title={`Có ${h(r)} gợi ý đổi attribute ở object này (mở Batch Review để xem và áp)`}>!</b>}
                   </td>
                 );
               })()}
