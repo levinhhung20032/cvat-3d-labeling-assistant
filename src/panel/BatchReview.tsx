@@ -25,7 +25,7 @@ type PwCompareProps = { ann: CvatAnnotations; start: number; stop: number; num: 
 const pwCompareMods = import.meta.glob('./PwCompare.tsx', { eager: true }) as Record<string, { PwCompare?: (p: PwCompareProps) => JSX.Element }>;
 const PwCompare = Object.values(pwCompareMods)[0]?.PwCompare ?? null;
 import { setPoolSource, setSegForced } from './groundSeg';
-import { clampPan, drawView, type EgoPlane, hexRgb, localize, NO_PAN, panBy, panOffset, rotateLocal, REF_COLOR, STATUS_COLOR, type Local, type Pan, type Scene, type View } from './render';
+import { clampPan, drawView, type EgoPlane, hexRgb, localize, NO_PAN, panBy, panOffset, rotateLocal, REF_COLOR, statusColor, type Local, type Pan, type Scene, type View } from './render';
 import { Cancelled, pointClouds } from './stores';
 import { issueKey, ignoreKey, ignoreStore, motionKey, overlapKey, shiftStore, useIgnored } from './shiftStore';
 import { CameraPanel } from './CameraPanel';
@@ -37,6 +37,7 @@ import { DEFAULT_FIT, fitGroundOf, fitReport, type FitReport } from '../shared/f
 import { thresholdStore, useThresholdVersion } from './thresholdStore';
 import { sym, useSymbols } from './symbolStore';
 import { findLongOutsideGaps, SPLIT_OUTSIDE_FRAMES, type OutsideGap } from '../shared/splitId';
+import { useColors } from './colorStore';
 import { adviseGround, type GroundAdvice } from '../shared/groundSuggest';
 import { confirmSnap, DEFAULT_GROUND, egoGround, enforceConsistency, GROUND_KINDS, groundSnap, groundSnapBy, pwGroundPlane, type ConsistencyItem, tiltFromPlane, type GroundKind, type GroundResult, type GroundSector } from '../shared/ground';
 import { DEFAULT_REFLECT, mirrorBox, mirroredPoints, pointsBelow, reflectionPlane, refPlane, type PlaneSource, type RefMode, type RefState } from '../shared/reflect';
@@ -75,9 +76,9 @@ function loadRefPrefs(): RefViewPrefs {
 setPoolSource((g) => pointClouds.peek(g)); // gộp điểm mặt đất của frame lân cận (mức 4) lấy từ các frame đã tải
 
 // --- tùy chọn hiển thị, nhớ theo từng người dùng (chỉ là tiện ích, không quan trọng nếu mất) ---
-// ptColor: '#rrggbb' hoặc '' (tô theo độ cao); ptAlpha: độ đậm 0.1–1; ptSize: hệ số cỡ điểm.
-interface Prefs { auto: boolean; size: number; slabMargin: number; perWin: number; keyOnly: boolean; tilt: boolean; gap: number; suggest: boolean; gkind: GroundKind; gshowAll: boolean; gadvise: boolean; ptColor: string; ptAlpha: number; ptSize: number }
-const PREFS_DEFAULT: Prefs = { auto: true, size: 200, slabMargin: 0.5, perWin: 6, keyOnly: false, tilt: true, gap: 28, suggest: true, gkind: 'measured', gshowAll: false, gadvise: true, ptColor: '', ptAlpha: 1, ptSize: 1 };
+// ptAlpha: độ đậm 0.1–1; ptSize: hệ số cỡ điểm (màu point nay ở tab Màu sắc).
+interface Prefs { auto: boolean; size: number; slabMargin: number; perWin: number; keyOnly: boolean; tilt: boolean; gap: number; suggest: boolean; gkind: GroundKind; gshowAll: boolean; gadvise: boolean; ptAlpha: number; ptSize: number }
+const PREFS_DEFAULT: Prefs = { auto: true, size: 200, slabMargin: 0.5, perWin: 6, keyOnly: false, tilt: true, gap: 28, suggest: true, gkind: 'measured', gshowAll: false, gadvise: true, ptAlpha: 1, ptSize: 1 };
 // Bản cũ lưu 3 công tắc ground / egoPlane / pwShow: chuyển thành một nguồn (ưu tiên đo riêng).
 const legacyKind = (p: { ground?: boolean; egoPlane?: boolean; pwShow?: boolean }): GroundKind => (p.ground === false ? (p.egoPlane ? 'ego' : p.pwShow ? 'pw' : 'measured') : 'measured');
 const loadPrefs = (): Prefs => {
@@ -87,31 +88,11 @@ const loadPrefs = (): Prefs => {
     return {
       auto: p.auto ?? true, size: num(p.size, 200, CELL_MIN, CELL_MAX), slabMargin: num(p.slabMargin, 0.5, 0, 3),
       perWin: Math.round(num(p.perWin, 6, 2, 30)), keyOnly: p.keyOnly === true, tilt: p.tilt !== false, gap: Math.round(num(p.gap, 28, 4, 80)), suggest: p.suggest !== false, gkind: GROUND_KINDS.includes(p.gkind as GroundKind) ? (p.gkind as GroundKind) : legacyKind(p as { ground?: boolean; egoPlane?: boolean; pwShow?: boolean }), gshowAll: p.gshowAll === true, gadvise: p.gadvise !== false,
-      ptColor: typeof p.ptColor === 'string' && hexRgb(p.ptColor) ? p.ptColor : '', ptAlpha: num(p.ptAlpha, 1, 0.1, 1), ptSize: num(p.ptSize, 1, 0.5, 4),
+      ptAlpha: num(p.ptAlpha, 1, 0.1, 1), ptSize: num(p.ptSize, 1, 0.5, 4),
     };
   } catch { return { ...PREFS_DEFAULT }; }
 };
 const savePrefs = (p: Prefs) => { try { kv.set('cvla-prefs', JSON.stringify(p)); } catch { /* bỏ qua */ } };
-
-/** Bảng màu point: tránh hồng (điểm lọt ngoài box) và tím (ref mode) để không lẫn. */
-const POINT_SWATCHES = ['#ffffff', '#cbd5e1', '#facc15', '#fb923c', '#f87171', '#4ade80', '#22d3ee', '#60a5fa'];
-const HEIGHT_GRADIENT = 'linear-gradient(90deg, hsl(220 80% 55%), hsl(120 80% 55%), hsl(20 80% 55%))';
-function PointColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
-  const sw = (bg: string, on: boolean, title: string, click: () => void) => (
-    <button key={title} type="button" onClick={click} title={title} aria-pressed={on}
-      style={{ width: 16, height: 16, padding: 0, background: bg, border: on ? '2px solid #f59e0b' : '1px solid #64748b', borderRadius: 3, cursor: 'pointer', verticalAlign: 'middle' }} />
-  );
-  const custom = value !== '' && !POINT_SWATCHES.includes(value);
-  return (
-    <span style={{ display: 'inline-flex', gap: 3, alignItems: 'center' }}>
-      {sw(HEIGHT_GRADIENT, value === '', 'Theo độ cao (mặc định)', () => onChange(''))}
-      {POINT_SWATCHES.map((c) => sw(c, value === c, c, () => onChange(c)))}
-      <label title="Chọn màu khác" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', border: custom ? '2px solid #f59e0b' : '1px solid #64748b', borderRadius: 3, width: 16, height: 16, overflow: 'hidden', background: custom ? value : 'conic-gradient(red, yellow, lime, cyan, blue, magenta, red)' }}>
-        <input type="color" value={value || '#ffffff'} onChange={(e) => onChange(e.target.value)} style={{ opacity: 0, width: 16, height: 16, padding: 0, border: 0, cursor: 'pointer' }} />
-      </label>
-    </span>
-  );
-}
 
 function useViewport() {
   const [v, setV] = useState(() => viewport());
@@ -187,12 +168,13 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
   const k = size / (2 * half);
   const [ox, oy] = panOffset(view, pan, k);
   const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const colorsNow = useColors(); // màu đổi (tab Màu sắc) thì vẽ lại ô
   useEffect(() => {
     const ctx = ref.current?.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawView(ctx, size, view, loc, box, half, st.status, !!drag.current, misfit, ghost, ground, mark, scene, overlays, st.cuboid, groundMarks, contactW, pan, egoPlane, reflect, pwPlane);
-  }, [view, size, dpr, loc, st.status, st.cuboid, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, pan, reflect, pwPlane]);
+  }, [view, size, dpr, loc, st.status, st.cuboid, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, pan, reflect, pwPlane, colorsNow]);
 
   // Cuộn chuột trên ô = phóng to/thu nhỏ mọi frame (listener gốc để chặn cuộn trang).
   const zoomRef = useRef(onZoom);
@@ -348,6 +330,7 @@ function Column({ kind, onKind, showAll, advise, onAdvice, pwShow = false, groun
   onSelect: () => void; onLoaded: (f: number) => void; onCommit: (f: number, c: Cuboid) => void; onZoom: (factor: number) => void;
 }) {
   useSymbols(); // ký hiệu lỗi đổi thì vẽ lại
+  useColors(); // màu viền frame đổi (tab Màu sắc) thì vẽ lại
   const hint = useKeyHint();
   const [pc, setPc] = useState<PointCloud | null>(() => pointClouds.peek(f) ?? null); // đã có trong kho (tải ở giao diện chính) thì dùng ngay
   const [err, setErr] = useState('');
@@ -469,7 +452,7 @@ function Column({ kind, onKind, showAll, advise, onAdvice, pwShow = false, groun
     const o = refCub ? overlayCubs.map((x) => boxV(localBoxOf(refCub, x))) : [];
     return plane && box ? [...o, { ...mirrorBox(box, plane.w), color: REF_COLOR }] : o;
   }, [refCub, overlayCubs, M, plane?.w, plane ? box : null]); // ref tắt: không phụ thuộc box (box tạo mới mỗi lần vẽ)
-  const color = STATUS_COLOR[st.status];
+  const color = statusColor(st.status);
   return (
     <div
       onClick={onSelect}
@@ -781,6 +764,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   const vp = useViewport();
   const [camShow] = useCameraShow();
   useSymbols();
+  const colors = useColors();
   const row = rows.find((r) => r.num === num);
   // Dynamic size theo từng object (nhớ cục bộ). Mặc định: bật cho nhãn co giãn, tắt cho Vehicle / Obstacle.
   const dynClasses = useDynClasses(job.id);
@@ -910,9 +894,9 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     return {
       zClip: baseHalf, colorHalf: baseHalf,
       slab: Math.min(cap, sy / 2 + prefs.slabMargin), slabFront: Math.min(cap, sx / 2 + prefs.slabMargin),
-      point: { color: prefs.ptColor || null, alpha: prefs.ptAlpha, scale: prefs.ptSize },
+      point: { color: colors.point || null, alpha: prefs.ptAlpha, scale: prefs.ptSize },
     };
-  }, [baseHalf, track, prefs.slabMargin, prefs.ptColor, prefs.ptAlpha, prefs.ptSize]);
+  }, [baseHalf, track, prefs.slabMargin, colors.point, prefs.ptAlpha, prefs.ptSize]);
   const locHalf = baseHalf / ZOOM_MIN;
   // Dời khung nhìn (giữ chuột phải kéo trên ô): dùng chung mọi frame; không dời ra ngoài vùng điểm đã lọc; đổi object thì về giữa.
   const [pan, setPan] = useState<Pan>(NO_PAN);
@@ -1604,8 +1588,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
             Điểm: cỡ{' '}
             <Slider width={90} min={0.5} max={4} step={0.1} value={prefs.ptSize} def={1} unit="×" decimals={1} onChange={(v) => updatePrefs({ ...prefs, ptSize: v })} />{' '}
             độ đậm{' '}
-            <Slider width={90} min={10} max={100} step={5} value={Math.round(prefs.ptAlpha * 100)} def={100} unit="%" onChange={(v) => updatePrefs({ ...prefs, ptAlpha: v / 100 })} />{' '}
-            màu <PointColorPicker value={prefs.ptColor} onChange={(c) => updatePrefs({ ...prefs, ptColor: c })} />
+            <Slider width={90} min={10} max={100} step={5} value={Math.round(prefs.ptAlpha * 100)} def={100} unit="%" onChange={(v) => updatePrefs({ ...prefs, ptAlpha: v / 100 })} />
           </span>
           <label title="Cho box nghiêng (roll / pitch): giữ Alt rồi kéo ở view Bên (pitch) / view Trước (roll), và Ground snap nghiêng box song song mặt đường dốc. Tắt: Alt+kéo ở các view này chỉ xoay yaw và Ground snap chỉ dời z."><input type="checkbox" checked={prefs.tilt} onChange={(e) => updatePrefs({ ...prefs, tilt: e.target.checked })} /> nghiêng theo mặt đường</label>
           </div>
@@ -1663,9 +1646,9 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
         {cols.map((c) => colEl(c, String(c.f), size, { onBelow: !refS.on && !refS.dismissed ? reportBelow : undefined }))}
       </div>
       <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>
-        Viền: <span style={{ color: STATUS_COLOR.key }}>■ keyframe</span> <span style={{ color: STATUS_COLOR.interp }}>■ nội suy</span>{' '}
-        <span style={{ color: STATUS_COLOR.hold }}>■ giữ nguyên</span> <span style={{ color: STATUS_COLOR.outside }}>■ outside</span>{' '}
-        <span style={{ color: STATUS_COLOR.none }}>■ chưa có</span> · khung nhìn rộng ±{half.toFixed(1)} m quanh object
+        Viền: <span style={{ color: statusColor('key') }}>■ keyframe</span> <span style={{ color: statusColor('interp') }}>■ nội suy</span>{' '}
+        <span style={{ color: statusColor('hold') }}>■ giữ nguyên</span> <span style={{ color: statusColor('outside') }}>■ outside</span>{' '}
+        <span style={{ color: statusColor('none') }}>■ chưa có</span> · khung nhìn rộng ±{half.toFixed(1)} m quanh object
       </div>
       {bulk && (
         <div role="dialog" aria-modal="true" onClick={() => setBulk(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>

@@ -6,6 +6,7 @@ import type { Status } from '../shared/interp';
 import type { PointCloud } from '../shared/pcd';
 import { DEFAULT_GROUND } from '../shared/ground';
 import { pooledGround, pwWOf, roadOf, segOf } from './groundSeg';
+import { getColors } from './colorState';
 
 export type { View };
 
@@ -47,10 +48,11 @@ export function rotateLocal(l: Local, m: Mat3): Local {
   return { u, v, w, n: l.n, g: l.g, pwW: l.pwW, pwRoad: l.pwRoad };
 }
 
-export const STATUS_COLOR: Record<Status, string> = {
-  key: '#22c55e', interp: '#38bdf8', hold: '#f59e0b',
-  'outside-key': '#ef4444', outside: '#ef4444', none: '#9ca3af',
-};
+/** Màu viền frame / box theo trạng thái (tab Màu sắc). */
+export function statusColor(s: Status): string {
+  const c = getColors();
+  return s === 'key' ? c.frameKey : s === 'interp' ? c.frameInterp : s === 'hold' ? c.frameHold : s === 'none' ? c.frameNone : c.frameOutside;
+}
 
 const BUCKETS = 8;
 const PALETTE = Array.from({ length: BUCKETS }, (_, i) => `hsl(${220 - (i * 200) / (BUCKETS - 1)} 80% 55%)`);
@@ -154,7 +156,8 @@ export function drawView(
   reflect: { pts: Local | null; plane: number } | null = null, // ref mode: điểm lật từ box ảo về box chính + độ cao w của mặt phản chiếu
   pwPlane: EgoPlane | null = null, // mặt đường Patchwork++ gợi ý (tím), cùng dạng với egoPlane
 ) {
-  ctx.fillStyle = '#0b0f14';
+  const colors = getColors();
+  ctx.fillStyle = colors.viewBg;
   ctx.fillRect(0, 0, size, size);
   const k = size / (2 * half), c = size / 2;
   const ps = scene.point;
@@ -232,39 +235,39 @@ export function drawView(
       const x0 = -ox, x1 = size - ox;
       const yAt = (x: number) => c - egoPlaneW(egoPlane, view, (x - c) / k) * k;
       ctx.save();
-      ctx.strokeStyle = '#ffd400';
-      ctx.fillStyle = '#ffd400';
+      ctx.strokeStyle = colors.groundEgo;
+      ctx.fillStyle = colors.groundEgo;
       ctx.lineWidth = 1.5;
       ctx.setLineDash([2, 4]);
       ctx.beginPath(); ctx.moveTo(x0, yAt(x0)); ctx.lineTo(x1, yAt(x1)); ctx.stroke();
       ctx.setLineDash([]);
       ctx.restore();
-      surfaceTag(ctx, 'ego', x0 + 4, yAt(x0) - 2, 'above', '#ffd400');
+      surfaceTag(ctx, 'ego', x0 + 4, yAt(x0) - 2, 'above', colors.groundEgo);
     }
     if (pwPlane && view !== 'top') {
       // mặt đường do Patchwork++ gợi ý (fit từ các điểm mặt đất quanh box, gộp cả frame lân cận): tím nét đứt dài, nghiêng theo mặt phẳng fit
       const x0 = -ox, x1 = size - ox;
       const yAt = (x: number) => c - egoPlaneW(pwPlane, view, (x - c) / k) * k;
       ctx.save();
-      ctx.strokeStyle = REF_COLOR;
-      ctx.fillStyle = REF_COLOR;
+      ctx.strokeStyle = colors.groundPw;
+      ctx.fillStyle = colors.groundPw;
       ctx.lineWidth = 1.8;
       ctx.setLineDash([9, 4]);
       ctx.beginPath(); ctx.moveTo(x0, yAt(x0)); ctx.lineTo(x1, yAt(x1)); ctx.stroke();
       ctx.setLineDash([]);
       ctx.restore();
-      surfaceTag(ctx, 'patchwork++', x0 + 4, yAt(x0) + 2, 'below', REF_COLOR);
+      surfaceTag(ctx, 'patchwork++', x0 + 4, yAt(x0) + 2, 'below', colors.groundPw);
     }
     if (ground !== null && view !== 'top') {
       // mặt đường ước lượng (xanh lá nét đứt) để so với đáy box
       const gy = c - ground * k;
       ctx.save();
-      ctx.strokeStyle = '#7cfc00';
+      ctx.strokeStyle = colors.groundLocal;
       ctx.lineWidth = 1.5;
       ctx.setLineDash([5, 4]);
       ctx.beginPath(); ctx.moveTo(-ox, gy); ctx.lineTo(size - ox, gy); ctx.stroke();
       ctx.restore();
-      surfaceTag(ctx, 'local', size - ox - 4, gy - 2, 'above', '#7cfc00', true);
+      surfaceTag(ctx, 'local', size - ox - 4, gy - 2, 'above', colors.groundLocal, true);
     }
     if (reflect && view !== 'top') {
       // mặt phản chiếu (ref mode): tím nét gạch dài
@@ -282,7 +285,7 @@ export function drawView(
       ctx.lineWidth = 3;
       for (const m of groundMarks) {
         const [x, y] = project(view, m.u, m.v, m.w, k, c);
-        ctx.strokeStyle = m.used ? '#7cfc00' : '#9aa4b2';
+        ctx.strokeStyle = m.used ? colors.groundLocal : '#9aa4b2';
         ctx.beginPath(); ctx.moveTo(x - 6, y); ctx.lineTo(x + 6, y); ctx.stroke();
       }
       if (contactW !== null) {
@@ -304,7 +307,7 @@ export function drawView(
     };
     const hu = box.sx / 2, hv = box.sy / 2, hw = box.sz / 2;
     const corner = (i: number) => pt(i & 1 ? hu : -hu, i & 2 ? hv : -hv, i & 4 ? hw : -hw);
-    ctx.strokeStyle = STATUS_COLOR[status];
+    ctx.strokeStyle = statusColor(status);
     ctx.lineWidth = active ? 2.5 : 2;
     ctx.beginPath();
     for (let i = 0; i < 8; i++) {

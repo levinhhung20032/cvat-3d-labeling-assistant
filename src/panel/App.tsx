@@ -24,6 +24,7 @@ import { QcPanel } from './QcPanel';
 import { DynSizePanel } from './DynSizePanel';
 import { ThresholdPanel } from './ThresholdPanel';
 import { CameraTab } from './CameraPanel';
+import { ColorPanel } from './ColorPanel';
 import { SettingsIO } from './SettingsIO';
 import { thresholdStore, useThresholdVersion } from './thresholdStore';
 import { backgroundConfigKey } from '../shared/thresholds';
@@ -160,7 +161,7 @@ try { const m = api.runtime.getManifest() as chrome.runtime.Manifest & { version
 const EMPTY: Draft = { work: null, edited: new Set<string>(), undo: [], redo: [] };
 
 type State = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ok'; data: Data };
-type Tab = 'objects' | 'review' | 'ref' | 'shift' | 'qc' | 'dyn' | 'thr' | 'cam' | 'keys' | 'job';
+type Tab = 'objects' | 'review' | 'ref' | 'shift' | 'qc' | 'dyn' | 'thr' | 'cam' | 'color' | 'keys' | 'job';
 /** Tải ưu tiên ngần này frame đầu; tải xong là mở được Batch Review (job ngắn hơn: cả job), phần còn lại tải và tính ngầm. */
 const UNLOCK_FRAMES = 6;
 
@@ -185,6 +186,9 @@ body { margin: 0; }
 /* Xám: như tối nhưng giảm tương phản rồi tăng sáng, nền ra màu xám than thay vì gần đen. */
 .cvla-root.cvla-gray { filter: invert(1) hue-rotate(180deg) contrast(.6) brightness(1.5); }
 .cvla-root.cvla-dark canvas, .cvla-root.cvla-dark img, .cvla-root.cvla-dark video, .cvla-root.cvla-dark .cvla-lens, .cvla-root.cvla-gray canvas, .cvla-root.cvla-gray img, .cvla-root.cvla-gray video, .cvla-root.cvla-gray .cvla-lens { filter: invert(1) hue-rotate(180deg); }
+/* .cvla-keep: ô mẫu màu (tab Màu sắc) giữ đúng màu người dùng chọn: bộ lọc NGHỊCH ĐẢO của bộ lọc gốc ở trên (đảo thứ tự và giá trị). */
+.cvla-root.cvla-dark .cvla-keep { filter: brightness(1.087) hue-rotate(-180deg) invert(1); }
+.cvla-root.cvla-gray .cvla-keep { filter: brightness(.667) contrast(1.667) hue-rotate(-180deg) invert(1); }
 /* Công tắc gạt: mọi ô tick trong panel hiển thị như toggle (ô chọn dòng dùng class cvla-check để giữ dạng ô tick). */
 .cvla-root input[type=checkbox]:not(.cvla-check) { appearance: none; -webkit-appearance: none; width: 30px; height: 17px; border-radius: 9px; background: #9aa4b2; position: relative; vertical-align: middle; margin: 0 4px 0 0; cursor: pointer; transition: background .15s; flex: none; }
 .cvla-root input[type=checkbox]:not(.cvla-check)::after { content: ''; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,.4); }
@@ -801,6 +805,7 @@ export function App() {
         {tabBtn('dyn', 'Dynamic size')}
         {tabBtn('thr', 'Threshold')}
         {tabBtn('cam', 'Camera')}
+        {tabBtn('color', 'Màu sắc')}
         {tabBtn('keys', 'Phím tắt')}
         {tabBtn('job', 'Thông tin job')}
         {data && (reloadMenu ? (
@@ -992,6 +997,7 @@ export function App() {
       {data && work && tab === 'dyn' && <DynSizePanel jobId={data.job.id} labels={data.labels} tracks={work.tracks} />}
       {data && work && tab === 'thr' && <ThresholdPanel jobId={data.job.id} labels={data.labels} tracks={work.tracks} />}
       {data && tab === 'cam' && <CameraTab start={data.job.start_frame} stop={data.job.stop_frame} />}
+      {tab === 'color' && <ColorPanel />}
       {tab === 'shift' && <ShiftPanel />}
       {tab === 'keys' && <KeysPanel map={keymap} setMap={setKeymap} />}
       {data && tab === 'job' && <JobInfo s={summarize(data.job, data.labels, data.ann)} />}
