@@ -61,14 +61,14 @@ const PALETTE = Array.from({ length: BUCKETS }, (_, i) => `hsl(${220 - (i * 200)
  */
 export type EgoPlane = [number, number, number, number];
 /** Độ cao w của mặt phẳng ego tại vị trí s trên trục ngang của ô (u ở view Bên, v ở view Trước; trục còn lại lấy 0, giữa lát cắt). */
-/** Nhãn tên mặt đường: chữ 10px như nhãn view (Trên / Bên / Trước), nền mờ trong suốt để nhìn xuyên qua point cloud. `right`: x là mép phải của nhãn. */
+/** Nhãn tên mặt đường: chữ 10px như nhãn view (Trên / Bên / Trước), nền mờ (75%, như nhãn view) để chữ không lẫn vào point cloud. `right`: x là mép phải của nhãn. */
 function surfaceTag(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, side: 'above' | 'below', color: string, right = false): void {
   ctx.save();
   ctx.setLineDash([]);
   ctx.font = '10px system-ui, sans-serif';
   const w = ctx.measureText(text).width + 6, h = 12;
   const left = right ? x - w : x, top = side === 'above' ? y - h : y;
-  ctx.fillStyle = 'rgba(11, 15, 20, 0.35)';
+  ctx.fillStyle = 'rgba(11, 15, 20, 0.75)';
   ctx.fillRect(left, top, w, h);
   ctx.fillStyle = color;
   ctx.textBaseline = 'middle';
