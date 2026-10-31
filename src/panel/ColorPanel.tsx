@@ -61,9 +61,11 @@ function sampleCloud(): Local {
   const n = u.length;
   return { u: Float32Array.from(u), v: Float32Array.from(v), w: Float32Array.from(w), n };
 }
-const EGO_PLANE: EgoPlane = [0, 0, 1, -0.95];
-const PW_PLANE: EgoPlane = [0.04, 0, 1, -0.7];
+// Ba mặt đường cách nhau ≥ 0,6 m (≈ 15 px ở khung xem trước) để vạch và nhãn không dính vào nhau: patchwork++ cao nhất, local sát mặt đất mẫu, ego thấp nhất.
+const EGO_PLANE: EgoPlane = [0, 0, 1, -1.5];
+const PW_PLANE: EgoPlane = [0.03, 0, 1, -0.1];
 const SAMPLE_GROUND = -0.8;
+const PREVIEW_HALF = 4; // nửa bề rộng khung nhìn (m): nhỏ hơn Batch Review để cảnh mẫu to, dễ phân biệt
 const VIEWS: { v: View; name: string }[] = [{ v: 'top', name: 'Trên' }, { v: 'side', name: 'Bên' }, { v: 'front', name: 'Trước' }];
 const SZ = 190;
 
@@ -74,7 +76,7 @@ function PreviewCanvas({ view, colors, loc }: { view: View; colors: ColorSetting
     const ctx = ref.current?.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const half = 6;
+    const half = PREVIEW_HALF;
     const scene = { zClip: half, slab: half * 0.5, colorHalf: half, point: { color: colors.point || null, alpha: 1, scale: 1 } };
     withColors(colors, () => drawView(ctx, SZ, view, loc, SAMPLE_BOX, half, 'key', false, false, null, SAMPLE_GROUND, null, scene, [], null, [], null, NO_PAN, EGO_PLANE, null, PW_PLANE));
   }, [view, colors, loc, dpr]);
