@@ -3,7 +3,7 @@ import { kv } from './storage';
 import { pointClouds, type ChunkSource } from './stores';
 
 /**
- * Cách tải point cloud (đo trên cvat-a job 9999, 22 frame, 2026-10-29):
+ * Cách tải point cloud (đo trên một job thật, 22 frame, 2026-10-29):
  * - từng frame (`type=frame`): tải mới ~2 s/frame, nhưng được trình duyệt giữ trong bộ nhớ đệm HTTP: mở lại / refresh sau upload chỉ ~22 ms/frame;
  * - chunk (`type=chunk`): 158 MB trong 14–17 s (nhanh hơn ~3× khi tải mới), nhưng KHÔNG vào bộ nhớ đệm: mỗi lần refresh tải lại toàn bộ.
  * Tự động: kiểm tra frame nào đã có trong bộ nhớ đệm (không tốn mạng); đã có từ một nửa trở lên thì tải từng frame (gần như tức thì),

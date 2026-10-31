@@ -17,7 +17,7 @@ const firefox = load('public/manifest.firefox.json');
 
 describe.each([['Edge / Chrome', chromium], ['Firefox', firefox]] as const)('manifest %s — luật quyền riêng tư', (_n, m) => {
   it('không có host mặc định, không xin quyền cookies / tabs / history / webRequest', () => {
-    expect(m.host_permissions).toEqual([]); // chủ dự án bỏ host mặc định cvat-a 2026-10-29: mọi máy chủ do người dùng tự thêm
+    expect(m.host_permissions).toEqual([]); // chủ dự án bỏ host mặc định 2026-10-29: mọi máy chủ do người dùng tự thêm
     // Máy chủ CVAT khác: người dùng tự thêm ở trang Cài đặt (chủ dự án duyệt 2026-10-28). Chỉ là quyền TÙY CHỌN https —
     // không tên miền nào được cấp sẵn, trình duyệt hỏi người dùng cho từng tên miền.
     expect(m.optional_host_permissions).toEqual(['https://*/*']);

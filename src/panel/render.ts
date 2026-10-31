@@ -10,7 +10,7 @@ import { pooledGround, pwWOf, roadOf, segOf } from './groundSeg';
 export type { View };
 
 /** Điểm trong hệ tọa độ của object: u dọc hướng box, v sang trái, w lên. */
-export interface Local { u: Float32Array; v: Float32Array; w: Float32Array; n: number; g?: Uint8Array; pwW?: number | null; pool?: { u: Float32Array; v: Float32Array; w: Float32Array; n: number } | null; pwRoad?: { a: number; b: number; c: number; rms: number; n: number } | null }
+export interface Local { u: Float32Array; v: Float32Array; w: Float32Array; n: number; g?: Uint8Array; pwW?: number | null; pool?: { u: Float32Array; v: Float32Array; w: Float32Array; n: number; ownOk?: boolean } | null; pwRoad?: { a: number; b: number; c: number; rms: number; n: number } | null }
 
 /** `f`: số frame của point cloud — có thì (mức 4, G.pwPool > 0) gộp thêm điểm mặt đất của các frame lân cận vào `pool`; `pool` ép bật / tắt. */
 export function localize(pc: PointCloud, c: Cuboid, half: number, f?: number, pool: boolean = DEFAULT_GROUND.pw >= 4): Local {

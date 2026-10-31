@@ -1,6 +1,6 @@
 import { build } from 'vite';
 import react from '@vitejs/plugin-react';
-import { cpSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 
 // node build.mjs                    → dist/          (Edge / Chrome, manifest.json)
 // node build.mjs --target=firefox   → dist-firefox/  (Firefox, manifest.firefox.json)
@@ -58,4 +58,6 @@ cpSync(firefox ? 'public/manifest.firefox.json' : 'public/manifest.json', `${out
 for (const n of [16, 32, 48, 128]) cpSync(`public/icons/icon-${n}.png`, `${out}/icons/icon-${n}.png`);
 // Giấy phép của mã bên thứ ba đóng gói kèm (Patchwork++, BSD-2: bản phân phối phải kèm thông báo bản quyền)
 cpSync('public/THIRD_PARTY_NOTICES.txt', `${out}/THIRD_PARTY_NOTICES.txt`);
+// Mã build (thời điểm build): bản chạy thử cục bộ dùng để biết dist vừa được build lại
+writeFileSync(`${out}/build-id.txt`, String(Date.now()));
 console.log(`Build xong → ${out}/`);

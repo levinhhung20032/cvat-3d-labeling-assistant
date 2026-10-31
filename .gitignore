@@ -20,3 +20,13 @@ graphify-out/
 # Đề xuất nội bộ, không đưa lên GitHub
 sg_size.txt
 test/fixtures/pw_scenes.json
+
+# Chỉ dùng trên máy người dùng, không đưa lên GitHub
+src/panel/legacyOrigin.local.ts
+src/panel/PwCompare.tsx
+src/panel/pwCompareCalc.ts
+test/pwCompare*.test.ts
+patchwork_plan.md
+audit.txt
+bug_fix.txt
+.claude/

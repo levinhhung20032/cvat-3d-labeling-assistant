@@ -4,7 +4,7 @@ import { PW_GROUND, PW_OTHER, PW_REFLECT } from './patchwork';
 /**
  * Mặt đường dưới MỘT object tại ĐÚNG frame đang xét (không dùng mặt đường toàn map, không dự đoán từ frame khác).
  *
- * Số liệu job 9999 (2150 cặp object × frame, 2026-10-28): cách cũ (một mặt phẳng "đồng thuận lớn nhất" trên vành 2–7 m) hay bám
+ * Số liệu một job thật (2150 cặp object × frame, 2026-10-28): cách cũ (một mặt phẳng "đồng thuận lớn nhất" trên vành 2–7 m) hay bám
  * nhầm lớp cao hơn (vỉa hè, thân xe bên cạnh) và có lỗi thô tới ~1 m; nhãn đã qua QC ở tầm gần nằm cao hơn TÂM lớp mặt đường
  * ~6–7 cm, lớp mặt đường dày ~5 cm. Vì vậy:
  * - mỗi cung quanh box lấy LỚP THẤP NHẤT CÓ MẬT ĐỘ (không lấy đồng thuận) → bỏ được vỉa hè, cây, thân xe ở trên;
@@ -48,6 +48,8 @@ export interface GroundConfig {
   pwRadius: number; // m: mức 3 — lấy các ô mặt đất có tâm cách tâm box không quá mức này
   pwFarRadius: number; // m: mức 4 — lấy các điểm mặt đất (nhãn Patchwork++) cách tâm box không quá mức này (bỏ vùng quanh chân box)
   pwMinPts: number; // mức 4 — số điểm mặt đất tối thiểu để fit mặt đường
+  pwPitch: boolean; // mức 4 — bù độ nghiêng của xe giữa các frame khi gộp điểm (theo mặt đường gần xe của từng frame)
+  pwNearSlack: number; // m: mức 4 — chỉ gộp từ các frame mà object ở tầm ≤ tầm gần nhất + mức này (≥ 12 m); 0 = gộp mọi frame
   pwPool: number; // mức 4 — gộp thêm điểm mặt đất của ±pwPool frame lân cận (bù chuyển động xe); 0 = không gộp
   pwConsSpan: number; // mức 4 — nhất quán theo thời gian: so với các frame kề trong ± ngần này frame của cùng object (0 = tắt)
   pwConsTol: number; // m: độ lệch cho phép so với trung vị mặt đường của các frame kề
@@ -55,7 +57,7 @@ export interface GroundConfig {
   pwAgree: number; // m: mức 4 — cách đo cũ (dù chưa chắc) có giá trị mà chênh mặt phẳng Patchwork++ quá mức này thì hai nguồn mâu thuẫn: không coi là đủ tin
 }
 
-// floatTol / sinkTol: chủ dự án chưa có quy ước bằng số (2026-10-28); mặc định chọn từ số liệu job 9999 (xem đầu file). Trên job đó:
+// floatTol / sinkTol: chủ dự án chưa có quy ước bằng số (2026-10-28); mặc định chọn từ số liệu một job thật (xem đầu file). Trên job đó:
 // báo 11,7% cặp object × frame (cách cũ 28,7%), tầm < 15 m 26,7%; floatTol 0,15 thì tầm < 15 m còn ~18%.
 export const DEFAULT_GROUND: GroundConfig = {
   maxRange: 80, // chủ dự án 2026-10-28: chỉ dự đoán mặt đường trong bán kính 80 m tính từ ego (khớp ngưỡng tầm xa của QC)
@@ -63,7 +65,7 @@ export const DEFAULT_GROUND: GroundConfig = {
   denseWin: 0.04, layerDepth: 0.06, minDense: 3, minDenseFrac: 0.08, contactBand: 0.3, contactMin: 4,
   planeTol: 0.03, layerJoin: 0.05, contactMatch: 0.08, corroborate: 0.04, maxSlopeDeg: 8, steepWarnDeg: 5,
   floatTol: 0.10, sinkTol: 0.05, sigmaK: 2.5, sigmaFloor: 0.015, sigmaPerMeter: 0.0015, sigmaAmbiguous: 0.05,
-  recheckTol: 0.05, pw: 0, pwMatch: 0.1, pwLift: 0.02, pwSigma: 0.02, pwMaxRms: 0.06, pwRadius: 8, pwFarRadius: 10, pwMinPts: 40, pwAgree: 0.15, pwPool: 2, pwConsSpan: 2, pwConsTol: 0.15, pwConsSlope: 0.05,
+  recheckTol: 0.05, pw: 0, pwMatch: 0.1, pwLift: 0.02, pwSigma: 0.02, pwMaxRms: 0.06, pwRadius: 8, pwFarRadius: 10, pwMinPts: 40, pwAgree: 0.15, pwPool: 4, pwPitch: true, pwNearSlack: 5, pwConsSpan: 2, pwConsTol: 0.15, pwConsSlope: 0.05,
 };
 
 /** Mức mặt đường của một cung quanh box (toạ độ như điểm đầu vào: u theo yaw, gốc ở tâm box). */
@@ -187,7 +189,8 @@ export function pwGroundPlane(
   if (!p.g && !p.pool) return null;
   const hu = sx / 2 + 0.5, hv = sy / 2 + 0.5, r2 = cfg.pwFarRadius * cfg.pwFarRadius;
   let pts: [number, number, number][] = [];
-  for (let i = 0; p.g && i < p.n; i++) {
+  // quan sát gần hơn hẳn ở frame khác (pool.ownOk = false): bỏ điểm xa, thưa của chính frame này
+  for (let i = 0; p.g && p.pool?.ownOk !== false && i < p.n; i++) {
     if (p.g[i] !== PW_GROUND) continue;
     const u = p.u[i]! - at.cu, v = p.v[i]! - at.cv, w = p.w[i]! - at.cw;
     if (Math.abs(u) <= hu && Math.abs(v) <= hv) continue;
@@ -228,11 +231,18 @@ export function groundSnap(
 ): GroundResult | null {
   const old = groundSnapCore(p, sx, sy, sz, at, cfg);
   if (cfg.pw !== 4 || (old && old.confident) || (at.range !== undefined && at.range > cfg.maxRange)) return old;
+  return pwResult(p, sx, sy, sz, at, cfg, old) ?? old;
+}
+
+/** Mặt đường từ các điểm Patchwork++ gán nhãn mặt đất quanh box (mức 4). `old`: kết quả cách đo cũ (nếu có) để đối chiếu; null nếu không đủ điểm. */
+function pwResult(
+  p: LocalPoints, sx: number, sy: number, sz: number, at: { cu: number; cv: number; cw: number; range?: number }, cfg: GroundConfig, old: GroundResult | null,
+): GroundResult | null {
   const pl = pwGroundPlane(p, sx, sy, at, cfg);
-  if (!pl) return old;
+  if (!pl) return null;
   const surface: Plane = { a: pl.a, b: pl.b, c: pl.c + cfg.pwLift };
   const dz = surface.c - -sz / 2;
-  if (Math.abs(dz) > cfg.maxShift) return old;
+  if (Math.abs(dz) > cfg.maxShift) return null;
   const sigma = Math.hypot(pl.rms * 0.5, cfg.sigmaFloor, cfg.pwSigma) + cfg.sigmaPerMeter * (at.range ?? 0);
   const conflict = !!old && Math.abs(old.groundW - (surface.c + at.cw)) > cfg.pwAgree; // cách cũ có số liệu độc lập nhưng không khớp
   const confident = pl.rms <= cfg.pwMaxRms && !conflict;
@@ -243,6 +253,33 @@ export function groundSnap(
     pw: 'pts', nSectors: 0, contactW: old?.contactW ?? null, marks: [], n: pl.n, flat: slope < 3, method: 'plane', slopeDeg: slope,
     steep: slope > cfg.steepWarnDeg, plane: surface, dzTilt: surface.c + (sz / 2) * Math.hypot(1, surface.a, surface.b),
   };
+}
+
+/** Ba nguồn mặt đường chọn được cho từng frame: đo riêng quanh object, mặt đường ego (z = 0), mặt đường Patchwork++. */
+export type GroundKind = 'measured' | 'ego' | 'pw';
+export const GROUND_KINDS: readonly GroundKind[] = ['measured', 'ego', 'pw'];
+
+/** Mặt đường ego: mặt phẳng Oxy (z = 0 thế giới), ngang trong hệ box (hệ box chỉ xoay theo yaw). `z`: z tâm box ở frame này. Luôn chắc chắn, không bao giờ cảnh báo. */
+export function egoGround(z: number, sz: number, at: { cu: number; cv: number; cw: number } = { cu: 0, cv: 0, cw: 0 }): GroundResult {
+  const c = -z - at.cw;
+  const dz = c + sz / 2;
+  return {
+    groundW: -z, dz, sigma: 0, rms: 0, warn: false, confident: true, ambiguous: false, pw: 'off', nSectors: 0, contactW: null, marks: [], n: 0, flat: true, method: 'plane',
+    slopeDeg: 0, steep: false, plane: { a: 0, b: 0, c }, dzTilt: c + sz / 2,
+  };
+}
+
+/**
+ * Mặt đường của MỘT nguồn (dùng cho Ground snap / lock khi frame chỉ chọn đúng 1 nguồn): 'measured' = cách đo cũ, không trộn Patchwork++;
+ * 'pw' = chỉ mặt phẳng từ điểm Patchwork++ (cần nhãn mặt đất trong `p`); 'ego' = z = 0. `z`: z tâm box (cần cho 'ego').
+ */
+export function groundSnapBy(
+  kind: GroundKind, p: LocalPoints, sx: number, sy: number, sz: number, at: { cu: number; cv: number; cw: number; range?: number }, z: number, cfg: GroundConfig = DEFAULT_GROUND,
+): GroundResult | null {
+  if (kind === 'ego') return egoGround(z, sz, at);
+  if (at.range !== undefined && at.range > cfg.maxRange) return null;
+  if (kind === 'pw') return pwResult(p, sx, sy, sz, at, cfg, null);
+  return groundSnapCore(p, sx, sy, sz, at, { ...cfg, pw: 0 });
 }
 
 function groundSnapCore(
@@ -299,7 +336,7 @@ function groundSnapCore(
     }
   }
   // Lớp tiếp xúc dưới gầm là mặt đất hoặc gầm / bánh xe — luôn ở bằng hoặc TRÊN mặt đất. Cung nào cao hơn nó quá contactMatch thì không
-  // phải mặt đường (thường là thân xe đỗ sát bên làm điểm mặt đường thưa đi; job 9999: lỗi thô "chìm ~80 cm" đến từ đây).
+  // phải mặt đường (thường là thân xe đỗ sát bên làm điểm mặt đường thưa đi; một job thật: lỗi thô "chìm ~80 cm" đến từ đây).
   if (contact) for (let k = secs.length - 1; k >= 0; k--) if (secs[k]!.w > contact.h + cfg.contactMatch) secs.splice(k, 1);
   if (!secs.length && !contact) return null;
 
@@ -327,7 +364,7 @@ function groundSnapCore(
       const inl = secs.filter((s) => Math.abs(resOf(f, s)) <= cfg.planeTol).length;
       if (inl > bestInl) { bestInl = inl; bestPl = f; }
     }
-    // ≥ 4 cung trên mặt: 3 cung dựng mặt phẳng nên luôn tự khớp, phải có thêm ít nhất 1 cung độc lập xác nhận (job 9999: thiếu điều
+    // ≥ 4 cung trên mặt: 3 cung dựng mặt phẳng nên luôn tự khớp, phải có thêm ít nhất 1 cung độc lập xác nhận (một job thật: thiếu điều
     // kiện này thì 3–4 cung ở các tầng khác nhau vẫn thành "mặt liền" nghiêng và cho lỗi thô tới ~90 cm).
     if (bestPl && bestInl >= Math.max(4, secs.length - 1)) chosen = secs.filter((s) => Math.abs(resOf(bestPl!, s)) <= cfg.planeTol);
   }
@@ -366,7 +403,7 @@ function groundSnapCore(
   const surface: Plane = { a: pl.a, b: pl.b, c: pl.c + lift };
   // Đáy box (nằm ngang) so với mặt đường TẠI TÂM chân box = độ cao trung bình dưới box, như cách nhãn đã qua QC được đặt. Không đẩy
   // theo góc cao nhất: trên dốc 5° với xe dài 4,8 m, luật "không góc nào chìm" báo "chìm" ~16 cm dù đáy đặt đúng; mặt phẳng nghiêng sai
-  // thì tới ~80 cm (job 9999). Muốn box ôm mặt dốc thì Ground snap nghiêng box (dzTilt, roll / pitch).
+  // thì tới ~80 cm (một job thật). Muốn box ôm mặt dốc thì Ground snap nghiêng box (dzTilt, roll / pitch).
   const target = surface.c;
   const dz = target - bottom;
   if (Math.abs(dz) > cfg.maxShift) return null;

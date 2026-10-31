@@ -7,7 +7,7 @@ import type { LocalPoints } from './fit';
  * phản chiếu gộp với điểm thật làm hình vật nét hơn. Chỉ để XEM, không đổi dữ liệu nhãn.
  * Mọi toạ độ ở hệ của khung nhìn (u dọc box, v ngang, w lên; gốc ở tâm box tham chiếu của frame), như các view của Batch Review.
  */
-export type RefMode = 'bottom' | 'road' | 'custom';
+export type RefMode = 'bottom' | 'road' | 'custom' | 'mirror' | 'pw'; // mirror: mặt gương tự dò từ ảnh phản chiếu; pw: mặt đường Patchwork++
 export interface RefState {
   on: boolean;
   mode: RefMode;
@@ -20,13 +20,17 @@ export interface ReflectConfig { minBelow: number; clear: number }
 /** Gợi ý bật ref khi dưới mặt đường, trong phạm vi chân box, có từ `minBelow` điểm (bỏ lớp `clear` m sát mặt đường). Chỉnh ở tab Threshold. */
 export const DEFAULT_REFLECT: ReflectConfig = { minBelow: 15, clear: 0.15 };
 
-export type PlaneSource = 'bottom' | 'road' | 'ego' | 'custom';
+export type PlaneSource = 'bottom' | 'road' | 'ego' | 'custom' | 'mirror' | 'pw';
 /**
  * Độ cao w của mặt phản chiếu. bottom: mặt dưới box; road: mặt đường đo được dưới object, không đo được thì mặt phẳng z = 0 của ego;
  * custom: đáy box + dh (đi theo box khi box dời).
  */
-export function refPlane(box: LocalBox, s: Pick<RefState, 'mode' | 'dh'>, roadW: number | null, egoW: number | null): { w: number; src: PlaneSource } {
+export function refPlane(
+  box: LocalBox, s: Pick<RefState, 'mode' | 'dh'>, roadW: number | null, egoW: number | null, extra: { mirrorW?: number | null; pwW?: number | null } = {},
+): { w: number; src: PlaneSource } {
   const bottom = box.cw - box.sz / 2;
+  if (s.mode === 'mirror' && extra.mirrorW !== null && extra.mirrorW !== undefined) return { w: extra.mirrorW, src: 'mirror' };
+  if (s.mode === 'pw' && extra.pwW !== null && extra.pwW !== undefined) return { w: extra.pwW, src: 'pw' };
   if (s.mode === 'custom') return { w: bottom + s.dh, src: 'custom' };
   if (s.mode === 'road') {
     if (roadW !== null && Number.isFinite(roadW)) return { w: roadW, src: 'road' };
@@ -73,7 +77,7 @@ export function pointsBelow(p: LocalPoints, box: LocalBox, roadW: number | null,
   return n;
 }
 
-const MODES: RefMode[] = ['bottom', 'road', 'custom'];
+const MODES: RefMode[] = ['bottom', 'road', 'custom', 'mirror', 'pw'];
 /** Đọc trạng thái ref đã lưu (hỏng / thiếu trường thì dùng mặc định từng trường). */
 export function parseRefState(raw: unknown): RefState {
   const r = raw && typeof raw === 'object' ? raw as Partial<RefState> : {};
@@ -83,4 +87,52 @@ export function parseRefState(raw: unknown): RefState {
     dh: typeof r.dh === 'number' && Number.isFinite(r.dh) ? Math.max(-5, Math.min(5, r.dh)) : 0,
     dismissed: r.dismissed === true,
   };
+}
+
+/**
+ * Mặt đường suy ra từ ẢNH PHẢN CHIẾU (đường ướt): ảnh phản chiếu là hình vật lật ngược qua mặt nước = mặt đường. Dò độ cao h của mặt gương
+ * nằm ngang (hệ box, gốc ở tâm box) để các điểm dưới đáy box lật qua h trùng nhiều nhất với điểm của chính vật (ô lưới `cell`). Dùng làm
+ * mốc độc lập để chấm các cách đo mặt đường: mặt đường gợi ý "đạt" khi mức trùng tại đó gần bằng mức tốt nhất (hình lật khớp hình vật).
+ * `valid` = có đủ điểm phản chiếu khớp và đỉnh rõ (không thì không dùng làm mốc).
+ */
+export interface ReflectionFit { h: number; matched: number; valid: boolean; scoreAt: (h: number) => number; best: number }
+export function reflectionPlane(p: LocalPoints, sx: number, sy: number, sz: number, cell = 0.08): ReflectionFit | null {
+  const hu = sx / 2 + 0.1, hv = sy / 2 + 0.1, bottom = -sz / 2, top = sz / 2;
+  const mainLo = bottom + 0.15; // bỏ lớp sát đáy (mặt đường, gầm) khỏi hình vật
+  const key = (u: number, v: number, w: number) => `${Math.floor(u / cell)},${Math.floor(v / cell)},${Math.floor(w / cell)}`;
+  const occ = new Set<string>();
+  const ghost: number[] = [];
+  let nMain = 0;
+  for (let i = 0; i < p.n; i++) {
+    const u = p.u[i]!, v = p.v[i]!, w = p.w[i]!;
+    if (Math.abs(u) > hu || Math.abs(v) > hv) continue;
+    if (w >= mainLo && w <= top) { occ.add(key(u, v, w)); nMain++; } else if (w < bottom + 0.3 && w > bottom - sz - 0.8) ghost.push(i);
+  }
+  if (nMain < 40 || ghost.length < 20) return null;
+  const H0 = bottom - 0.6, H1 = bottom + 0.3, STEP = 0.01;
+  const scores: number[] = [];
+  for (let h = H0; h <= H1 + 1e-9; h += STEP) {
+    let m = 0;
+    for (const i of ghost) {
+      const w2 = 2 * h - p.w[i]!;
+      if (w2 < mainLo || w2 > top) continue;
+      if (occ.has(key(p.u[i]!, p.v[i]!, w2))) m++;
+    }
+    scores.push(m);
+  }
+  // làm mượt nhẹ (3 mẫu) để đỉnh không nhảy theo biên ô lưới
+  const sm = scores.map((_, k) => (scores[Math.max(0, k - 1)]! + scores[k]! + scores[Math.min(scores.length - 1, k + 1)]!) / 3);
+  let bi = 0;
+  for (let k = 1; k < sm.length; k++) if (sm[k]! > sm[bi]!) bi = k;
+  const best = sm[bi]!;
+  // đỉnh bẹt (tường xe thẳng đứng): lấy tâm vùng ≥ 92% đỉnh liền quanh đỉnh thay vì mẫu đầu tiên đạt max
+  let lo = bi, hi = bi;
+  while (lo > 0 && sm[lo - 1]! >= 0.92 * best) lo--;
+  while (hi < sm.length - 1 && sm[hi + 1]! >= 0.92 * best) hi++;
+  const ci = Math.round((lo + hi) / 2);
+  const scoreAt = (h: number) => sm[Math.max(0, Math.min(sm.length - 1, Math.round((h - H0) / STEP)))]!;
+  const h = H0 + ci * STEP;
+  // đỉnh rõ: cách đỉnh ±15 cm mức trùng phải giảm còn ≤ 70%; đủ điểm khớp
+  const sharp = Math.max(scoreAt(h - 0.15), scoreAt(h + 0.15)) <= 0.7 * best;
+  return { h, matched: scores[ci]!, best, scoreAt, valid: scores[ci]! >= 25 && sharp && lo > 0 && hi < sm.length - 1 };
 }

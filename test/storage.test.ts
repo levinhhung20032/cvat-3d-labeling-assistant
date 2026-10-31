@@ -26,8 +26,8 @@ describe('kho lưu trữ khi có nhiều máy chủ CVAT', () => {
     S.whenStorageReady(() => calls.push('early'));
     expect(calls).toEqual([]);
     disk['ui:cvla-theme'] = 'dark';
-    disk['ui:cvla-made:9999'] = '[10]';
-    disk['ui:cvla-qc'] = '{"9999:1:0":"ghi chú"}';
+    disk['ui:cvla-made:1001'] = '[10]';
+    disk['ui:cvla-qc'] = '{"1001:1:0":"ghi chú"}';
     await S.useExtensionStorage('https://cvat-a.example.com');
     expect(calls).toEqual(['early']);
     S.whenStorageReady(() => calls.push('late'));
@@ -36,20 +36,20 @@ describe('kho lưu trữ khi có nhiều máy chủ CVAT', () => {
 
   it('máy chủ mặc định giữ nguyên khóa cũ: đọc được dữ liệu sẵn có', () => {
     expect(S.defaultOrigin()).toBe('https://cvat-a.example.com');
-    expect(S.kv.get('cvla-made:9999')).toBe('[10]');
-    expect(S.kv.get('cvla-qc')).toBe('{"9999:1:0":"ghi chú"}');
+    expect(S.kv.get('cvla-made:1001')).toBe('[10]');
+    expect(S.kv.get('cvla-qc')).toBe('{"1001:1:0":"ghi chú"}');
   });
 
   it('máy chủ khác: dữ liệu theo job (sổ object do tool tạo, ghi chú QC…) KHÔNG lọt sang, ghi vào khóa riêng; tùy chọn cá nhân dùng chung', async () => {
     await S.useExtensionStorage('https://cvat-b.example.com');
-    expect(S.kv.get('cvla-made:9999')).toBeNull(); // job 9999 của máy chủ kia không phải job này: không được coi là object do tool tạo
+    expect(S.kv.get('cvla-made:1001')).toBeNull(); // một job thật của máy chủ kia không phải job này: không được coi là object do tool tạo
     expect(S.kv.get('cvla-qc')).toBeNull();
     expect(S.kv.get('cvla-theme')).toBe('dark');
-    S.kv.set('cvla-made:9999', '[99]');
+    S.kv.set('cvla-made:1001', '[99]');
     S.kv.set('cvla-theme', 'gray');
     await Promise.resolve();
-    expect(disk['ui@https://cvat-b.example.com|cvla-made:9999']).toBe('[99]');
-    expect(disk['ui:cvla-made:9999']).toBe('[10]'); // máy chủ mặc định không bị đụng
+    expect(disk['ui@https://cvat-b.example.com|cvla-made:1001']).toBe('[99]');
+    expect(disk['ui:cvla-made:1001']).toBe('[10]'); // máy chủ mặc định không bị đụng
     expect(disk['ui:cvla-theme']).toBe('gray');
     expect(S.storageKey('cvla-draft:5', 'https://cvat-b.example.com')).toBe('ui@https://cvat-b.example.com|cvla-draft:5');
     expect(S.storageKey('cvla-keymap', 'https://cvat-b.example.com')).toBe('ui:cvla-keymap');
@@ -57,7 +57,7 @@ describe('kho lưu trữ khi có nhiều máy chủ CVAT', () => {
 
   it('quay lại máy chủ mặc định: thấy lại đúng dữ liệu của nó', async () => {
     await S.useExtensionStorage('https://cvat-a.example.com');
-    expect(S.kv.get('cvla-made:9999')).toBe('[10]');
+    expect(S.kv.get('cvla-made:1001')).toBe('[10]');
     expect(S.kv.get('cvla-theme')).toBe('gray');
   });
 

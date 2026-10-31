@@ -20,7 +20,10 @@ import { AttributePanel } from './AttributePanel';
 import { gpuActive } from './gpu';
 import { Help, PENDING_STYLE, Pill, Slider } from './ui';
 import { ControlLayout, GripCtx } from './ControlLayout';
-import { PwCompare } from './PwCompare';
+// Bảng so sánh Patchwork++ chỉ có trên máy kiểm thử (PwCompare.tsx không đưa lên git): không có file thì nút và bảng không xuất hiện.
+type PwCompareProps = { ann: CvatAnnotations; start: number; stop: number; num: number; onJump: (num: number, f: number) => void; onClose: () => void };
+const pwCompareMods = import.meta.glob('./PwCompare.tsx', { eager: true }) as Record<string, { PwCompare?: (p: PwCompareProps) => JSX.Element }>;
+const PwCompare = Object.values(pwCompareMods)[0]?.PwCompare ?? null;
 import { setPoolSource, setSegForced } from './groundSeg';
 import { clampPan, drawView, type EgoPlane, hexRgb, localize, NO_PAN, panBy, panOffset, rotateLocal, REF_COLOR, STATUS_COLOR, type Local, type Pan, type Scene, type View } from './render';
 import { Cancelled, pointClouds } from './stores';
@@ -34,8 +37,8 @@ import { DEFAULT_FIT, fitGroundOf, fitReport, type FitReport } from '../shared/f
 import { thresholdStore, useThresholdVersion } from './thresholdStore';
 import { sym, useSymbols } from './symbolStore';
 import { findLongOutsideGaps, SPLIT_OUTSIDE_FRAMES, type OutsideGap } from '../shared/splitId';
-import { confirmSnap, DEFAULT_GROUND, enforceConsistency, groundSnap, pwGroundPlane, type ConsistencyItem, tiltFromPlane, type GroundResult, type GroundSector } from '../shared/ground';
-import { DEFAULT_REFLECT, mirrorBox, mirroredPoints, pointsBelow, refPlane, type PlaneSource, type RefMode, type RefState } from '../shared/reflect';
+import { confirmSnap, DEFAULT_GROUND, egoGround, enforceConsistency, GROUND_KINDS, groundSnap, groundSnapBy, pwGroundPlane, type ConsistencyItem, tiltFromPlane, type GroundKind, type GroundResult, type GroundSector } from '../shared/ground';
+import { DEFAULT_REFLECT, mirrorBox, mirroredPoints, pointsBelow, reflectionPlane, refPlane, type PlaneSource, type RefMode, type RefState } from '../shared/reflect';
 import { refStore, useRefState } from './refStore';
 import { motionJump, type MotionWarning } from '../shared/motion';
 import { trackIssues, type FrameIssue, type IssueKind } from '../shared/qcrules';
@@ -122,10 +125,53 @@ function cursorFor(view: View, hit: Hit, alt = false): string {
   return horizontal ? 'ew-resize' : 'ns-resize';
 }
 
+const cm = (m: number) => Math.round(Math.abs(m) * 100);
+/** Ba nguồn mặt đường chọn được. Ground snap / lock chỉ chạy khi frame chọn ĐÚNG 1 nguồn; chọn nhiều thì chỉ hiển thị, không snap / lock. */
+const GROUND_LABEL: Record<GroundKind, { short: string; full: string; tip: string }> = {
+  measured: { short: 'đo', full: 'Đo riêng (sg gr)', tip: `Đo mặt đường riêng cho object ở đúng frame này (lớp thấp nhất có mật độ ở 8 cung quanh box + lớp tiếp xúc dưới gầm), không dự đoán từ frame khác. Báo ⏬ khi đáy cao hơn mặt đường quá ${cm(DEFAULT_GROUND.floatTol)} cm hoặc thấp hơn quá ${cm(DEFAULT_GROUND.sinkTol)} cm và vượt độ bất định của phép đo.` },
+  ego: { short: 'z=0', full: 'Ego z=0 (gr z=0)', tip: 'Mặt phẳng Oxy của ego (z = 0, mặt đường dưới xe): vạch vàng chấm ở view Bên / Trước, theo z của box ở frame này. Snap / lock đặt đáy box lên z = 0.' },
+  pw: { short: 'pw', full: 'Patchwork++ (gr pw)', tip: 'Mặt đường fit từ các điểm Patchwork++ gán là mặt đất quanh box (vạch tím nét đứt ở view Bên / Trước). Snap / lock đặt đáy box lên mặt này; frame thiếu điểm mặt đất quanh box thì không có vạch.' },
+};
+const groundSelText = (sel: readonly GroundKind[]) => (sel.length ? sel.map((k) => GROUND_LABEL[k].short).join('+') : 'tắt');
+function GroundPick({ sel, onChange, label, title }: { sel: readonly GroundKind[]; onChange: (sel: GroundKind[]) => void; label?: string; title?: string }) {
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const one = sel.length === 1;
+  return (
+    <span onClick={(e) => e.stopPropagation()} style={{ display: 'inline-block' }}>
+      <button
+        onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setAt((v) => (v ? null : { x: r.left, y: r.bottom + 2 })); }}
+        title={title ?? `Mặt đường (chọn 1 hoặc nhiều). Chọn đúng 1: Ground snap / lock dùng mặt đó; chọn nhiều: chỉ hiển thị, không lock. Hiện: ${sel.length ? sel.map((k) => GROUND_LABEL[k].full).join(' + ') : 'không chọn'}.`}
+        style={{ padding: '0 5px', fontSize: 11, lineHeight: '14px', ...(one ? { fontWeight: 700 } : null) }}
+      >{label ? `${label}: ` : ''}{groundSelText(sel)} ▾</button>
+      {at && <div onPointerDown={(e) => { e.stopPropagation(); setAt(null); }} style={{ position: 'fixed', inset: 0, zIndex: 49 }} />}
+      {at && (
+        <div style={{ position: 'fixed', left: at.x, top: at.y, zIndex: 50, background: '#fff', color: '#222', border: '1px solid #888', borderRadius: 4, padding: 4, boxShadow: '0 2px 8px rgba(0,0,0,.3)', fontSize: 12, whiteSpace: 'nowrap' }}>
+          {GROUND_KINDS.map((k) => (
+            <label key={k} title={GROUND_LABEL[k].tip} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 4px', cursor: 'pointer' }}>
+              <input type="checkbox" checked={sel.includes(k)} onChange={(e) => onChange(GROUND_KINDS.filter((x) => (x === k ? e.target.checked : sel.includes(x))))} /> {GROUND_LABEL[k].full}
+            </label>
+          ))}
+          <div style={{ fontSize: 11, color: '#555', padding: '2px 4px', maxWidth: 220, whiteSpace: 'normal' }}>{one ? 'Snap / lock dùng mặt này.' : 'Chỉ chọn 1 mặt thì Ground snap / lock mới chạy.'}</div>
+        </div>
+      )}
+    </span>
+  );
+}
+
+const loadFrameSel = (key: string): Record<number, GroundKind[]> => {
+  const out: Record<number, GroundKind[]> = {};
+  try {
+    const o = JSON.parse(kv.get(key) ?? '{}') as Record<string, unknown>;
+    for (const [k, v] of Object.entries(o)) if (Array.isArray(v) && Number.isInteger(Number(k))) out[Number(k)] = GROUND_KINDS.filter((g) => v.includes(g));
+  } catch { /* bỏ qua */ }
+  return out;
+};
+
 interface DragState { hit: NonNullable<Hit>; x0: number; y0: number; base: LocalBox; moved: boolean }
 
-function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, tiltOn, autoSnap, onPreview, onCommit, onZoom, pan, onPan, reflect, pwPlane }: {
+function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, tiltOn, autoSnap, lockKind, onPreview, onCommit, onZoom, pan, onPan, reflect, pwPlane }: {
   pwPlane: EgoPlane | null; // mặt đường Patchwork++ gợi ý (tím) trong hệ của khung nhìn
+  lockKind: GroundKind | null; // nguồn mặt đường của lock (frame chọn đúng 1 nguồn); null: không lock
   reflect: { pts: Local | null; plane: number } | null; // ref mode (chỉ ở tab Ref)
   egoPlane: EgoPlane | null; // mặt phẳng Oxy của ego trong hệ của khung nhìn (null: công tắc tắt)
   scene: Scene; overlays: LocalBox[]; tiltOn: boolean; frame: Mat3 | null; // frame: khung nhìn căn theo box nghiêng (null nếu box không nghiêng)
@@ -225,10 +271,10 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
       let b = box;
       // Tự bám mặt đất: sau khi dời / đổi cỡ, đặt lại độ cao để đáy chạm mặt đường tại vị trí mới.
       const geometryChanged = b.cu !== 0 || b.cv !== 0 || b.cw !== 0 || b.sx !== st.cuboid.sx || b.sy !== st.cuboid.sy || b.sz !== st.cuboid.sz;
-      if (autoSnap && loc && geometryChanged && !frame) {
+      if (autoSnap && lockKind && loc && geometryChanged && !frame) {
         const at = { cu: b.cu, cv: b.cv, cw: b.cw, range: Math.hypot(st.cuboid.x, st.cuboid.y) };
-        const g = groundSnap(loc, b.sx, b.sy, b.sz, at);
-        if (g && confirmSnap(loc, b.sx, b.sy, b.sz, at, g)) b = { ...b, cw: b.cw + g.dz }; // đo lại tại chỗ mới phải ra cùng mặt đường
+        const g = groundSnapBy(lockKind, loc, b.sx, b.sy, b.sz, at, st.cuboid.z);
+        if (g && g.confident && (lockKind !== 'measured' || confirmSnap(loc, b.sx, b.sy, b.sz, at, g))) b = { ...b, cw: b.cw + g.dz }; // đo riêng: đo lại tại chỗ mới phải ra cùng mặt đường
       }
       if (frame) { const [cu, cv, cw] = apply(transpose(frame), [b.cu, b.cv, b.cw]); b = { ...b, cu, cv, cw }; } // về hệ yaw
       onCommit(applyLocalBox(st.cuboid, b));
@@ -249,11 +295,10 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
 const NO_ISSUES: FrameIssue[] = [];
 /** Một dòng trong nhóm Hiển thị (nhóm chia cố định 2 dòng; hẹp quá thì dòng tự xuống tiếp). */
 const DISPLAY_LINE: React.CSSProperties = { flexBasis: '100%', display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center' };
-const REF_MODE_TEXT: Record<RefMode, string> = { bottom: 'mặt dưới box', road: 'mặt đường', custom: 'Custom' };
-const PLANE_TEXT: Record<PlaneSource, string> = { bottom: 'mặt dưới box', road: 'mặt đường đo được', ego: 'z = 0 của ego (chưa đo được mặt đường)', custom: 'tự chỉnh' };
+const REF_MODE_TEXT: Record<RefMode, string> = { bottom: 'mặt dưới box', road: 'mặt đường', custom: 'Custom', mirror: 'gương tự dò', pw: 'Patchwork++' };
+const PLANE_TEXT: Record<PlaneSource, string> = { bottom: 'mặt dưới box', road: 'mặt đường đo được', ego: 'z = 0 của ego (chưa đo được mặt đường)', custom: 'tự chỉnh', mirror: 'gương tự dò từ ảnh phản chiếu', pw: 'mặt đường Patchwork++' };
 const NO_MARKS: GroundSector[] = [];
 
-const cm = (m: number) => Math.round(Math.abs(m) * 100);
 /** Hành động cần làm để đáy box nằm trên mặt đường ("nâng 12 cm" / "hạ 12 cm"), thay cho mũi tên dễ hiểu nhầm. */
 const groundAction = (g: GroundResult) => `${g.dz > 0 ? 'nâng' : 'hạ'} ${cm(g.dz)} cm`;
 const groundTip = (g: GroundResult) =>
@@ -275,9 +320,10 @@ const CHIP_BTN: React.CSSProperties = { padding: '0 3px', lineHeight: 1, height:
 interface FileFlag { kind: IssueKind; state: FlagState; msg?: string; det: boolean }
 const NO_FLAGS: FileFlag[] = [];
 
-function Column({ pwShow = false, groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan, refl = null, onBelow, onRefPlane, horizontal = false }: {
+function Column({ sel, onSel, pwShow = false, groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan, refl = null, onBelow, onRefPlane, horizontal = false }: {
   horizontal?: boolean; // tab Ref: 3 view Trên | Bên | Trước xếp ngang
   pwShow?: boolean; // hiện mặt đường Patchwork++ gợi ý (vạch tím) ở view Bên / Trước
+  sel: GroundKind[]; onSel: (f: number, sel: GroundKind[]) => void; // nguồn mặt đường của RIÊNG frame này (đổi ở frame khác không đụng tới)
   onRefPlane?: (f: number, d: number | null) => void; // tab Ref: mặt phản chiếu cao hơn đáy box bao nhiêu (m)
   refl?: RefState | null; // tab Ref: vẽ box ảo, mặt phản chiếu và điểm lấy đối xứng
   onBelow?: (f: number, n: number) => void; // số điểm dưới mặt đường trong chân box (để gợi ý bật ref)
@@ -368,7 +414,16 @@ function Column({ pwShow = false, groundOv, groundOn, egoOn, suggestOn, f, size,
   useEffect(() => { onFit(f, bad); }, [f, bad]);
   // Ground snap: ước lượng mặt đường dưới chân box.
   const snap = groundOn ? groundOv : null;
-  useEffect(() => { onSnap(f, snap); }, [f, snap]);
+  // Snap / lock chỉ khi frame chọn đúng 1 nguồn mặt đường; nhiều nguồn thì chỉ hiển thị.
+  const lockKind: GroundKind | null = sel.length === 1 ? sel[0]! : null;
+  const snapSel = useMemo<GroundResult | null>(() => {
+    const c = st.cuboid;
+    if (!lockKind || !c) return null;
+    if (lockKind === 'measured') return groundOv;
+    if (lockKind === 'ego') return egoGround(c.z, c.sz);
+    return loc ? groundSnapBy('pw', loc, c.sx, c.sy, c.sz, { cu: 0, cv: 0, cw: 0, range: Math.hypot(c.x, c.y) }, c.z) : null;
+  }, [lockKind, groundOv, loc, st.cuboid]);
+  useEffect(() => { onSnap(f, snapSel); }, [f, snapSel]);
   // Cảnh báo vật đi xa bất thường: dấu × cam ở vị trí dự đoán từ chuyển động các frame trước.
   const shownMotion = motion && !motionIgnored ? motion : null;
   const mark = useMemo(() => {
@@ -389,7 +444,14 @@ function Column({ pwShow = false, groundOv, groundOn, egoOn, suggestOn, f, size,
     if (known !== null || !refl || refl.mode !== 'road' || !loc || !st.cuboid) return known;
     return groundSnap(loc, st.cuboid.sx, st.cuboid.sy, st.cuboid.sz, { cu: 0, cv: 0, cw: 0, range: Math.hypot(st.cuboid.x, st.cuboid.y) })?.groundW ?? null;
   }, [fitGround, groundOv, refl?.mode, loc, st.cuboid]);
-  const plane = refl && box ? refPlane(box, refl, roadW, egoW) : null;
+  // Mặt gương tự dò (điểm phản chiếu lật lại khớp hình vật nhất) — vừa là một lựa chọn mặt phản chiếu, vừa để chấm mức khớp của mặt đang dùng.
+  const mirrorFit = useMemo(() => (refl && loc && st.cuboid ? reflectionPlane(loc, st.cuboid.sx, st.cuboid.sy, st.cuboid.sz) : null), [!!refl, loc, st.cuboid]);
+  const pwRefW = useMemo(() => {
+    if (!refl || refl.mode !== 'pw' || !loc || !st.cuboid) return null;
+    const pl = pwGroundPlane(loc, st.cuboid.sx, st.cuboid.sy);
+    return pl ? pl.c + DEFAULT_GROUND.pwLift : null;
+  }, [refl?.mode, loc, st.cuboid]);
+  const plane = refl && box ? refPlane(box, refl, roadW, egoW, { mirrorW: mirrorFit?.valid ? mirrorFit.h : null, pwW: pwRefW }) : null;
   const reflect = useMemo(() => (plane && box && ptsView ? { pts: mirroredPoints(ptsView, box, plane.w), plane: plane.w } : null), [plane?.w, box, ptsView]);
   const below = useMemo(() => (onBelow && !refl && ptsView && st.cuboid ? pointsBelow(ptsView, identityBox(st.cuboid), roadW, egoW) : 0), [!!onBelow, refl, ptsView, st.cuboid, roadW, egoW, thrVer]);
   useEffect(() => { onBelow?.(f, below); }, [f, below]);
@@ -433,10 +495,11 @@ function Column({ pwShow = false, groundOv, groundOn, egoOn, suggestOn, f, size,
       {/* Kích thước box ở frame này (dài × rộng × cao, m): dòng riêng cao cố định ngay dưới tiêu đề, không đè lên point cloud; đang kéo thì hiện
           kích thước mới. Frame không có box vẫn giữ dòng trống để các cột thẳng hàng. */}
       <div
-        style={{ height: 16, lineHeight: '16px', fontSize: 11, padding: '0 4px', background: '#eef2f7', color: '#222', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontVariantNumeric: 'tabular-nums' }}
+        style={{ height: 16, lineHeight: '16px', fontSize: 11, padding: '0 4px', background: '#eef2f7', color: '#222', whiteSpace: 'nowrap', overflow: 'hidden', display: 'flex', alignItems: 'center', gap: 4, fontVariantNumeric: 'tabular-nums' }}
         title={box ? `Dài × rộng × cao của box ở frame ${f} (m)` : undefined}
       >
-        {box ? <>L×W×H <b>{box.sx.toFixed(2)} × {box.sy.toFixed(2)} × {box.sz.toFixed(2)}</b> m</> : ''}
+        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{box ? <>L×W×H <b>{box.sx.toFixed(2)} × {box.sy.toFixed(2)} × {box.sz.toFixed(2)}</b> m</> : ''}</span>
+        {!horizontal && <GroundPick sel={sel} onChange={(v) => onSel(f, v)} title={`Mặt đường của RIÊNG frame ${f} (đổi ở frame khác không ảnh hưởng frame này). Chọn đúng 1: Ground snap / lock dùng mặt đó; chọn nhiều: chỉ hiển thị, không lock.`} />}
       </div>
       {/* Lỗi & gợi ý ở ĐẦU cột, dạng chip một dòng, vùng cao cố định nên các cột không bao giờ lệch hàng; chi tiết ở dưới các view. */}
       <div style={{ height: 40, overflow: 'hidden', display: 'flex', flexWrap: 'wrap', alignContent: 'flex-start', gap: 2, padding: '2px 2px 0', background: '#fafafa' }}>
@@ -457,12 +520,12 @@ function Column({ pwShow = false, groundOv, groundOn, egoOn, suggestOn, f, size,
       </div>
       <div style={{ position: 'relative', ...(horizontal ? { display: 'flex', gap: VIEW_GAP } : null) }}>
       {VIEWS.map((v) => (
-        <Cell key={v} reflect={reflect} pwPlane={pwPlane} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} pan={pan} onPan={onPan} />
+        <Cell key={v} reflect={reflect} pwPlane={pwPlane} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap && lockKind !== null} lockKind={lockKind} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} pan={pan} onPan={onPan} />
       ))}
       </div>
       {reflect && plane && (
         <div style={{ fontSize: 11, padding: '1px 4px', background: '#f3e8ff', color: '#4c1d95' }} title="Điểm trong box ảo (tím nét đứt) được lật qua mặt phản chiếu (vạch tím) và vẽ chồng lên box chính bằng màu tím">
-          ref: {reflect.pts?.n ?? 0} điểm gộp · mặt phản chiếu: {PLANE_TEXT[plane.src]} ({plane.w >= (box ? box.cw - box.sz / 2 : 0) ? '+' : ''}{((plane.w - (box ? box.cw - box.sz / 2 : 0)) * 100).toFixed(0)} cm so với đáy box)
+          ref: {reflect.pts?.n ?? 0} điểm gộp{mirrorFit && mirrorFit.best > 0 ? ` · khớp hình ${Math.round((100 * mirrorFit.scoreAt(plane.w)) / mirrorFit.best)}% mức tốt nhất${mirrorFit.valid ? '' : ' (ít điểm phản chiếu)'}` : ''} · mặt phản chiếu: {PLANE_TEXT[plane.src]} ({plane.w >= (box ? box.cw - box.sz / 2 : 0) ? '+' : ''}{((plane.w - (box ? box.cw - box.sz / 2 : 0)) * 100).toFixed(0)} cm so với đáy box)
         </div>
       )}
       {!pc && (
@@ -646,7 +709,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   const { start_frame: start, stop_frame: stop } = job;
   const hint = useKeyHint();
   const keyOf = useKeyOf();
-  const [prefs, setPrefs] = useState(() => { const p = loadPrefs(); setSegForced(p.pwShow); return p; });
+  const [prefs, setPrefs] = useState(() => loadPrefs());
   const [showCmp, setShowCmp] = useState(false);
   const thrVer = useThresholdVersion(); // ngưỡng cảnh báo chỉnh tay (tab Threshold) đổi thì tính lại cảnh báo
   const max = ann.tracks.length;
@@ -681,6 +744,21 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   const [sugs, setSugs] = useState<Map<number, Suggestion | null>>(new Map());
   const ign = useIgnored();
   const [snaps, setSnaps] = useState<Map<number, GroundResult | null>>(new Map());
+  // Nguồn mặt đường theo TỪNG frame của object (nhớ cục bộ): frame chưa chọn riêng thì theo dropdown chung ở nhóm Gợi ý & mặt đất. Đổi ở một frame
+  // chỉ ghi frame đó, không đụng vạch / cảnh báo / snap của frame khác.
+  const gSelKey = `cvla-gsrc:${job.id}:${num}`;
+  const [frameSel, setFrameSelState] = useState<Record<number, GroundKind[]>>(() => loadFrameSel(gSelKey));
+  useEffect(() => { setFrameSelState(loadFrameSel(gSelKey)); }, [gSelKey]);
+  const defSel = useMemo<GroundKind[]>(() => GROUND_KINDS.filter((k) => (k === 'measured' ? prefs.ground : k === 'ego' ? prefs.egoPlane : prefs.pwShow)), [prefs.ground, prefs.egoPlane, prefs.pwShow]);
+  const selOf = (f: number): GroundKind[] => frameSel[f] ?? defSel;
+  const setFrameSel = (f: number, sel: GroundKind[]) => {
+    const next = { ...frameSel, [f]: sel };
+    setFrameSelState(next);
+    try { kv.set(gSelKey, JSON.stringify(next)); } catch { /* bỏ qua */ }
+  };
+  const anyMeasured = defSel.includes('measured') || Object.values(frameSel).some((v) => v.includes('measured'));
+  const anyPw = defSel.includes('pw') || Object.values(frameSel).some((v) => v.includes('pw'));
+  useEffect(() => { setSegForced(anyPw); }, [anyPw]);
   const [autoSnap, setAutoSnapState] = useState(() => { try { return kv.get('cvla-autosnap') === '1'; } catch { return false; } });
   const setAutoSnap = (v: boolean) => { setAutoSnapState(v); try { kv.set('cvla-autosnap', v ? '1' : '0'); } catch { /* bỏ qua */ } };
   const [rangeFrom, setRangeFrom] = useState('');
@@ -792,7 +870,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   }, [ovAt, framesKey, ann]);
   useEffect(() => { onSel(selFrame); }, [selFrame]);
 
-  const updatePrefs = (p: Prefs) => { setSegForced(p.pwShow); setPrefs(p); savePrefs(p); };
+  const updatePrefs = (p: Prefs) => { setPrefs(p); savePrefs(p); };
   const zoomBy = (factor: number) => setZoom((z) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z * factor)));
   useEffect(() => { setZoom(1); }, [num]);
 
@@ -1050,7 +1128,8 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   const snapWhy = useRef('');
   const groundFrame = (f: number): boolean => {
     snapWhy.current = '';
-    if (!prefs.ground) { snapWhy.current = 'dò mặt đất (sg gr) đang tắt'; return false; }
+    const sf = selOf(f);
+    if (sf.length !== 1) { snapWhy.current = sf.length === 0 ? 'frame này chưa chọn mặt đường nào (dropdown mặt đường ở đầu cột)' : 'frame này đang chọn nhiều mặt đường: chỉ chọn đúng 1 để snap'; return false; }
     const st = track ? stateAt(track, f) : null;
     const g = snaps.get(f);
     if (!st?.cuboid) { snapWhy.current = 'frame này không có box'; return false; }
@@ -1060,7 +1139,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     const pc = pointClouds.peek(f);
     if (!pc) { snapWhy.current = 'point cloud của frame này chưa có trong bộ nhớ'; return false; }
     const c0 = st.cuboid;
-    if (!confirmSnap(localize(pc, c0, 16, f), c0.sx, c0.sy, c0.sz, { cu: 0, cv: 0, cw: 0, range: Math.hypot(c0.x, c0.y) }, g)) { snapWhy.current = 'đo lại tại chỗ cho ra mặt đường khác (hai lần đo không khớp)'; return false; }
+    if (sf[0] === 'measured' && !confirmSnap(localize(pc, c0, 16, f), c0.sx, c0.sy, c0.sz, { cu: 0, cv: 0, cw: 0, range: Math.hypot(c0.x, c0.y) }, g)) { snapWhy.current = 'đo lại tại chỗ cho ra mặt đường khác (hai lần đo không khớp)'; return false; }
     // Mặt dốc: nghiêng box song song mặt đường (roll / pitch) nếu bật và dốc đủ rõ; không thì chỉ dời z.
     if (prefs.tilt && g.method === 'plane' && g.plane && g.dzTilt !== undefined && (g.slopeDeg ?? 0) >= 1) {
       const t = tiltFromPlane(g.plane.a, g.plane.b, st.cuboid.yaw);
@@ -1074,7 +1153,6 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     return true;
   };
   const groundSelectedOrAll = () => {
-    if (!prefs.ground) { setNote('Dò mặt đất đang tắt (bật ở nhóm Gợi ý & mặt đất).'); return; }
     const tgt = hoverRef.current ?? selFrame; // trỏ chuột > frame đã chọn > cả cửa sổ
     const list = tgt !== null ? [tgt] : frames;
     const done = list.filter((f) => groundFrame(f));
@@ -1108,7 +1186,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   // Độ khớp box ↔ cụm điểm (lệch / ít điểm) của CẢ track, tính chung vòng lặp với mặt đường; checked = số frame đã có point cloud để kiểm.
   const [fitSeries, setFitSeries] = useState<{ fits: Map<number, FitReport>; checked: number }>({ fits: new Map(), checked: 0 });
   useEffect(() => {
-    if (!(prefs.ground || warn) || !track) { setSeries(new Map()); setFitSeries({ fits: new Map(), checked: 0 }); return; }
+    if (!(anyMeasured || warn) || !track) { setSeries(new Map()); setFitSeries({ fits: new Map(), checked: 0 }); return; }
     let live = true;
     const timer = window.setTimeout(async () => {
       const grounds = new Map<number, GroundResult | null>();
@@ -1122,19 +1200,19 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
         const loc = localize(pc, c, 16, f);
         checked++;
         const g = groundSnap(loc, c.sx, c.sy, c.sz, { cu: 0, cv: 0, cw: 0, range: Math.hypot(c.x, c.y) });
-        if (prefs.ground) { grounds.set(f, g); consItems.push({ f, z: c.z, range: Math.hypot(c.x, c.y), g }); }
+        if ((frameSel[f] ?? defSel).includes('measured')) { grounds.set(f, g); consItems.push({ f, z: c.z, range: Math.hypot(c.x, c.y), g }); }
         if (warn) fits.set(f, fitReport(loc, c.sx, c.sy, c.sz, DEFAULT_FIT, fitGroundOf(g)));
         if (checked % 3 === 0) await new Promise((r) => window.setTimeout(r, 0));
       }
-      if (prefs.ground && DEFAULT_GROUND.pw >= 4) {
+      if (consItems.length && DEFAULT_GROUND.pw >= 4) {
         // mức 4: loại ước lượng Patchwork++ lệch so với mặt đường các frame kề của cùng object
         const checked2 = enforceConsistency(consItems);
         consItems.forEach((it, i) => grounds.set(it.f, checked2[i]!));
       }
-      if (live) { setSeries(prefs.ground ? grounds : new Map()); setFitSeries({ fits, checked }); }
+      if (live) { setSeries(grounds); setFitSeries({ fits, checked }); }
     }, 300);
     return () => { live = false; window.clearTimeout(timer); };
-  }, [track, prefs.ground, warn, cloudTick, start, stop, thrVer]);
+  }, [track, anyMeasured, frameSel, defSel, warn, cloudTick, start, stop, thrVer]);
   // Tất cả lỗi đang có của object (cả track): lệch / ít điểm, đáy lơ lửng / chìm, chồng lấn; bỏ các frame đã bỏ qua.
   const allWarn = useMemo(() => {
     const misfit: number[] = [], sparse: number[] = [], ground: number[] = [], overl: number[] = [];
@@ -1142,7 +1220,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
       if (r.level === 'misfit') { if (prefs.suggest && !ign.has(ignoreKey(job.id, num, f))) misfit.push(f); }
       else if (r.level === 'sparse') sparse.push(f);
     }
-    if (prefs.ground) for (const [f, g] of series) if (g?.warn) ground.push(f);
+    for (const [f, g] of series) if (g?.warn) ground.push(f);
     for (const f of ovAt.keys()) overl.push(f);
     const asc = (a: number, b: number) => a - b;
     return { misfit: misfit.sort(asc), sparse: sparse.sort(asc), ground: ground.sort(asc), overl: overl.sort(asc) };
@@ -1213,7 +1291,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
       onIgnore={(f, on) => ignoreFrames([f], on)}
       motion={c.mot} motionIgnored={ign.has(motionKey(job.id, num, c.f))}
       onIgnoreMotion={ignoreMotion}
-      autoSnap={autoSnap && prefs.ground} pwShow={prefs.pwShow} groundOv={series.get(c.f) ?? null} groundOn={prefs.ground} egoOn={prefs.egoPlane} suggestOn={prefs.suggest} onGround={(f) => { if (!groundFrame(f)) setNote(`Không snap được frame ${f}: ${snapWhy.current || 'không rõ lý do'}.`); }}
+      sel={selOf(c.f)} onSel={setFrameSel} autoSnap={autoSnap} pwShow={selOf(c.f).includes('pw')} groundOv={series.get(c.f) ?? null} groundOn={selOf(c.f).includes('measured')} egoOn={selOf(c.f).includes('ego')} suggestOn={prefs.suggest} onGround={(f) => { if (!groundFrame(f)) setNote(`Không snap được frame ${f}: ${snapWhy.current || 'không rõ lý do'}.`); }}
       onSnap={(f, g) => setSnaps((m) => (m.get(f) === g ? m : new Map(m).set(f, g)))}
       onSuggest={(f, s) => setSugs((m) => (m.get(f) === s ? m : new Map(m).set(f, s)))} onAccept={accept}
       onFit={(f, r) => setFits((m) => (m.get(f) === r ? m : new Map(m).set(f, r)))} onSelect={() => onPickSelect(c.f)}
@@ -1250,7 +1328,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
           </span>
           <span title="Mặt phẳng nằm ngang dùng để lấy đối xứng. Mặt đường: đo dưới object ở frame này; không đo được thì z = 0 của ego. Tự chỉnh độ cao là chuyển sang Custom.">
             Mặt phản chiếu:{' '}
-            {(['bottom', 'road', 'custom'] as const).map((m) => (
+            {(['bottom', 'road', 'mirror', 'pw', 'custom'] as const).map((m) => (
               <label key={m} style={{ marginRight: 6 }}><input type="radio" checked={refS.mode === m} onChange={() => setRefMode(m)} /> {REF_MODE_TEXT[m]}</label>
             ))}
           </span>
@@ -1369,20 +1447,17 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
           <label title="sg size = gợi ý kích thước box: khi box lệch cụm điểm, đề xuất box mới (nét đứt xanh lơ, nút ✔ nhận) kèm cảnh báo ⚠ lệch. Tắt: không có gợi ý và không có cảnh báo lệch (⚠ ít điểm vẫn hiện)." style={{ fontWeight: 600 }}>
             <input type="checkbox" checked={prefs.suggest} onChange={(e) => updatePrefs({ ...prefs, suggest: e.target.checked })} /> sg size
           </label>
-          <label title="gr pw = hiện mặt đường do Patchwork++ gợi ý: vạch tím nét đứt ở view Bên / Trước của mọi frame, là mặt phẳng fit từ các điểm Patchwork++ gán là mặt đất quanh box (gộp ±G.pwPool frame lân cận, bỏ vùng quanh chân box) + G.pwLift. Không cần đặt G.pw: chỉ để xem; đáy box so với vạch tím cho biết Patchwork++ nghĩ box cao / thấp hơn mặt đường bao nhiêu. Frame thiếu điểm mặt đất quanh box thì không có vạch.">
-            <input type="checkbox" checked={prefs.pwShow} onChange={(e) => updatePrefs({ ...prefs, pwShow: e.target.checked })} /> gr pw
+          <GroundPick
+            sel={defSel} label="mặt đường"
+            onChange={(v) => updatePrefs({ ...prefs, ground: v.includes('measured'), egoPlane: v.includes('ego'), pwShow: v.includes('pw') })}
+            title="Mặt đường mặc định cho các frame chưa chọn riêng (mỗi frame có dropdown riêng ở đầu cột, đổi ở frame nào chỉ ảnh hưởng frame đó). Chọn đúng 1 (đo / z=0 / Patchwork++): Ground snap và gr lock dùng mặt đó; chọn nhiều: chỉ hiển thị, không snap / lock."
+          />
+          <label title="gr lock = tự bám mặt đất khi kéo: sau mỗi lần dời / đổi cỡ box bằng chuột, tự đặt lại độ cao cho đáy chạm mặt đường tại vị trí mới. Chỉ chạy ở frame chọn đúng 1 mặt đường (dùng mặt đó); chọn nhiều hoặc không chọn thì không lock.">
+            <input type="checkbox" checked={autoSnap} onChange={(e) => setAutoSnap(e.target.checked)} /> gr lock
           </label>
-          <label title="gr z=0 = hiện mặt đường ego (Oxy): mặt phẳng Oxy (z = 0, mặt đường dưới xe) vẽ bằng vạch vàng chấm ở view Bên / Trước của MỌI frame, theo z của box ở frame đó (box nghiêng thì vạch nghiêng theo). Để so box với mặt đường chung của cả cảnh; không ảnh hưởng cảnh báo hay dữ liệu.">
-            <input type="checkbox" checked={prefs.egoPlane} onChange={(e) => updatePrefs({ ...prefs, egoPlane: e.target.checked })} /> gr z=0
-          </label>
-          <label title={`sg gr = dò mặt đất: đo mặt đường riêng cho object ở đúng frame đang xét (lớp thấp nhất có mật độ ở 8 cung quanh box + lớp tiếp xúc dưới gầm), không dự đoán từ frame khác. Báo khi đáy cao hơn mặt đường quá ${cm(DEFAULT_GROUND.floatTol)} cm hoặc thấp hơn quá ${cm(DEFAULT_GROUND.sinkTol)} cm và vượt độ bất định của phép đo. Tắt: không còn chip ⏬, không có Ground snap và tự bám mặt đất.`} style={{ fontWeight: 600 }}>
-            <input type="checkbox" checked={prefs.ground} onChange={(e) => updatePrefs({ ...prefs, ground: e.target.checked })} /> sg gr
-          </label>
-          <label title="gr lock = tự bám mặt đất khi kéo: sau mỗi lần dời / đổi cỡ box bằng chuột, tự đặt lại độ cao cho đáy chạm mặt đường tại vị trí mới">
-            <input type="checkbox" checked={autoSnap} disabled={!prefs.ground} onChange={(e) => setAutoSnap(e.target.checked)} /> gr lock
-          </label>
+          {PwCompare && (
           <button onClick={() => setShowCmp((v) => !v)} aria-pressed={showCmp} style={showCmp ? { fontWeight: 700 } : undefined}
-            title="So sánh cách đo mặt đường cũ với Patchwork++ cho lỗi G (đáy lơ lửng / chìm): tỉ lệ báo theo tầm, ca mơ hồ, ca không đo được, và danh sách frame hai cách kết luận khác nhau.">⚖ So sánh Patchwork++</button>
+            title="So sánh cách đo mặt đường cũ với Patchwork++ cho lỗi G (đáy lơ lửng / chìm): tỉ lệ báo theo tầm, ca mơ hồ, ca không đo được, và danh sách frame hai cách kết luận khác nhau.">⚖ So sánh Patchwork++</button>)}
           </Group>
         ),
         '1': (
@@ -1508,7 +1583,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
           </Group>
         ),
       }} />
-      {showCmp && <PwCompare ann={ann} start={start} stop={stop} num={num} onJump={jumpTo} onClose={() => setShowCmp(false)} />}
+      {showCmp && PwCompare && <PwCompare ann={ann} start={start} stop={stop} num={num} onJump={jumpTo} onClose={() => setShowCmp(false)} />}
       <div style={{ marginBottom: 6, display: 'flex', flexWrap: 'wrap', gap: '4px 12px', alignItems: 'center' }}>
         {row && (
           <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>

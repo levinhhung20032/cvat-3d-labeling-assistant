@@ -28,8 +28,8 @@ describe('lưu kết quả tính của cả job (tab CVAT tải lại không ph�
 
   it('lưu rồi đọc lại đúng từng (frame, object)', () => {
     const res = new Map([[3, new Map([[1, { sig: P.sigOf(box), sparse: true, n: 4 }], [2, { sig: 'abc', sparse: false, n: 31 }]])]]);
-    P.savePass('cvla-pass:9999', res);
-    const back = P.loadPass('cvla-pass:9999');
+    P.savePass('cvla-pass:1001', res);
+    const back = P.loadPass('cvla-pass:1001');
     expect(back.get(3)?.get(1)).toEqual({ sig: P.sigOf(box), sparse: true, n: 4 });
     expect(back.get(3)?.get(2)).toEqual({ sig: 'abc', sparse: false, n: 31 });
   });

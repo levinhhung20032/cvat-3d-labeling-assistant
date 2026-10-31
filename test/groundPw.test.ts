@@ -163,7 +163,7 @@ describe('gộp điểm mặt đất từ frame lân cận', () => {
   const cub = { x: 15, y: 0, z: -0.25, yaw: 0 }; // frame 1: vật ở (15, 0) = (24, 0) của frame 0, tâm box ở z = −0,25
 
   it('đưa điểm mặt đất của frame trước về hệ box của frame này, bỏ điểm không phải mặt đất', () => {
-    const r = pooledGround(1, cub, 2, 10, ego, src)!;
+    const r = pooledGround(1, cub, 2, 10, ego, src, { pitch: false, nearSlack: 0 })!;
     expect(r).not.toBeNull();
     expect(r.n).toBeGreaterThan(100);
     expect(Math.min(...r.u)).toBeGreaterThanOrEqual(-10.01);
@@ -182,7 +182,7 @@ describe('gộp điểm mặt đất từ frame lân cận', () => {
   });
 
   it('mặt đường fit từ điểm gộp khi frame này không có điểm mặt đất nào quanh box', () => {
-    const pool = pooledGround(1, cub, 2, 10, ego, src)!;
+    const pool = pooledGround(1, cub, 2, 10, ego, src, { pitch: false, nearSlack: 0 })!;
     const r = groundSnap({ u: new Float32Array(0), v: new Float32Array(0), w: new Float32Array(0), n: 0, g: new Uint8Array(0), pool }, 4, 2, 1.5, { cu: 0, cv: 0, cw: 0, range: 15 }, { ...DEFAULT_GROUND, pw: 4, pwMinPts: 40 })!;
     expect(r.pw).toBe('pts');
     expect(r.groundW).toBeCloseTo(-0.75 + DEFAULT_GROUND.pwLift, 3);

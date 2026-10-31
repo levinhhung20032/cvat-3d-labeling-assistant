@@ -32,7 +32,7 @@ export function trackDims(track: CvatTrack): Dim | null {
   return { L: pct(cubs.map((c) => c.sx), 0.5), W: pct(cubs.map((c) => c.sy), 0.5), H: pct(cubs.map((c) => c.sz), 0.8) };
 }
 
-// ---------- quy tắc theo kích thước (đã đối chiếu với job 9999: xe phần lớn 3,9–5,1 × 1,8–2,1 × 1,5–1,9 m là "car") ----------
+// ---------- quy tắc theo kích thước (đã đối chiếu với một job thật: xe phần lớn 3,9–5,1 × 1,8–2,1 × 1,5–1,9 m là "car") ----------
 export function vehicleType(d: Dim): Pick {
   const why = dimText(d);
   if (d.L < 1.4 && d.W < 0.9 && d.H < 1.4) return { v: 'stroller', c: 'thấp', why: `${why}: rất nhỏ (xe nôi / xe lăn)` };

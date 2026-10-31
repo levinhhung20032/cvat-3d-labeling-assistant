@@ -6,7 +6,7 @@ import { stateAt } from '../src/shared/interp';
 import type { CvatAnnotations, CvatLabel, CvatShape, CvatTrack } from '../src/shared/types';
 import { shape, track } from './fixtures';
 
-// Đặc tả nhãn đúng như job 9999 (đã đọc từ CVAT)
+// Đặc tả nhãn đúng như một job thật (đã đọc từ CVAT)
 const LABELS: CvatLabel[] = [
   { id: 12871, name: 'vehicles', attributes: [{ id: 1816, name: 'type', input_type: 'radio', mutable: false, default_value: 'car', values: ['car', 'truck', 'bus', 'van', 'contruction', 'pickup', 'Trailer', 'Tricycle', 'Stroller', 'Wheelchair', 'other'] }] },
   { id: 12872, name: 'pedestrian', attributes: [
@@ -168,9 +168,9 @@ describe('suggestAttributes', () => {
   });
 });
 
-const file = 'backups/backup_job1208_annotations_v0_20261023.json';
-describe.skipIf(!existsSync(file))('gợi ý trên job thật 9999', () => {
-  const ann = JSON.parse(readFileSync(file, 'utf8')) as CvatAnnotations;
+const file = 'backups/backup_sample.json';
+describe.skipIf(!existsSync(file))('gợi ý trên job thật 1001', () => {
+  const ann = (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : { tracks: [] }) as CvatAnnotations;
   const all = ann.tracks.flatMap((t, i) => {
     const first = t.shapes.find((s) => !s.outside);
     if (!first) return [];

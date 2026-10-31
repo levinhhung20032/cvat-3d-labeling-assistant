@@ -98,7 +98,7 @@ describe('ánh xạ camera', () => {
     // xuất rồi nạp lại vẫn đủ
     expect(s.over.image_1).toEqual({ yaw: 0, lens: 'wide', halfFov: 50 });
   });
-  it('bộ 6 camera: thứ tự image_N suy từ ảnh job 9999 (độ tin cậy vừa)', () => {
+  it('bộ 6 camera: thứ tự image_N suy từ ảnh một job thật (độ tin cậy vừa)', () => {
     const d = (n: number) => suggestDir(`image_${n}.jpg`, 6);
     expect([0, 1, 2, 3, 4, 5].map(d)).toEqual(['back', 'back-left', 'back-right', 'front', 'front-left', 'front-right']);
   });

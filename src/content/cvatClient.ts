@@ -23,7 +23,7 @@ export interface ClientOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
-/** Thử lại khi tải chunk mà máy chủ báo bận / đang dựng chunk (lần đầu mở job mới, cvat-b trả 503 rồi mới trả 200). */
+/** Thử lại khi tải chunk mà máy chủ báo bận / đang dựng chunk (lần đầu mở job mới, máy chủ trả 503 rồi mới trả 200). */
 export const CHUNK_RETRY_DELAYS = [5000, 10000, 20000, 30000];
 const BUSY_STATUS = [429, 502, 503, 504];
 
@@ -95,7 +95,7 @@ export class CvatClient {
 
   /**
    * Frame n đã nằm trong bộ nhớ đệm HTTP của trình duyệt chưa (không gửi request ra mạng). Trả về 1 byte: 1 = có, 0 = không.
-   * Đo trên cvat-a job 9999 (2026-10-29): frame trong bộ nhớ đệm về sau 22 ms, tải mới ~2 s/frame; chunk 158 MB luôn tải lại (không vào bộ nhớ đệm).
+   * Đo trên một job thật (2026-10-29): frame trong bộ nhớ đệm về sau 22 ms, tải mới ~2 s/frame; chunk 158 MB luôn tải lại (không vào bộ nhớ đệm).
    */
   async probeFrameCache(jobId: number, n: number): Promise<ArrayBuffer> {
     const url = new URL(`/api/jobs/${jobId}/data?type=frame&number=${n}&quality=original`, this.origin);

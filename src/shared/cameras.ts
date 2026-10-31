@@ -60,7 +60,7 @@ export const UNMAPPED = '';
 /** Gán mặc định theo số thứ tự file (image_0 … image_N-1) trong từng bộ. */
 const DEFAULT_ORDER: Record<CamCount, string[]> = {
   8: DIRS_8.map((d) => d.id),
-  // Suy từ ảnh job 9999 (cvat-a, 2026-10-29), độ tin cậy vừa: camera trái thấy thân xe ở mép trái ảnh, camera phải ở mép phải (quy luật
+  // Suy từ ảnh một job thật (2026-10-29), độ tin cậy vừa: camera trái thấy thân xe ở mép trái ảnh, camera phải ở mép phải (quy luật
   // rút ra từ bảng 8 camera của PLAN.md); trước / sau suy từ giao thông đi bên phải (dải phân cách bên trái xe). Sai thì gán lại ở tab Camera.
   6: ['back', 'back-left', 'back-right', 'front', 'front-left', 'front-right'],
 };

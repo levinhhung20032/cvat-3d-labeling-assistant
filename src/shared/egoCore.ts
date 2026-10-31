@@ -1,6 +1,6 @@
 /**
  * Chuyển động của xe (ego) giữa hai frame liền nhau, ước lượng từ chính các box đã gán (không cần dữ liệu GPS / IMU; xem ego.ts).
- * Toạ độ nhãn theo ego, nên vật đứng yên "chạy" ngược lại khi xe chạy VÀ xoay khi xe đổi hướng: job 9999 xe đi ~9 m/frame, mỗi frame
+ * Toạ độ nhãn theo ego, nên vật đứng yên "chạy" ngược lại khi xe chạy VÀ xoay khi xe đổi hướng: một job thật xe đi ~9 m/frame, mỗi frame
  * xoay tới ±3°. Mỗi bước là phép biến đổi cứng 2D: điểm ở frame f−1 → toạ độ ở frame f, p' = R(θ)·p + t.
  * Tệp này không import gì để cả nội suy (interp.ts) lẫn cảnh báo (motion.ts) dùng chung mà không vòng import.
  */

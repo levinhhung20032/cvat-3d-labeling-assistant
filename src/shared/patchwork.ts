@@ -45,7 +45,7 @@ export interface PatchworkConfig {
   /**
    * Tiền nghiệm từ hiệu chỉnh của dự án: gốc toạ độ nằm trên mặt đường dưới lidar, nên mặt đường ở cách gốc r mét chỉ có thể nằm trong
    * |z| ≤ priorMargin + priorSlope · r (độ dốc tối đa ≈ priorSlope, mặc định 8%). Điểm ngoài khoảng đó (lớp phản chiếu sâu dưới đường, thân xe / nhà ở
-   * trên) không được dùng để dựng ô mặt đất. Job 9999: không có tiền nghiệm này thì lớp phản chiếu dày ở sâu 3,6 m bị nhận là mặt đất.
+   * trên) không được dùng để dựng ô mặt đất. một job thật: không có tiền nghiệm này thì lớp phản chiếu dày ở sâu 3,6 m bị nhận là mặt đất.
    */
   prior: boolean; priorMargin: number; priorSlope: number;
 }

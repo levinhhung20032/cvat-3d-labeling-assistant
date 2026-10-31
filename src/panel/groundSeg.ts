@@ -69,21 +69,75 @@ const defaultFrame = (g: number): PoolFrame | null => {
   return pc && seg ? { pc, seg } : null;
 };
 
+/**
+ * Mặt đường gần xe của một frame (z = a·x + b·y + c, điểm mặt đất ở 3–15 m quanh gốc, loại dần điểm lệch > 10 cm): cho biết xe đang chúi /
+ * ngửa / lắc bao nhiêu so với mặt đường ở frame đó. Khi chuyển điểm giữa hai frame, giữ "độ cao so với mặt đường gần xe" thay vì giữ z
+ * (z của cùng một điểm đổi theo góc nghiêng của xe: 1° ở 20 m ≈ 35 cm). null nếu không đủ điểm.
+ */
+const nearPlanes = new WeakMap<PwResult, { a: number; b: number; c: number } | null>();
+export function nearPlaneOf(pc: PointCloud, seg: PwResult): { a: number; b: number; c: number } | null {
+  if (nearPlanes.has(seg)) return nearPlanes.get(seg)!;
+  let idx: number[] = [];
+  for (let i = 0; i < pc.count; i += 3) {
+    if (seg.label[i] !== PW_GROUND) continue;
+    const r2 = pc.xyz[i * 3]! ** 2 + pc.xyz[i * 3 + 1]! ** 2;
+    if (r2 >= 9 && r2 <= 225) idx.push(i);
+  }
+  const fit = (ids: number[]) => {
+    let sxx = 0, sxy = 0, syy = 0, sx = 0, sy = 0, n = 0, sxz = 0, syz = 0, sz = 0;
+    for (const i of ids) {
+      const x = pc.xyz[i * 3]!, y = pc.xyz[i * 3 + 1]!, z = pc.xyz[i * 3 + 2]!;
+      sxx += x * x; sxy += x * y; syy += y * y; sx += x; sy += y; n++; sxz += x * z; syz += y * z; sz += z;
+    }
+    const A = [sxx, sxy, sx, sxy, syy, sy, sx, sy, n];
+    const det3 = (m: number[]) => m[0]! * (m[4]! * m[8]! - m[5]! * m[7]!) - m[1]! * (m[3]! * m[8]! - m[5]! * m[6]!) + m[2]! * (m[3]! * m[7]! - m[4]! * m[6]!);
+    const d = det3(A);
+    if (n < 50 || !Number.isFinite(d) || Math.abs(d) < 1e-6) return null;
+    const r = [sxz, syz, sz];
+    const col = (k: number) => A.map((v, j) => (j % 3 === k ? r[(j / 3) | 0]! : v));
+    return { a: det3(col(0)) / d, b: det3(col(1)) / d, c: det3(col(2)) / d };
+  };
+  let pl = fit(idx);
+  for (let it = 0; it < 2 && pl; it++) {
+    const q = pl;
+    idx = idx.filter((i) => Math.abs(pc.xyz[i * 3 + 2]! - (q.a * pc.xyz[i * 3]! + q.b * pc.xyz[i * 3 + 1]! + q.c)) <= 0.1);
+    pl = fit(idx);
+  }
+  if (pl && Math.hypot(pl.a, pl.b) > 0.15) pl = null; // nghiêng > ~8,5°: không tin
+  nearPlanes.set(seg, pl);
+  return pl;
+}
+
+/** Điểm mặt đất gộp + `ownOk`: điểm của chính frame này có nên dùng không (false khi đã có quan sát gần hơn hẳn ở frame khác). */
+export interface Pooled { u: Float32Array; v: Float32Array; w: Float32Array; n: number; ownOk: boolean }
+
 export function pooledGround(
   f: number, c: Pick<Cuboid, 'x' | 'y' | 'z' | 'yaw'>, K: number, radius: number,
   ego: EgoMotion | null = getEgo(), frameOf: (g: number) => PoolFrame | null = defaultFrame,
-): { u: Float32Array; v: Float32Array; w: Float32Array; n: number } | null {
+  opt: { pitch: boolean; nearSlack: number } = { pitch: DEFAULT_GROUND.pwPitch, nearSlack: DEFAULT_GROUND.pwNearSlack },
+): Pooled | null {
   if (!ego || K <= 0) return null;
   const cs = Math.cos(c.yaw), sn = Math.sin(c.yaw);
   const us: number[] = [], vs: number[] = [], ws: number[] = [];
   const r2 = radius * radius;
+  // Ưu tiên quan sát gần: tầm của object ở từng frame; chỉ lấy các frame có tầm ≤ max(tầm gần nhất + nearSlack, 12 m).
+  const rf = Math.hypot(c.x, c.y);
+  const cand: { g: number; fr: PoolFrame; o: { x: number; y: number }; r: number }[] = [];
   for (let g = f - K; g <= f + K; g++) {
     if (g === f) continue;
     const fr = frameOf(g);
-    if (!fr) continue;
-    const o = transform(ego, c.x, c.y, 0, f, g); // vị trí object trong hệ của frame g
+    const o = fr ? transform(ego, c.x, c.y, 0, f, g) : null; // vị trí object trong hệ của frame g
+    if (fr && o) cand.push({ g, fr, o, r: Math.hypot(o.x, o.y) });
+  }
+  const rMin = Math.min(rf, ...cand.map((x) => x.r));
+  const keepR = opt.nearSlack > 0 ? Math.max(rMin + opt.nearSlack, 12) : Infinity;
+  const fFrame = opt.pitch ? frameOf(f) : null;
+  const pf = fFrame ? nearPlaneOf(fFrame.pc, fFrame.seg) : null;
+  for (const { g, fr, o, r } of cand) {
+    if (r > keepR) continue;
     const t0 = transform(ego, 0, 0, 0, g, f), t1 = transform(ego, 1, 0, 0, g, f); // g → f: p_f = R·p_g + t
-    if (!o || !t0 || !t1) continue;
+    if (!t0 || !t1) continue;
+    const pg = opt.pitch ? nearPlaneOf(fr.pc, fr.seg) : null;
     const rc = t1.x - t0.x, rs = t1.y - t0.y;
     const grid = gridOf(fr.pc, fr.seg);
     const xyz = fr.pc.xyz;
@@ -94,13 +148,18 @@ export function pooledGround(
         for (const i of cell) {
           const x = xyz[i * 3]!, y = xyz[i * 3 + 1]!;
           if ((x - o.x) ** 2 + (y - o.y) ** 2 > r2) continue;
-          const dx = rc * x - rs * y + t0.x - c.x, dy = rs * x + rc * y + t0.y - c.y;
-          us.push(dx * cs + dy * sn); vs.push(-dx * sn + dy * cs); ws.push(xyz[i * 3 + 2]! - c.z);
+          const xf = rc * x - rs * y + t0.x, yf = rs * x + rc * y + t0.y;
+          let z = xyz[i * 3 + 2]!;
+          // bù nghiêng: độ cao so với mặt đường gần xe ở frame g → cùng độ cao so với mặt đường gần xe ở frame f
+          if (pg && pf) z = z - (pg.a * x + pg.b * y + pg.c) + (pf.a * xf + pf.b * yf + pf.c);
+          const dx = xf - c.x, dy = yf - c.y;
+          us.push(dx * cs + dy * sn); vs.push(-dx * sn + dy * cs); ws.push(z - c.z);
         }
       }
     }
   }
-  return us.length ? { u: Float32Array.from(us), v: Float32Array.from(vs), w: Float32Array.from(ws), n: us.length } : null;
+  const ownOk = rf <= keepR;
+  return us.length ? { u: Float32Array.from(us), v: Float32Array.from(vs), w: Float32Array.from(ws), n: us.length, ownOk } : null;
 }
 
 /** Mặt đường quanh object trong hệ của box (w = a·u + b·v + c, gốc ở tâm box, u theo yaw); null nếu không có ô mặt đất nào đủ gần. */

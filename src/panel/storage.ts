@@ -15,7 +15,7 @@ import { patternOrigin } from '../shared/hosts';
  * `ui@<origin>|<khóa>`. Tùy chọn cá nhân (giao diện, phím tắt, ca làm việc / KPI…) dùng chung mọi máy chủ.
  */
 const PREFIX = 'ui:';
-const PER_HOST = [/^cvla-(draft|made|dyn|bak|dynclass|dynattr|pass|throbj|seen):/, /^cvla-(qc|ignore|qcimp|qcmarks|passidx|resume|camsetup)$/];
+const PER_HOST = [/^cvla-(draft|made|dyn|bak|dynclass|dynattr|pass|throbj|seen|gsrc):/, /^cvla-(qc|ignore|qcimp|qcmarks|passidx|resume|camsetup)$/];
 const isPerHost = (key: string) => PER_HOST.some((r) => r.test(key));
 let scope = ''; // '' = máy chủ mặc định
 let mem: Map<string, string> | null = null;
@@ -25,7 +25,10 @@ const readyCbs: (() => void)[] = [];
  * Máy chủ sở hữu dữ liệu lưu theo khóa CŨ (`ui:<khóa>`, trước khi dữ liệu được tách theo máy chủ). Chỉ là nhãn để dữ liệu sẵn có không bị
  * mất; KHÔNG phải quyền host (manifest không còn host mặc định 2026-10-29, mọi máy chủ đều do người dùng tự thêm ở trang Cài đặt).
  */
-export const LEGACY_DATA_ORIGIN = 'https://cvat-a.example.com';
+// Chỉ có trên máy đã dùng bản cũ: đặt trong src/panel/legacyOrigin.local.ts (không đưa lên git) `export const LEGACY_DATA_ORIGIN = '<origin>';`.
+// Không có file thì null: cài mới chưa từng có khóa cũ, mọi dữ liệu theo job đi theo máy chủ người dùng thêm.
+const legacyMods = import.meta.glob('./legacyOrigin.local.ts', { eager: true }) as Record<string, { LEGACY_DATA_ORIGIN?: string }>;
+export const LEGACY_DATA_ORIGIN: string | null = Object.values(legacyMods)[0]?.LEGACY_DATA_ORIGIN ?? null;
 /** Origin dùng khóa cũ: host đầu tiên trong host_permissions của manifest nếu có, không thì máy chủ sở hữu dữ liệu cũ. */
 export function defaultOrigin(): string | null {
   try { return patternOrigin(api.runtime.getManifest().host_permissions?.[0] ?? '') ?? LEGACY_DATA_ORIGIN; } catch { return LEGACY_DATA_ORIGIN; }

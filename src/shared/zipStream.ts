@@ -2,7 +2,7 @@ import { inflateSync } from 'fflate';
 
 /**
  * Đọc file zip THEO LUỒNG: mỗi khi một mục (file) trong zip đã đủ dữ liệu thì gọi `onEntry`, không cần giữ cả file zip trong bộ nhớ.
- * Dùng cho chunk point cloud của CVAT (`/api/jobs/<id>/data?type=chunk`): đã xác minh trên cvat-b 2026-10-28 là zip không nén
+ * Dùng cho chunk point cloud của CVAT (`/api/jobs/<id>/data?type=chunk`): đã xác minh trên một máy chủ 2026-10-28 là zip không nén
  * (method 0), cờ 0 (kích thước ghi sẵn trong header từng mục), tên file 000000.pcd, 000001.pcd… theo thứ tự frame.
  * Không hỗ trợ mục ghi kích thước ở cuối (data descriptor, cờ bit 3) hay ZIP64 → báo lỗi để bên gọi quay về tải từng frame.
  */

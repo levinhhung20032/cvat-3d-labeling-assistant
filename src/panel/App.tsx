@@ -688,11 +688,14 @@ export function App() {
   const rootRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => { if (tab === 'review' || tab === 'ref') rootRef.current?.scrollIntoView({ block: 'start' }); }, [tab]);
   // Tab Ref chỉ có khi object đang chọn bật ref mode; tắt (hoặc đổi sang object không bật) thì về Batch Review.
-  const refS = useRefState(data?.job.id ?? 0, selectedNum);
+  // Chưa chọn object nào (vừa tải lại trang): Batch Review đang xem object #1, tab Ref cũng theo object đó.
+  const refNum = selectedNum ?? (data?.ann.tracks.length ? 1 : null);
+  const refS = useRefState(data?.job.id ?? 0, refNum);
   const [refFrame, setRefFrame] = useState(0);
   useEffect(() => { if (tab === 'ref' && !refS.on) setTab('review'); }, [tab, refS.on]);
   const openRef = (f?: number) => {
     setRefFrame(f ?? selFrameRef.current ?? startFrame);
+    if (selectedNum === null && refNum !== null) setSelectedNum(refNum);
     if (readyRef.current) setTab('ref');
   };
   // Mở Batch Review từ bảng object: cửa sổ bắt đầu ở frame này (frame 0) và bỏ lần nhảy theo frame CVAT lúc vừa mở. Hết lượt mở thì xoá.
@@ -792,7 +795,7 @@ export function App() {
       <div style={{ margin: '6px 0 0', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4 }}>
         {tabBtn('objects', 'Bảng object')}
         {tabBtn('review', 'Batch Review')}
-        {refS.on && selectedNum !== null && tabBtn('ref', `Ref #${selectedNum}`)}
+        {refS.on && refNum !== null && tabBtn('ref', `Ref #${refNum}`)}
         {tabBtn('shift', 'Ca / KPI')}
         {tabBtn('qc', 'QC')}
         {tabBtn('dyn', 'Dynamic size')}

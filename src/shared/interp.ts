@@ -46,7 +46,7 @@ export function stateAt(track: CvatTrack, f: number): FrameState {
   const b = parseCuboid(next.points);
   const t = (f - s.frame) / (next.frame - s.frame);
   // Có chuyển động của xe (ego): nội suy theo MẶT ĐẤT rồi đưa về toạ độ frame f, thay vì tuyến tính trong hệ ego (xe đổi tốc độ / xoay thì
-  // vật đứng yên không đi đường thẳng trong hệ ego). Job 9999, bỏ một frame rồi dự đoán lại: sai số trung vị 0,27 / 1,02 / 1,87 m (tuyến tính,
+  // vật đứng yên không đi đường thẳng trong hệ ego). một job thật, bỏ một frame rồi dự đoán lại: sai số trung vị 0,27 / 1,02 / 1,87 m (tuyến tính,
   // cách 1 / 2 / 3 frame) giảm còn 0,10 / 0,14 / 0,14 m. Thiếu bước ego nào giữa hai keyframe thì nội suy tuyến tính như cũ.
   const ego = getEgo();
   if (ego) {

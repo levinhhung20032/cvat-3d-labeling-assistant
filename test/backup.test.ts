@@ -5,7 +5,7 @@ import { planUpload } from '../src/shared/plan';
 import type { CvatAnnotations } from '../src/shared/types';
 
 // Chỉ chạy khi có bản backup cục bộ (backups/ không vào git).
-const file = 'backups/backup_job1208_annotations_v0_20261023.json';
+const file = 'backups/backup_sample.json';
 
 describe.skipIf(!existsSync(file))('trên backup job thật', () => {
   const ann = () => JSON.parse(readFileSync(file, 'utf8')) as CvatAnnotations;

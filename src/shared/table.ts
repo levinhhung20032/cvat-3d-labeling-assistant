@@ -5,7 +5,7 @@ import { trackIssues } from './qcrules';
 import type { CvatAnnotations, CvatLabel } from './types';
 
 export interface ObjectRow {
-  num: number; // ID hiển thị như giao diện CVAT: thứ tự trong mảng tracks + 1 (đã xác minh trên job 9999)
+  num: number; // ID hiển thị như giao diện CVAT: thứ tự trong mảng tracks + 1 (đã xác minh trên một job thật)
   id: number;
   labelId: number;
   label: string;

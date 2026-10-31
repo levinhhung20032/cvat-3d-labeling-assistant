@@ -332,7 +332,7 @@ Giai đoạn 0 là cổng quan trọng nhất: nếu đọc/ghi khứ hồi chư
 
 **Giai đoạn 0 trên dữ liệu thật**
 
-Môi trường cvat-a được coi là dữ liệu thật, nên giai đoạn 0 chỉ ghi ở mức tối thiểu và trả lại được:
+Môi trường máy chủ thử được coi là dữ liệu thật, nên giai đoạn 0 chỉ ghi ở mức tối thiểu và trả lại được:
 
 - **Dry-run mặc định:** tool dựng payload và hiện ra để kiểm tra, không gửi cho tới khi người dùng bật ghi thật.
 - **Chỉ test bằng update, không create:** trên một job được giao cho bạn, chụp giá trị gốc của một keyframe, sửa một giá trị nhỏ, đọc lại, rồi ghi trả giá trị gốc và đọc lại để so khớp. Không tạo track thử, vì luật cấm xóa ID nghĩa là track thử sẽ nằm lại vĩnh viễn.
@@ -369,7 +369,7 @@ Extension được cài bằng Developer mode và Load unpacked, không qua cử
 - [x] Outside từ 6 frame trở lên thì tách ID; box tối thiểu 6 điểm.
 - [ ] Lấy được file thông số calibration (intrinsic, extrinsic) của 8 camera không? Có thì chiếu được cuboid lên ảnh.
 - [ ] Ngưỡng đã chốt: tầm xa 30 m, lệch yaw so với quỹ đạo 5°, chồng box 30% (phần giao trên hình chiếu từ trên so với box nhỏ hơn), không cộng biên khi đề xuất size.
-- [ ] Môi trường: coi cvat-a là dữ liệu thật (đã chốt). Không có job sandbox (đã chốt).
+- [ ] Môi trường: coi máy chủ thử là dữ liệu thật (đã chốt). Không có job sandbox (đã chốt).
 - [ ] Cài lên Edge: Developer mode + Load unpacked (đã chốt).
 - [ ] Quy định của dự án gán nhãn có cho phép công cụ hỗ trợ trên trình duyệt không?
 

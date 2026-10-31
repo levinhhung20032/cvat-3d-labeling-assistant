@@ -412,7 +412,7 @@ export class CloudLoader {
   }
 }
 
-// Tải từng frame (chỉ khi chunk không dùng được): đo trên cvat-b 2026-10-29, máy chủ làm gần như tuần tự (1 kết nối 5,0 s/frame, 2 kết nối 4,0 s/frame,
+// Tải từng frame (chỉ khi chunk không dùng được): đo trên một máy chủ 2026-10-29, máy chủ làm gần như tuần tự (1 kết nối 5,0 s/frame, 2 kết nối 4,0 s/frame,
 // 3 kết nối thì mỗi request chờ 15–25 s; 6 kết nối làm 503) nên tối đa 2 kết nối.
 export const pointClouds = new CloudLoader(64, 2, 1, 2);
 

@@ -42,7 +42,7 @@ describe('KPI ca', () => {
   it('object đã tác động, frame outside mới / đưa trở lại, keyframe', () => {
     const s = base();
     s.uploads.push({
-      time: '2026-10-21T02:00:00.000Z', jobId: 9999,
+      time: '2026-10-21T02:00:00.000Z', jobId: 1001,
       tracks: [
         rec(5, { added: 2, baked: 10, outsideBefore: [3, 4], outsideAfter: [3, 4, 5, 6, 7] }),
         rec(9, { modified: 3, label: 'pedestrian', outsideBefore: [8], outsideAfter: [] }),
@@ -72,10 +72,10 @@ describe('KPI ca', () => {
   }
     {
     const s = base();
-    s.touched = ['9999:5', '9999:7'];
-    s.uploads.push({ time: 't', jobId: 9999, tracks: [rec(5)] });
+    s.touched = ['1001:5', '1001:7'];
+    s.uploads.push({ time: 't', jobId: 1001, tracks: [rec(5)] });
     const k = computeKpi(s);
-    expect(k.pending).toEqual(['9999:7']);
+    expect(k.pending).toEqual(['1001:7']);
     expect(kpiText(k)).toContain('CHƯA upload: 7');
   }
   });

@@ -3,7 +3,7 @@ import { strToU8, Zip, ZipPassThrough, zipSync } from 'fflate';
 import { entryBuffer, ZipStreamReader, type ZipEntry } from '../src/shared/zipStream';
 import { CvatClient } from '../src/content/cvatClient';
 
-/** Zip giống chunk point cloud của CVAT (đã xem trên cvat-b): không nén, tên 000000.pcd, 000001.pcd… */
+/** Zip giống chunk point cloud của CVAT (đã xem trên một máy chủ): không nén, tên 000000.pcd, 000001.pcd… */
 const frames = (n: number) => Array.from({ length: n }, (_, i) => {
   const u = new Uint8Array(1000 + i * 37);
   for (let j = 0; j < u.length; j++) u[j] = (i * 31 + j) & 255;
