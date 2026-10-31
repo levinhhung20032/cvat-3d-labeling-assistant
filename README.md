@@ -16,19 +16,39 @@ Extension cho trình duyệt **Edge / Chrome** (và bản thử cho Firefox) gi�
 
 | Nhóm | Mô tả ngắn |
 | --- | --- |
-| **Bảng object** | Danh sách object của job kèm số frame, cảnh báo, khoảng cách tới xe; lọc và sắp xếp. |
+| **Bảng object** | Danh sách object của job kèm số frame, cảnh báo, khoảng cách tới xe, attribute (dấu **!** cạnh attribute = object có gợi ý đổi attribute); lọc và sắp xếp; dòng tên cột luôn hiện khi cuộn xuống. |
 | **Batch Review** | Xem một object qua nhiều frame cùng lúc, 3 hình chiếu (Trên / Bên / Trước). Kéo thả để dời, đổi kích thước, xoay box; zoom bằng con lăn, giữ chuột phải kéo để dời khung nhìn. |
 | **Keyframe & outside** | Khoá / mở khoá keyframe, đánh dấu outside (box được lưu lại để trả về đúng chỗ cũ). |
 | **Cảnh báo & gợi ý** | Box lệch khỏi cụm điểm (có box gợi ý, bấm A để nhận), trôi box, đi xa bất thường, chồng lấn, đáy box lơ lửng / chìm so với mặt đường, ít điểm, outside quá lâu (có nút tách ID). |
+| **Mặt đường** | Mỗi frame chọn đúng 1 nguồn mặt đường cho Ground snap / lock: **local** (đo riêng quanh object), **ego** (z = 0) hoặc **patchwork++**; công tắc *hiện cả 3* để so sánh; hệ thống gợi ý nguồn (xem [mục dưới](#mặt-đường-local--ego--patchwork)). |
 | **Threshold** | Bạn tự đặt các rule cảnh báo; xuất / nạp toàn bộ cài đặt ra file `setting.json`. |
 | **Dynamic size** | Chọn class nào được đổi kích thước theo từng frame, class nào dùng một kích thước cho cả object. |
 | **QC** | Ghi chú QC theo (ID, frame) và xuất Excel; **đối chiếu file báo cáo QC** (xem [mục dưới](#đối-chiếu-file-qc-qc-comparison)). |
 | **Thuộc tính** | Xem và sửa attribute, có gợi ý theo kích thước box. |
 | **Upload** | Màn hình xem lại → ghi lên CVAT → đọc lại để so khớp; có nhật ký hoàn nguyên. |
 | **Ca làm việc / KPI** | Tự chia ca sáng / chiều / OT theo giờ, thống kê số object và frame đã sửa. |
-| **Giao diện** | Cửa sổ nổi kéo được, giao diện sáng / tối / xám, phím tắt tuỳ chỉnh. |
+| **Giao diện & màu sắc** | Cửa sổ nổi kéo được, giao diện sáng / tối / xám, phím tắt tuỳ chỉnh; tab **Màu sắc** chỉnh màu point, nền view, vạch mặt đường, viền frame (có khung xem trước, bấm Lưu mới đổi). |
 
 Tool tải sẵn point cloud của cả job ngầm ở nền (có thanh tiến độ); nút **↻ Tải lại frame** dùng khi có frame bị lỗi. Bản nháp được lưu trong trình duyệt nên F5 không mất.
+
+## Mặt đường: local / ego / patchwork++
+
+Ground snap (phím `G`), tự bám mặt đất khi kéo (`gr lock`) và lỗi đáy lơ lửng / chìm đều cần một **mặt đường**. Tool có ba nguồn, chọn **đúng một** cho mỗi frame ở ô chọn đầu cột frame (ô chung ở nhóm *Gợi ý & mặt đất* là mặc định cho frame chưa chọn riêng):
+
+| Nguồn | Cách dựng |
+| --- | --- |
+| **local** | Đo riêng cho object ở đúng frame đó: lớp thấp nhất có mật độ ở 8 cung quanh box, kèm bằng chứng dưới gầm; không dự đoán từ frame khác. Mặc định. |
+| **ego** | Mặt phẳng z = 0 của hệ ego (mặt đường dưới xe). Luôn có, chỉ là mốc chung của cả cảnh. |
+| **patchwork++** | Mặt phẳng fit từ các điểm Patchwork++ gán là mặt đất quanh box (thử nghiệm, dành cho ca xa / thưa / bị che). |
+
+- Đổi nguồn ở một frame **không ảnh hưởng frame khác**; lựa chọn được nhớ theo object và frame.
+- **hiện cả 3**: vẽ cả ba vạch (local xanh lá, ego vàng chấm, patchwork++ tím nét đứt) để so sánh; Ground snap / lock vẫn dùng đúng nguồn đã chọn.
+- **sg road** (gợi ý mặt đường): mỗi frame đo cả ba nguồn rồi gợi ý một nguồn (local nếu đủ tin → patchwork++ → ego) bằng chip 💡 ở đầu cột; chip ⚠ khi local và patchwork++ cùng đủ tin nhưng lệch nhau nhiều (nên xem bằng mắt, ví dụ đường ướt có lớp phản chiếu). Nút **💡 Áp gợi ý** chọn nguồn gợi ý cho các frame đang hiện, không dời box nào. Bật gợi ý sẽ chạy Patchwork++ cho các frame đang hiện.
+- Patchwork++ là phần **thử nghiệm**: chưa dùng trong cảnh báo lỗi G mặc định, và chưa đánh giá trên đường khô. Mã Patchwork++ đóng gói kèm theo giấy phép BSD-2 (xem `THIRD_PARTY_NOTICES.txt`).
+
+## Màu sắc
+
+Tab **Màu sắc** chỉnh: màu point (cố định hoặc theo độ cao), nền các view, màu vạch local / ego / patchwork++, và màu viền frame / box theo trạng thái (keyframe, nội suy, giữ nguyên, outside, chưa có box). Khung **Xem trước** vẽ một cảnh mẫu bằng đúng hàm vẽ của Batch Review. Các thay đổi chỉ là bản nháp cho tới khi bấm **💾 Lưu**; có **Hủy thay đổi** và **↺ Mặc định**. Màu lưu cục bộ trong extension, không có trong `setting.json`.
 
 ## Threshold (ngưỡng cảnh báo)
 
@@ -107,6 +127,7 @@ Ví dụ một tab `Matrix` hợp lệ (số liệu minh hoạ tự tạo):
 - Bản Firefox chỉ là bản thử, chưa chạy thử trong Firefox thật.
 - **Trôi box** chỉ bắt box giữ nguyên toạ độ so với xe khi xe đang chạy, không bắt box nhích chậm quanh vị trí đúng.
 - Gợi ý attribute theo kích thước box chưa kiểm trên dữ liệu thật cho Animal / Obstacle.
+- Mặt đường **patchwork++** và hệ thống gợi ý mặt đường là thử nghiệm; đo trên đường ướt (có lớp phản chiếu) thì cả local lẫn patchwork++ đều có thể sai, nên so bằng mắt.
 
 ## Dành cho người phát triển
 
