@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { askConfirm } from './confirmStore';
 import type { Shift } from '../shared/shift';
 import { allocTargets, creditOf, suggestAlloc, type IdCredit } from '../shared/kpiCredit';
 import { shiftStore, useCredits, useSchedule, useShifts } from './shiftStore';
@@ -68,7 +69,7 @@ export function OtAllocator({ shift }: { shift: Shift }) {
           <input type="checkbox" checked={split} onChange={(e) => { setSplit(e.target.checked); setPreview(null); }} /> chia nhỏ (đủ {sch.kpiTarget} thì sang ca sau)
         </label>
         <button onClick={suggest} disabled={!targets.length}>Gợi ý</button>
-        {assigned && <button onClick={() => { if (confirm(`Trả toàn bộ KPI về ca ${shift.name}?`)) shiftStore.unassign(shift.name); }}>Trả hết về OT</button>}
+        {assigned && <button onClick={() => { void askConfirm({ title: 'Trả KPI về ca', message: `Trả toàn bộ KPI về ca ${shift.name}?`, confirmLabel: 'Trả hết' }).then((ok) => { if (ok) shiftStore.unassign(shift.name); }); }}>Trả hết về OT</button>}
       </div>
       {preview && (
         <div style={{ marginTop: 6 }}>

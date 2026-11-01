@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from 'react';
+import { askConfirm } from './confirmStore';
 import { ISSUE_KINDS, ISSUE_NAMES, type IssueKind } from '../shared/qcrules';
 import { detectAll, flagKey, flagState, parseQcMatrix, type FlagState, type QcFlag } from '../shared/qcimport';
 import type { CvatTrack } from '../shared/types';
@@ -98,7 +99,7 @@ export function QcCompare({ jobId, tracks, labels, start, stop, onOpen }: {
       </p>
       <p style={{ margin: '4px 0' }}>
         <label className="cvla-filebtn">⬆ Chọn file QC để đối chiếu (QC comparison){' '}<input type="file" accept=".xlsx" onChange={(e) => { void load(e.target.files?.[0]); e.target.value = ''; }} /></label>
-        {imp && <button style={{ marginLeft: 8 }} onClick={() => { if (confirm('Bỏ file QC đã nạp và mọi đánh dấu ignore / fixed của job này?')) qcFlagStore.clearImport(jobId); }}>Bỏ file</button>}
+        {imp && <button style={{ marginLeft: 8 }} onClick={() => { void askConfirm({ title: 'Bỏ file QC', message: 'Bỏ file QC đã nạp và mọi đánh dấu ignore / fixed của job này?', confirmLabel: 'Bỏ file', danger: true }).then((ok) => { if (ok) qcFlagStore.clearImport(jobId); }); }}>Bỏ file</button>}
       </p>
       {err && <p style={{ color: '#b00' }}>{err}</p>}
       {imp && (

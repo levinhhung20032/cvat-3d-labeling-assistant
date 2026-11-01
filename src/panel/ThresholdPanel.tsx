@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { askConfirm } from './confirmStore';
 import type { CvatLabel, CvatTrack } from '../shared/types';
 import {
   fieldsOf, isChanged, resetAll, resetSection, SECTIONS, sectionChanged, setValue, type Field, type SectionId,
@@ -208,7 +209,7 @@ export function ThresholdPanel({ jobId, labels, tracks }: { jobId: number; label
         Extension không kèm con số nào: <b>chưa có rule thì không báo lỗi</b>. Có hiệu lực ngay; lưu cục bộ, không gửi đi đâu.
       </p>
       <p style={{ margin: '4px 0' }}>
-        <button disabled={!rules.length} onClick={() => { if (confirm(`Xoá TẤT CẢ ${rules.length} rule? (tham số, ký hiệu giữ nguyên)`)) thresholdStore.setRules([]); }}>Xoá tất cả rule</button>{' '}
+        <button disabled={!rules.length} onClick={() => { void askConfirm({ title: 'Xoá tất cả rule', message: `Xoá TẤT CẢ ${rules.length} rule? (tham số, ký hiệu giữ nguyên)`, confirmLabel: 'Xoá tất cả', danger: true }).then((ok) => { if (ok) thresholdStore.setRules([]); }); }}>Xoá tất cả rule</button>{' '}
         <button onClick={() => { resetAll(); thresholdStore.changed(); }} disabled={!SECTIONS.some((s) => sectionChanged(s.id))}>↺ Tham số</button>{' '}
         <button onClick={() => symbolStore.reset()} title="Về ký hiệu mặc định (đi xa bất thường = Y)">↺ Ký hiệu lỗi</button>
       </p>

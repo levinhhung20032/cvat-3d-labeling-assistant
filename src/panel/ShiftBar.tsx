@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { Notice } from './Notice';
+import { Icon } from './Icon';
 import { computeKpi, fmtDuration } from '../shared/shift';
 import { SLOT_LABEL, endWarning, minutesLeft, slotAt } from '../shared/schedule';
 import { shiftStore, useCredits, useSchedule, useShifts } from './shiftStore';
@@ -72,12 +74,11 @@ export function ShiftBanner({ pending, onUpload }: { pending: number; onUpload: 
   const w = endWarning(now, sch);
   if (!w) return null;
   return (
-    <div role="alert" style={{ background: '#fff3cd', border: '1px solid #e0b000', color: '#5a4300', padding: '4px 8px', margin: '6px 0', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-      <b>⏰ Còn {w.minutesLeft} phút là hết {SLOT_LABEL[w.slot]} ({hm(w.endsAt)}).</b>
+    <Notice tone="warn" actions={pending > 0 ? <button className="cvla-primary" onClick={onUpload}><Icon name="upload" />Upload ngay</button> : undefined}>
+      <b><Icon name="clock" /> Còn {w.minutesLeft} phút là hết {SLOT_LABEL[w.slot]} ({hm(w.endsAt)}).</b>
       {pending > 0
         ? <span>Đang có <b>{pending}</b> frame chưa upload.</span>
         : <span>Hãy hoàn tất và kiểm tra phần đang làm.</span>}
-      {pending > 0 && <button className="cvla-primary" onClick={onUpload}>⬆ Upload ngay</button>}
-    </div>
+    </Notice>
   );
 }

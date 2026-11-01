@@ -1,5 +1,6 @@
 import { createContext, useRef, useState, type DragEvent, type PointerEvent as RPointerEvent, type ReactNode } from 'react';
 import { kv } from './storage';
+import { PopWindow } from './PopWindow';
 import { DEFAULT_LAYOUT, moveGroup, parseLayout, resizeSplit, setRowHeight, type CtlLayout, type DropSide } from './ctlLayout';
 
 /**
@@ -13,6 +14,9 @@ const isDefault = (l: CtlLayout) => JSON.stringify(l) === JSON.stringify(DEFAULT
 
 /** Nút kéo ⠿ của nhóm `id` (Group gắn vào tiêu đề); null ngoài khu bố cục. */
 export const GripCtx = createContext<((id: string) => ReactNode) | null>(null);
+/** Nút ⧉ (mở cửa sổ rời) của nhóm `id`; trong cửa sổ rời là nút "Đưa về". null ngoài khu bố cục. */
+export const PopCtx = createContext<((id: string) => ReactNode) | null>(null);
+const HIDE_KEY = 'cvla-ctl-hidden';
 
 const GAP = 6;
 const DROP_BAR: Record<DropSide, React.CSSProperties> = {
@@ -33,6 +37,25 @@ export function ControlLayout({ groups }: { groups: Record<string, ReactNode> })
   const dragId = useRef<string | null>(null);
   const [drop, setDrop] = useState<{ id: string; side: DropSide } | null>(null);
   const wraps = useRef(new Map<string, HTMLDivElement>());
+  const [hidden, setHiddenState] = useState(() => { try { return kv.get(HIDE_KEY) === '1'; } catch { return false; } });
+  const setHidden = (v: boolean) => { setHiddenState(v); try { if (v) kv.set(HIDE_KEY, '1'); else kv.remove(HIDE_KEY); } catch { /* bỏ qua */ } };
+  const [popped, setPopped] = useState<string[]>([]); // nhóm đang ở cửa sổ rời
+  const [popFail, setPopFail] = useState(false);
+  const popSize = useRef(new Map<string, { w: number; h: number }>());
+  const rootRef = useRef<HTMLDivElement>(null);
+  const popOut = (id: string) => {
+    const r = wraps.current.get(id)?.getBoundingClientRect();
+    popSize.current.set(id, { w: Math.max(360, Math.min(900, (r?.width ?? 480) + 40)), h: Math.max(160, Math.min(700, (r?.height ?? 200) + 60)) });
+    setPopFail(false);
+    setPopped((p) => (p.includes(id) ? p : [...p, id]));
+  };
+  const popBack = (id: string) => setPopped((p) => p.filter((x) => x !== id));
+  const popBtn = (id: string) => (
+    <button className="cvla-iconbtn" style={{ padding: '0 3px' }} onClick={() => popOut(id)} title="Mở nhóm này ở cửa sổ riêng để dùng độc lập (kéo sang màn hình khác được). Đóng cửa sổ thì nhóm về chỗ cũ." aria-label="Mở cửa sổ riêng">⧉</button>
+  );
+  const backBtn = (id: string) => (
+    <button className="cvla-iconbtn" style={{ padding: '0 3px' }} onClick={() => popBack(id)} title="Đưa nhóm về lại chỗ cũ trong tool" aria-label="Đưa về">⮌ Đưa về</button>
+  );
 
   const grip = (id: string) => (
     <span
@@ -93,9 +116,28 @@ export function ControlLayout({ groups }: { groups: Record<string, ReactNode> })
     el.addEventListener('pointercancel', up);
   };
 
+  const rootClass = () => (rootRef.current?.closest('.cvla-root')?.className ?? 'cvla-root');
+  const isDef = isDefault(lay);
+
   return (
     <GripCtx.Provider value={grip}>
-      <div style={{ marginBottom: 6 - GAP }}>
+     <PopCtx.Provider value={popBtn}>
+      <div ref={rootRef} style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', margin: '0 0 4px' }}>
+        {popFail && <span style={{ color: '#b00', fontSize: 11 }}>Trình duyệt chặn cửa sổ rời: hãy cho phép cửa sổ bật lên cho trang này.</span>}
+        <button onClick={() => save(DEFAULT_LAYOUT)} disabled={isDef} style={{ fontSize: 11, padding: '0 6px' }} title="Đưa các nhóm điều khiển về vị trí và kích thước mặc định">↺ Bố cục mặc định</button>
+        <button onClick={() => setHidden(!hidden)} style={{ fontSize: 11, padding: '0 6px' }} aria-pressed={hidden} title={hidden ? 'Hiện lại thanh công cụ (các nhóm điều khiển)' : 'Ẩn thanh công cụ để dành chỗ cho bảng frame (cửa sổ rời vẫn giữ)'}>{hidden ? '▾ Hiện thanh công cụ' : '▴ Ẩn thanh công cụ'}</button>
+      </div>
+      {popped.map((id) => (
+        <PopWindow
+          key={id} title={`Nhóm ${id} · CVAT 3D Assistant`} rootClass={rootClass()} width={popSize.current.get(id)?.w ?? 520} height={popSize.current.get(id)?.h ?? 260}
+          onClose={() => popBack(id)} onFail={() => { popBack(id); setPopFail(true); }}
+        >
+          <GripCtx.Provider value={null}>
+            <PopCtx.Provider value={backBtn}>{groups[id]}</PopCtx.Provider>
+          </GripCtx.Provider>
+        </PopWindow>
+      ))}
+      {!hidden && <div style={{ marginBottom: 6 - GAP }}>
         {lay.map((row, r) => (
           <div key={row.ids.join(',')}>
             <div style={{
@@ -120,7 +162,9 @@ export function ControlLayout({ groups }: { groups: Record<string, ReactNode> })
                   ref={(el) => { if (el) wraps.current.set(id, el); else wraps.current.delete(id); }}
                   onDragOver={(e) => onOver(e, id)} onDrop={(e) => onDrop(e, id)}
                 >
-                  {groups[id]}
+                  {popped.includes(id)
+                    ? <div style={{ border: '1px dashed #9aa4b2', borderRadius: 4, padding: '4px 8px', height: '100%', boxSizing: 'border-box', fontSize: 12 }}>Đang ở cửa sổ riêng {backBtn(id)}</div>
+                    : groups[id]}
                   {drop?.id === id && <div style={{ position: 'absolute', background: '#2563eb', zIndex: 3, pointerEvents: 'none', ...DROP_BAR[drop.side] }} />}
                 </div>,
               ])}
@@ -136,12 +180,8 @@ export function ControlLayout({ groups }: { groups: Record<string, ReactNode> })
             />
           </div>
         ))}
-      </div>
-      {!isDefault(lay) && (
-        <div style={{ textAlign: 'right', margin: '-2px 0 4px' }}>
-          <button onClick={() => save(DEFAULT_LAYOUT)} style={{ fontSize: 11, padding: '0 6px' }} title="Đưa các nhóm điều khiển về vị trí và kích thước mặc định">↺ Bố cục mặc định</button>
-        </div>
-      )}
+      </div>}
+     </PopCtx.Provider>
     </GripCtx.Provider>
   );
 }

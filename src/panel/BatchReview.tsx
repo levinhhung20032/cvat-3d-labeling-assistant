@@ -1,4 +1,5 @@
 import { apply, transpose, type Mat3 } from '../shared/rot';
+import { askConfirm } from './confirmStore';
 import { kv } from './storage';
 import { onViewport, viewport } from './bridge';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -19,7 +20,7 @@ import { parseLabelSpecs } from '../shared/attributes';
 import { AttributePanel } from './AttributePanel';
 import { gpuActive } from './gpu';
 import { Help, PENDING_STYLE, Pill, Slider } from './ui';
-import { ControlLayout, GripCtx } from './ControlLayout';
+import { ControlLayout, GripCtx, PopCtx } from './ControlLayout';
 // Bảng so sánh Patchwork++ chỉ có trên máy kiểm thử (PwCompare.tsx không đưa lên git): không có file thì nút và bảng không xuất hiện.
 type PwCompareProps = { ann: CvatAnnotations; start: number; stop: number; num: number; onJump: (num: number, f: number) => void; onClose: () => void };
 const pwCompareMods = import.meta.glob('./PwCompare.tsx', { eager: true }) as Record<string, { PwCompare?: (p: PwCompareProps) => JSX.Element }>;
@@ -674,11 +675,13 @@ function Group({ id, title, bg, children }: { id: string; title: ReactNode; bg?:
   const [shut, setShut] = useState(() => !!loadCollapsed()[id]);
   const toggle = () => setShut((v) => { const next = !v; kv.set(GROUPS_KEY, JSON.stringify({ ...loadCollapsed(), [id]: next })); return next; });
   const grip = useContext(GripCtx);
+  const pop = useContext(PopCtx);
   return (
     // cao 100% ô của bố cục (hàng đặt chiều cao cố định thì nội dung dài cuộn trong nhóm)
     <fieldset className="cvla-group" style={{ border: '1px solid #c5ccd6', margin: 0, minWidth: 0, height: '100%', boxSizing: 'border-box', overflow: 'auto', padding: '1px 8px 4px', display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center', alignContent: 'flex-start', background: bg }}>
       <legend style={{ fontSize: 11, fontWeight: 700, color: '#456', padding: '0 4px' }}>
         {grip?.(id)}
+        {pop?.(id)}
         <span role="button" tabIndex={0} onClick={toggle} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggle(); }} style={{ cursor: 'pointer', userSelect: 'none' }} title={shut ? 'Mở rộng' : 'Thu nhỏ'}>{shut ? '▸' : '▾'} </span>
         {title}
       </legend>
@@ -1168,14 +1171,14 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   };
   // Outside dài (≥ SPLIT_OUTSIDE_FRAMES frame) rồi có box lại: gợi ý tách ID, có hộp xác nhận (xem trước) trước khi áp.
   const outGaps = useMemo(() => (track ? findLongOutsideGaps(track, start, stop) : []), [track, start, stop]);
-  const splitAt = (g: OutsideGap) => {
+  const splitAt = async (g: OutsideGap) => {
     if (!track) return;
     const msg = `Tách ID object #${num}?\n\n`
       + `• Outside ${g.len} frame (${g.from}–${g.to}), có box lại từ frame ${g.resume}.\n`
       + `• Phần từ frame ${g.resume} trở đi thành object MỚI (cuối danh sách, chưa có trên CVAT tới khi upload).\n`
       + `• Object #${num} giữ ID, giữ phần trước, và outside có keyframe từ frame ${g.resume} tới frame ${stop}.\n\n`
       + 'Không xóa ID nào. Chỉ nằm trong nháp tới khi bạn upload.';
-    if (!window.confirm(msg)) return;
+    if (!await askConfirm({ title: `Tách ID object #${num}`, message: msg.slice(msg.indexOf('\n\n') + 2), confirmLabel: 'Tách ID' })) return;
     const n = onSplit(num - 1, g.resume);
     setNote(n === null ? 'Không tách được: frame này không phải keyframe có box ngay sau đoạn outside.' : `Đã tách: object mới #${n} (từ frame ${g.resume}); #${num} outside từ frame ${g.resume}. Nằm trong nháp, chưa upload.`);
   };
@@ -1413,7 +1416,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
             title={hint('kf.toggle', selSt?.status === 'key'
               ? 'Mở khoá frame đang chọn: keyframe về nội suy. Chọn frame bằng cách bấm tiêu đề cột.'
               : 'Khoá frame đang chọn thành keyframe (giá trị giữ nguyên). Chọn frame bằng cách bấm tiêu đề cột.')}
-          >{selSt?.status === 'key' ? '🔓' : '🔒'} frame {selFrame ?? '…'}</button>
+          >{selSt?.status === 'key' ? '🔓' : '🔒'} frame <span style={{ display: 'inline-block', minWidth: '2ch', textAlign: 'left', fontVariantNumeric: 'tabular-nums' }}>{selFrame ?? '…'}</span></button>
           <button onClick={unlockInner} title={hint('kf.unlockInner', 'Mở khoá keyframe ở giữa: gỡ mọi keyframe nằm hẳn bên trong Phạm vi, giữ hai đầu mút; frame về nội suy')}>🔓 KF giữa</button>
   
           </Group>
@@ -1424,7 +1427,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
             disabled={selFrame === null}
             onClick={() => selFrame !== null && toggleOutside(selFrame)}
             title={hint('outside.from', 'Outside từ frame đang chọn tới keyframe kế tiếp; nếu frame đang là outside thì đưa object trở lại. Chọn frame bằng cách bấm tiêu đề cột.')}
-          >① ⛔ Outside — frame {selFrame ?? '…'}</button>
+          >① ⛔ Outside — frame <span style={{ display: 'inline-block', minWidth: '2ch', textAlign: 'left', fontVariantNumeric: 'tabular-nums' }}>{selFrame ?? '…'}</span></button>
           <button onClick={outsideRange} title={hint('outside.window', 'Đặt outside cho mọi frame có box trong cửa sổ đang hiển thị; frame ngay sau cửa sổ giữ nguyên trạng thái')}>② ⛔ Current window</button>
           <button
             onClick={togglePick}

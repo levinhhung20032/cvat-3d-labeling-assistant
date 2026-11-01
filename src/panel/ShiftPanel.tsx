@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { askConfirm } from './confirmStore';
 import { computeKpi, fmtDuration, kpiText, type Kpi, type Shift } from '../shared/shift';
 import { DEFAULT_SCHEDULE } from '../shared/schedule';
 import { setSchedule, shiftStore, useCredits, useSchedule, useShifts } from './shiftStore';
@@ -119,7 +120,7 @@ export function ShiftPanel() {
             <div style={{ marginTop: 4 }}>
               <Copy text={`KPI ghi cho ca ${s.name}: ${cr.kpi}${ot ? '' : `/${sch.kpiTarget}`}${cr.rework ? ` · rework ${cr.rework}` : ''}${cr.fromOthers ? ` · gồm ${cr.fromOthers} ID dồn từ OT` : ''}${given.length ? ` · đã dồn ${given.length} ID sang ${[...new Set(given.map((c) => c.owner))].join(', ')}` : ''}
 ${kpiText(k)}`} />{' '}
-              {s.end && <button onClick={() => { if (confirm(`Xóa ca ${s.name} khỏi lịch sử?`)) shiftStore.remove(s.name); }}>Xóa khỏi lịch sử</button>}
+              {s.end && <button onClick={() => { void askConfirm({ title: 'Xóa ca', message: `Xóa ca ${s.name} khỏi lịch sử?`, confirmLabel: 'Xóa', danger: true }).then((ok) => { if (ok) shiftStore.remove(s.name); }); }}>Xóa khỏi lịch sử</button>}
             </div>
           </>
         )}

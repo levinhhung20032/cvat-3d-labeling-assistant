@@ -48,6 +48,12 @@ import { suggestAttributes } from '../shared/attrSuggest';
 import { fmtDuration, shiftName, computeKpi } from '../shared/shift';
 import { emitAction, isCapturing, useKeymap } from './actions';
 import { ObjectTable } from './ObjectTable';
+import { STYLE } from './styles';
+import { Notice } from './Notice';
+import { Icon } from './Icon';
+import { ConfirmHost } from './Dialogs';
+import { askConfirm } from './confirmStore';
+import { Tutorial, tutorialSeen } from './Tutorial';
 import { diag, keyTarget, onContentMessage, post, resolveBinary, resolveChunkEnd, resolveChunkFile, resolveRpc, streamChunk } from './bridge';
 
 export interface Data {
@@ -166,64 +172,8 @@ type Tab = 'objects' | 'review' | 'ref' | 'shift' | 'qc' | 'dyn' | 'thr' | 'cam'
 const UNLOCK_FRAMES = 6;
 
 
-/** Giao diện chung: nút bo góc, tab rõ ràng, thanh đầu (tiêu đề, ca, tab, nút upload) dính ở đầu khi cuộn. */
-const STYLE = `
-.cvla-root button { font: inherit; border: 1px solid #9aa4b2; background: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; }
-.cvla-root button:hover:not(:disabled) { background: #eaf1fb; border-color: #5b7db1; }
-.cvla-root button:disabled { opacity: .45; cursor: default; }
-.cvla-root input[type=text], .cvla-root input:not([type]), .cvla-root select { font: inherit; border: 1px solid #9aa4b2; border-radius: 4px; padding: 1px 4px; }
-.cvla-root input:focus-visible, .cvla-root select:focus-visible, .cvla-root button:focus-visible { outline: 2px solid #2b6cb0; outline-offset: 1px; }
-.cvla-root table th { font-weight: 600; background: #f1f4f8; padding: 3px 6px; }
-.cvla-root table td { padding: 2px 6px; }
-.cvla-root fieldset { border-radius: 6px; }
-.cvla-root .cvla-tab { border-radius: 4px 4px 0 0; border-bottom: 2px solid transparent; background: #f1f4f8; }
-.cvla-root .cvla-tab.cvla-tab-on { background: #1f2937; color: #fff; border-color: #1f2937; font-weight: 700; }
-.cvla-root .cvla-tab.cvla-tab-on:hover:not(:disabled) { background: #1f2937; }
-/* Giao diện tối: đảo màu cả panel rồi đảo ngược lại canvas / ảnh (point cloud, ảnh camera) để chúng giữ màu gốc; hue-rotate 180° giữ nguyên sắc (xanh vẫn xanh, đỏ vẫn đỏ). */
-body { margin: 0; }
-.cvla-root { background: #fff; min-height: 100vh; box-sizing: border-box; }
-.cvla-root.cvla-dark { filter: invert(1) hue-rotate(180deg) brightness(.92); }
-/* Xám: như tối nhưng giảm tương phản rồi tăng sáng, nền ra màu xám than thay vì gần đen. */
-.cvla-root.cvla-gray { filter: invert(1) hue-rotate(180deg) contrast(.6) brightness(1.5); }
-.cvla-root.cvla-dark canvas, .cvla-root.cvla-dark img, .cvla-root.cvla-dark video, .cvla-root.cvla-dark .cvla-lens, .cvla-root.cvla-gray canvas, .cvla-root.cvla-gray img, .cvla-root.cvla-gray video, .cvla-root.cvla-gray .cvla-lens { filter: invert(1) hue-rotate(180deg); }
-/* .cvla-keep: ô mẫu màu (tab Màu sắc) giữ đúng màu người dùng chọn: bộ lọc NGHỊCH ĐẢO của bộ lọc gốc ở trên (đảo thứ tự và giá trị). */
-.cvla-root.cvla-dark .cvla-keep { filter: brightness(1.087) hue-rotate(-180deg) invert(1); }
-.cvla-root.cvla-gray .cvla-keep { filter: brightness(.667) contrast(1.667) hue-rotate(-180deg) invert(1); }
-/* Công tắc gạt: mọi ô tick trong panel hiển thị như toggle (ô chọn dòng dùng class cvla-check để giữ dạng ô tick). */
-.cvla-root input[type=checkbox]:not(.cvla-check) { appearance: none; -webkit-appearance: none; width: 30px; height: 17px; border-radius: 9px; background: #9aa4b2; position: relative; vertical-align: middle; margin: 0 4px 0 0; cursor: pointer; transition: background .15s; flex: none; }
-.cvla-root input[type=checkbox]:not(.cvla-check)::after { content: ''; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,.4); }
-.cvla-root input[type=checkbox]:not(.cvla-check):checked { background: #2b6cb0; }
-.cvla-root input[type=checkbox]:not(.cvla-check):checked::after { left: 15px; }
-.cvla-root input[type=checkbox]:not(.cvla-check):disabled { opacity: .45; cursor: default; }
-.cvla-root button.cvla-primary { background: #2563eb; color: #fff; border-color: #1d4ed8; }
-.cvla-root button.cvla-primary:hover:not(:disabled) { background: #1d4ed8; }
-.cvla-root button.cvla-shift { border-radius: 12px; padding: 1px 10px; background: #e6f4ea; border-color: #34a853; color: #14532d; font-size: 12px; }
-.cvla-root button.cvla-shift-ot { background: #ede9fe; border-color: #7c3aed; color: #4c1d95; }
-.cvla-root button.cvla-shift-warn { background: #fde68a; border-color: #d97706; color: #7a4100; font-weight: 700; }
-.cvla-root label.cvla-filebtn { display: inline-flex; align-items: center; border: 1px solid #9aa4b2; border-radius: 4px; padding: 2px 8px; background: #fff; cursor: pointer; }
-.cvla-root label.cvla-filebtn input { display: none; }
-/* nhóm điều khiển của Batch Review: nút / công tắc xuống dòng nguyên khối, không gãy chữ giữa chừng */
-.cvla-root fieldset.cvla-group > label, .cvla-root fieldset.cvla-group > button, .cvla-root fieldset.cvla-group button { white-space: nowrap; }
-/* bố cục nhóm điều khiển (ControlLayout): nút kéo ⠿, vạch đổi rộng / cao */
-.cvla-grip { cursor: grab; color: #8a94a3; padding: 0 3px 0 0; user-select: none; font-weight: 400; }
-.cvla-grip:hover { color: #2563eb; }
-.cvla-split { border-radius: 2px; touch-action: none; }
-.cvla-split-v { cursor: col-resize; }
-.cvla-split-h { cursor: row-resize; height: 6px; }
-.cvla-split:hover { background: #93c5fd; }
-.cvla-badge { display: inline-block; min-width: 16px; padding: 0 5px; margin-left: 6px; border-radius: 9px; background: #fff; color: #1d4ed8; font-size: 11px; line-height: 16px; text-align: center; }
-.cvla-help { display: inline-block; width: 15px; height: 15px; border-radius: 50%; border: 1px solid #8a94a3; color: #5b6573; font-size: 10px; line-height: 14px; text-align: center; cursor: help; margin-left: 4px; font-weight: 700; user-select: none; }
-.cvla-root button.cvla-num { border: 0; background: transparent; padding: 0 2px; min-width: 40px; text-align: left; text-decoration: underline dotted; }
-.cvla-pill { display: inline-block; padding: 0 7px; border-radius: 9px; font-size: 11px; line-height: 17px; background: #e8ecf1; color: #34404f; white-space: nowrap; }
-.cvla-pill-class { background: #1f2937; color: #fff; font-weight: 600; }
-.cvla-pill-warn { background: #fde68a; color: #7a5200; }
-.cvla-pill-bad { background: #fecaca; color: #991b1b; font-weight: 700; }
-.cvla-head { position: sticky; top: 0; z-index: 20; background: #fff; padding-bottom: 4px; border-bottom: 1px solid #d5dbe3; margin: -10px -10px 8px; padding: 8px 10px 6px; }
-`;
-
 type Theme = 'auto' | 'dark' | 'gray' | 'light';
-const THEME_NEXT: Record<Theme, Theme> = { auto: 'dark', dark: 'gray', gray: 'light', light: 'auto' };
-const THEME_LABEL: Record<Theme, string> = { auto: '◐ tự động', dark: '🌙 tối', gray: '🌫 xám', light: '☀ sáng' };
+const THEME_LABEL: Record<Theme, string> = { auto: 'Tự động', dark: 'Tối', gray: 'Xám', light: 'Sáng' };
 const loadTheme = (): Theme => { try { const v = kv.get('cvla-theme'); return v === 'dark' || v === 'gray' || v === 'light' ? v : 'auto'; } catch { return 'auto'; } };
 
 const loadSync = () => { try { return kv.get('cvla-sync') !== '0'; } catch { return true; } };
@@ -252,7 +202,18 @@ export function App() {
     return () => window.clearInterval(t);
   }, []);
   const [toast, setToast] = useState('');
-  const [reloadMenu, setReloadMenu] = useState(false); // menu của nút "Tải lại frame" (chỉ frame lỗi / tất cả)
+  const [menu, setMenu] = useState<'settings' | 'more' | null>(null); // menu nổi trên thanh đầu (⚙ tùy chọn nhanh, ⋯ thao tác với nháp)
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [tutorial, setTutorial] = useState(false); // hướng dẫn dùng lần đầu / xem lại
+  const tutorialAuto = useRef(false);
+  const [showProgress, setShowProgress] = useState(false); // chi tiết tiến độ tải (bấm chip ở thanh đầu)
+  const lastSettings = useRef<Tab>('thr'); // tab con của "Cài đặt" dùng gần nhất
+  useEffect(() => {
+    if (!menu) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenu(null); };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [menu]);
   const [restorable, setRestorable] = useState<SavedDraft | null>(null);
   const restorableRef = useRef<SavedDraft | null>(null);
   const [draftNote, setDraftNote] = useState('');
@@ -377,6 +338,10 @@ export function App() {
   }, []);
 
   const data = state.kind === 'ok' ? state.data : null;
+  // Lần đầu dùng tool: hiện hướng dẫn một lần khi đã có dữ liệu job (bỏ qua hoặc xong là không hiện lại; xem lại ở menu ⚙).
+  useEffect(() => {
+    if (data && !tutorialAuto.current) { tutorialAuto.current = true; if (!tutorialSeen()) setTutorial(true); }
+  }, [data]);
   const storeHealth = useSyncExternalStore(onStorageHealth, storageHealth); // lỗi ghi kho (extension vừa Reload, kho đầy): báo ngay, không mất lặng lẽ
   const chunkSrcRef = useRef<ChunkSource | null>(null);
   const [lmode, setLmode] = useState<LoadMode>(loadMode);
@@ -645,10 +610,11 @@ export function App() {
   const autoRetry = useRef(0);
   const retryFailedNow = () => { pointClouds.retryFailed(); };
   // Nút cố định trên thanh đầu: luôn bấm được, báo lại kết quả (số frame lỗi được tải lại, hoặc còn bao nhiêu frame đang tải).
-  const reloadAllClouds = () => {
+  const reloadAllClouds = async () => {
     if (!data) return;
     const { start_frame: a, stop_frame: b } = data.job;
-    if (!confirm(`Tải lại tất cả ${b - a + 1} frame point cloud từ máy chủ? Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.`)) return;
+    if (!await askConfirm({ title: 'Tải lại point cloud', message: `Tải lại tất cả ${b - a + 1} frame point cloud từ máy chủ?
+Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.`, confirmLabel: 'Tải lại tất cả' })) return;
     autoRetry.current = 0;
     pointClouds.abortInFlight();
     setToast(`Đang tải lại ${pointClouds.reloadAll(a, b)} frame…`);
@@ -745,10 +711,10 @@ export function App() {
   );
 
   /** Xóa object do tool tạo: trong nháp thì bỏ khỏi nháp; đã upload thì mở hộp thoại xóa trên CVAT (chỉ ID trong sổ của tool). */
-  const deleteMade = (r: { num: number; id: number; made: 'draft' | 'server' | null }) => {
+  const deleteMade = async (r: { num: number; id: number; made: 'draft' | 'server' | null }) => {
     if (!data || r.made === null) return;
     if (r.made === 'draft') {
-      if (!confirm(`Xóa object #${r.num} (do tool tạo, đang trong nháp)? Chưa có gì trên CVAT nên không ảnh hưởng server.`)) return;
+      if (!await askConfirm({ title: `Xóa object #${r.num}`, message: 'Object do tool tạo, đang trong nháp.\nChưa có gì trên CVAT nên không ảnh hưởng server.', confirmLabel: 'Xóa khỏi nháp', danger: true })) return;
       dispatch({ t: 'removeTrack', idx: r.num - 1 });
       if (selectedNum !== null && selectedNum >= r.num) setSelectedNum(selectedNum > r.num ? selectedNum - 1 : null);
       setToast(`Đã xóa object #${r.num} khỏi nháp. (Hoàn tác / làm lại bị làm mới.)`);
@@ -758,13 +724,22 @@ export function App() {
     setDeleting([r.id]);
   };
 
-  const reload = () => {
-    if (draft.edited.size && !confirm(`Có ${draft.edited.size} frame đã sửa chưa upload. Tải lại sẽ bỏ nháp. Tiếp tục?`)) return;
+  const reload = async () => {
+    if (draft.edited.size && !await askConfirm({ title: 'Tải lại dữ liệu job', message: `Có ${draft.edited.size} frame đã sửa chưa upload.
+Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', danger: true })) return;
     post({ type: 'load' });
   };
 
+  const settingsTabs: { id: Tab; label: string }[] = [
+    { id: 'dyn', label: 'Dynamic size' }, { id: 'thr', label: 'Threshold' }, { id: 'cam', label: 'Camera' },
+    { id: 'color', label: 'Màu sắc' }, { id: 'keys', label: 'Phím tắt' }, { id: 'job', label: 'Thông tin job' },
+  ];
+  const inSettings = settingsTabs.some((x) => x.id === tab);
+  if (inSettings) lastSettings.current = tab;
+
   const tabBtn = (t: Tab, label: string) => (
     <button
+      role="tab" aria-selected={tab === t}
       onClick={() => (t === 'review' ? openReview() : t === 'ref' ? openRef() : setTab(t))}
       disabled={(t === 'review' || t === 'ref') && !ready}
       title={(t === 'review' || t === 'ref') && !ready ? 'Mở được khi đã tải xong point cloud mọi frame và tính xong mặt đường / trôi box' : t === 'ref' ? `Reflection mode của object #${selectedNum} (frame đang chọn ở Batch Review)` : undefined}
@@ -773,88 +748,132 @@ export function App() {
       {label}
     </button>
   );
+  const loadedFrames = passView.total - passView.loading - passView.failed;
+  const loading = !!data && passView.pending > 0 && doneJob !== data.job.id;
 
   return (
     <div ref={rootRef} className={skin === 'dark' ? 'cvla-root cvla-dark' : skin === 'gray' ? 'cvla-root cvla-gray' : 'cvla-root'} style={{ font: '13px/1.4 system-ui', padding: 10, color: '#111' }}>
       <style>{STYLE}</style>
+      <ConfirmHost />
+      {tutorial && <Tutorial onClose={() => setTutorial(false)} />}
       <div className="cvla-head">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <b>CVAT 3D Assistant · v{VERSION}</b>
-        <ShiftBadge onOpen={() => setTab('shift')} />
-        </span>
-        <span>
-          <label title="Khi bạn chọn một object trong giao diện CVAT, tool tự chọn object đó và nhảy tới frame hiện tại của CVAT">
-            <input type="checkbox" checked={sync} onChange={(e) => setSync(e.target.checked)} /> CVAT → tool
-          </label>{' '}
-          <label title="Khi bạn chọn object trong tool, giao diện CVAT chuyển focus sang object đó (đổi frame nếu object không có ở frame hiện tại)">
-            <input type="checkbox" checked={pushOut} onChange={(e) => setPushOut(e.target.checked)} /> tool → CVAT
-          </label>{' '}
-          <button onClick={() => focusRef.current()} disabled={selectedNum === null} title="Thu nhỏ tool và đưa camera 3D của CVAT lại gần object đang chọn (như bấm đúp vào object trong CVAT). Phím F.">🎯 Focus</button>{' '}
-          <button onClick={() => setTheme(THEME_NEXT[theme])} title="Giao diện: tự động (theo hệ điều hành) → tối → xám → sáng">{THEME_LABEL[theme]}</button>{' '}
-          <button onClick={reload}>Tải lại</button>
-        </span>
-      </div>
-      {data && <SettingsIO jobId={data.job.id} labels={data.labels} />}
-      <div style={{ margin: '6px 0 0', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4 }}>
-        {tabBtn('objects', 'Bảng object')}
-        {tabBtn('review', 'Batch Review')}
-        {refS.on && refNum !== null && tabBtn('ref', `Ref #${refNum}`)}
-        {tabBtn('shift', 'Ca / KPI')}
-        {tabBtn('qc', 'QC')}
-        {tabBtn('dyn', 'Dynamic size')}
-        {tabBtn('thr', 'Threshold')}
-        {tabBtn('cam', 'Camera')}
-        {tabBtn('color', 'Màu sắc')}
-        {tabBtn('keys', 'Phím tắt')}
-        {tabBtn('job', 'Thông tin job')}
-        {data && (reloadMenu ? (
-          <span style={{ marginLeft: 8 }}>
-            Tải lại:{' '}
-            <button onClick={() => { setReloadMenu(false); reloadClouds(); }} title="Chỉ tải lại các frame lỗi (frame đang tải thì giữ nguyên)">Chỉ frame lỗi{passView.failed ? <span className="cvla-badge">{passView.failed}</span> : null}</button>{' '}
-            <button onClick={() => { setReloadMenu(false); reloadAllClouds(); }} title="Bỏ hết point cloud đã tải và tải lại cả job từ máy chủ">Tất cả {data.job.stop_frame - data.job.start_frame + 1} frame</button>{' '}
-            <button onClick={() => setReloadMenu(false)} title="Đóng menu">✕</button>
-          </span>
-        ) : (
-          <>
-          <select
-            value={lmode} style={{ marginLeft: 8 }}
-            title={`Cách tải point cloud: ${LOAD_MODES.find((x) => x.id === lmode)?.title ?? ''} Đổi xong áp dụng cho các frame chưa tải.`}
-            onChange={(e) => { const v = e.target.value as LoadMode; setLmode(v); setLoadMode(v); if (data) configureLoading(data.job.start_frame, data.job.stop_frame, chunkSrcRef.current); }}
-          >
-            {LOAD_MODES.map((x) => <option key={x.id} value={x.id}>Tải: {x.label}</option>)}
-          </select>
-          <button onClick={() => setReloadMenu(true)} style={{ marginLeft: 8 }} title="Tải lại point cloud: chọn chỉ frame lỗi hoặc tất cả">↻ Tải lại frame ▾{passView.failed ? <span className="cvla-badge">{passView.failed}</span> : null}</button>
-          </>
-        ))}
-        {data && (
-          <span style={{ marginLeft: 12, padding: '2px 6px', background: draft.edited.size ? '#fff3cd' : '#eee' }}>
-            Nháp: <b>{draft.edited.size}</b> frame chưa upload <Help text="Các chỉnh sửa chỉ nằm trong bộ nhớ (và bản lưu cục bộ để F5 không mất) cho tới khi bạn bấm Upload lên CVAT." />{' '}
-            <button disabled={!draft.undo.length} onClick={() => dispatch({ t: 'undo' })}>Hoàn tác</button>{' '}
-            <button disabled={!draft.redo.length} onClick={() => dispatch({ t: 'redo' })}>Làm lại</button>{' '}
+        <div className="cvla-bar">
+          <b>CVAT 3D Assistant · v{VERSION}</b>
+          <ShiftBadge onOpen={() => setTab('shift')} />
+          <div className="cvla-tabs" role="tablist" aria-label="Chức năng">
+            {tabBtn('objects', 'Bảng object')}
+            {tabBtn('review', 'Batch Review')}
+            {refS.on && refNum !== null && tabBtn('ref', `Ref #${refNum}`)}
+            {tabBtn('shift', 'Ca / KPI')}
+            {tabBtn('qc', 'QC')}
             <button
-              disabled={!draft.edited.size}
-              onClick={() => { if (confirm('Bỏ toàn bộ chỉnh sửa trong nháp?')) dispatch({ t: 'reset', baseline: data.ann }); }}
-            >Bỏ nháp</button>{' '}
-            <button className={draft.edited.size ? 'cvla-primary' : undefined} onClick={() => setUploading(true)} style={{ fontWeight: 700 }}>⬆ Upload lên CVAT…{draft.edited.size ? <span className="cvla-badge">{draft.edited.size}</span> : null}</button>
+              role="tab" aria-selected={inSettings} className={inSettings ? 'cvla-tab cvla-tab-on' : 'cvla-tab'}
+              onClick={() => setTab(lastSettings.current)} title="Dynamic size, Threshold, Camera, Màu sắc, Phím tắt, Thông tin job"
+            >Cài đặt</button>
+          </div>
+          <span className="cvla-spacer" />
+          {data && (loading || passView.failed > 0) && (
+            <button
+              className="cvla-loadchip" onClick={() => setShowProgress((v) => !v)}
+              title={loading ? `Đã tải ${loadedFrames}/${passView.total} frame${passView.failed ? `, ${passView.failed} frame lỗi` : ''}. Bấm để xem chi tiết.` : `${passView.failed} frame tải lỗi`}
+            >
+              {loading && <progress value={loadedFrames} max={Math.max(1, passView.total - passView.failed)} />}
+              {loading ? `${loadedFrames}/${passView.total}` : null}
+              {passView.failed > 0 && <span className="cvla-badge"><Icon name="warn" size={11} /> {passView.failed}</span>}
+            </button>
+          )}
+          {data && (
+            <span className={draft.edited.size ? 'cvla-draftchip cvla-draftchip-on' : 'cvla-draftchip'}>
+              Nháp: <b>{draft.edited.size}</b> frame <Help text="Các chỉnh sửa chỉ nằm trong bộ nhớ (và bản lưu cục bộ để F5 không mất) cho tới khi bạn bấm Upload lên CVAT." />
+              <button className="cvla-iconbtn cvla-iconbtn-b" disabled={!draft.undo.length} onClick={() => dispatch({ t: 'undo' })} title="Hoàn tác" aria-label="Hoàn tác"><Icon name="undo" /></button>
+              <button className="cvla-iconbtn cvla-iconbtn-b" disabled={!draft.redo.length} onClick={() => dispatch({ t: 'redo' })} title="Làm lại" aria-label="Làm lại"><Icon name="redo" /></button>
+              <span className="cvla-menuwrap">
+                <button className="cvla-iconbtn cvla-iconbtn-b" disabled={!draft.edited.size} onClick={() => setMenu(menu === 'more' ? null : 'more')} title="Thao tác khác với nháp" aria-label="Thao tác khác với nháp" aria-expanded={menu === 'more'}><Icon name="more" /></button>
+                {menu === 'more' && (
+                  <><div className="cvla-backdrop" onClick={() => setMenu(null)} />
+                  <div className="cvla-menu" ref={menuRef} style={{ minWidth: 190 }}>
+                    <button className="cvla-danger" onClick={async () => {
+                      setMenu(null);
+                      if (await askConfirm({ title: 'Bỏ nháp', message: `Bỏ toàn bộ chỉnh sửa chưa upload (${draft.edited.size} frame)?\nChưa có gì lên CVAT nên server không bị ảnh hưởng.`, confirmLabel: 'Bỏ nháp', danger: true })) dispatch({ t: 'reset', baseline: data.ann });
+                    }}><Icon name="trash" />Bỏ toàn bộ nháp</button>
+                  </div></>
+                )}
+              </span>
+              <button className={draft.edited.size ? 'cvla-primary' : undefined} onClick={() => setUploading(true)} style={{ fontWeight: 700 }}>
+                <Icon name="upload" />Upload lên CVAT…{draft.edited.size ? <span className="cvla-badge">{draft.edited.size}</span> : null}
+              </button>
+            </span>
+          )}
+          <button onClick={() => focusRef.current()} disabled={selectedNum === null} title="Thu nhỏ tool và đưa camera 3D của CVAT lại gần object đang chọn (như bấm đúp vào object trong CVAT). Phím F."><Icon name="focus" />Focus</button>
+          <span className="cvla-menuwrap">
+            <button className="cvla-iconbtn cvla-iconbtn-b" onClick={() => setMenu(menu === 'settings' ? null : 'settings')} title="Đồng bộ, giao diện, tải point cloud" aria-label="Tùy chọn nhanh" aria-expanded={menu === 'settings'}><Icon name="settings" size={16} /></button>
+            {menu === 'settings' && (
+              <><div className="cvla-backdrop" onClick={() => setMenu(null)} />
+              <div className="cvla-menu" ref={menuRef}>
+                <h4>Đồng bộ với CVAT</h4>
+                <label title="Khi bạn chọn một object trong giao diện CVAT, tool tự chọn object đó và nhảy tới frame hiện tại của CVAT">
+                  <input type="checkbox" checked={sync} onChange={(e) => setSync(e.target.checked)} /> Theo object đang chọn trong CVAT
+                </label>
+                <label title="Khi bạn chọn object trong tool, giao diện CVAT chuyển focus sang object đó (đổi frame nếu object không có ở frame hiện tại)">
+                  <input type="checkbox" checked={pushOut} onChange={(e) => setPushOut(e.target.checked)} /> Chọn trong tool thì CVAT nhảy theo
+                </label>
+                <h4>Giao diện</h4>
+                <span className="cvla-seg" role="group" aria-label="Giao diện">
+                  {(Object.keys(THEME_LABEL) as Theme[]).map((t) => (
+                    <button key={t} className={theme === t ? 'cvla-seg-on' : undefined} aria-pressed={theme === t} onClick={() => setTheme(t)}>{THEME_LABEL[t]}</button>
+                  ))}
+                </span>
+                {data && (
+                  <>
+                    <h4>Point cloud</h4>
+                    <select
+                      value={lmode}
+                      title={`Cách tải point cloud: ${LOAD_MODES.find((x) => x.id === lmode)?.title ?? ''} Đổi xong áp dụng cho các frame chưa tải.`}
+                      onChange={(e) => { const v = e.target.value as LoadMode; setLmode(v); setLoadMode(v); if (data) configureLoading(data.job.start_frame, data.job.stop_frame, chunkSrcRef.current); }}
+                    >
+                      {LOAD_MODES.map((x) => <option key={x.id} value={x.id}>Tải: {x.label}</option>)}
+                    </select>
+                    <button onClick={() => { setMenu(null); reloadClouds(); }} title="Chỉ tải lại các frame lỗi (frame đang tải thì giữ nguyên)"><Icon name="reload" />Tải lại frame lỗi{passView.failed ? <span className="cvla-badge">{passView.failed}</span> : null}</button>
+                    <button onClick={() => { setMenu(null); void reloadAllClouds(); }} title="Bỏ hết point cloud đã tải và tải lại cả job từ máy chủ"><Icon name="reload" />Tải lại tất cả {data.job.stop_frame - data.job.start_frame + 1} frame</button>
+                  </>
+                )}
+                <h4>Trợ giúp</h4>
+                <button onClick={() => { setMenu(null); setTutorial(true); }} title="Xem lại hướng dẫn dùng tool">Hướng dẫn sử dụng</button>
+                <h4>Dữ liệu job</h4>
+                <button onClick={() => { setMenu(null); void reload(); }} title="Đọc lại nhãn của job từ CVAT (bỏ nháp chưa upload)"><Icon name="reload" />Tải lại dữ liệu từ CVAT</button>
+              </div></>
+            )}
           </span>
+        </div>
+        {inSettings && (
+          <div className="cvla-bar">
+            <span className="cvla-subtabs" role="tablist" aria-label="Cài đặt">
+              {settingsTabs.map((x) => (
+                <button key={x.id} role="tab" aria-selected={tab === x.id} className={tab === x.id ? 'cvla-subtab cvla-subtab-on' : 'cvla-subtab'} onClick={() => setTab(x.id)}>{x.label}</button>
+              ))}
+            </span>
+          </div>
         )}
-      </div>
+        {data && (tab === 'dyn' || tab === 'thr' || tab === 'cam') && <SettingsIO jobId={data.job.id} labels={data.labels} />}
       </div>
       <ShiftBanner pending={draft.edited.size} onUpload={() => setUploading(true)} />
       {restorable && data && (
-        <div style={{ background: '#e0f2fe', border: '1px solid #38bdf8', padding: '4px 8px', margin: '6px 0' }}>
-          Có <b>bản nháp chưa upload</b> từ lần trước ({new Date(restorable.savedAt).toLocaleString()}): {restorable.edited.length} frame đã sửa, {Object.keys(restorable.tracks).length} object.{' '}
-          <button style={{ fontWeight: 700 }} onClick={() => {
-            const r = applyDraft(restorable, data.ann);
-            dispatch({ t: 'restore', work: r.work, edited: r.edited });
-            restorableRef.current = null; setRestorable(null);
-            setToast(r.skipped.length ? `Đã khôi phục nháp; bỏ qua object ${r.skipped.join(', ')} (ID không còn khớp).` : 'Đã khôi phục bản nháp.');
-          }}>Khôi phục</button>{' '}
-          <button onClick={() => { kv.remove(draftKey(data.job.id)); restorableRef.current = null; setRestorable(null); }}>Bỏ bản nháp</button>
-        </div>
+        <Notice
+          tone="info"
+          actions={<>
+            <button className="cvla-primary" onClick={() => {
+              const r = applyDraft(restorable, data.ann);
+              dispatch({ t: 'restore', work: r.work, edited: r.edited });
+              restorableRef.current = null; setRestorable(null);
+              setToast(r.skipped.length ? `Đã khôi phục nháp; bỏ qua object ${r.skipped.join(', ')} (ID không còn khớp).` : 'Đã khôi phục bản nháp.');
+            }}>Khôi phục</button>
+            <button onClick={() => { kv.remove(draftKey(data.job.id)); restorableRef.current = null; setRestorable(null); }}>Bỏ bản nháp</button>
+          </>}
+        >
+          Có <b>bản nháp chưa upload</b> từ lần trước ({new Date(restorable.savedAt).toLocaleString()}): {restorable.edited.length} frame đã sửa, {Object.keys(restorable.tracks).length} object.
+        </Notice>
       )}
-      {draftNote && <div style={{ background: '#fff3cd', border: '1px solid #e0b000', padding: '4px 8px', margin: '6px 0' }}>{draftNote} <button onClick={() => setDraftNote('')}>×</button></div>}
+      {draftNote && <Notice tone="warn" onClose={() => setDraftNote('')}>{draftNote}</Notice>}
       {deleting && data && (
         <DeleteDialog
           job={data.job} baseline={data.ann} labels={data.labels} ids={deleting}
@@ -879,55 +898,54 @@ export function App() {
         />
       )}
       {data && reloading && (
-        <div style={{ background: '#eef4ff', border: '1px solid #7aa2e3', padding: '4px 8px', margin: '6px 0', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <progress value={reloadSt.total - reloadSt.left} max={reloadSt.total} style={{ width: 160 }} />
-          <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-            ↻ Đang tải lại: <b>{reloadSt.total - reloadSt.left}/{reloadSt.total}</b> frame đã về
-            {reloadSt.chunks.map((c) => (
-              <span key={c.k}> · chunk {c.k}: {c.got === 0 ? `chờ máy chủ dựng (${c.secs} s, thường 20–30 s)` : `đang nhận ${c.got}/${c.count} file (${c.secs} s)`}</span>
-            ))}
-            {reloadSt.chunks.length === 0 ? ' · đang tải từng frame' : ''}
-          </span>
-        </div>
+        <Notice tone="info">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <progress value={reloadSt.total - reloadSt.left} max={reloadSt.total} style={{ width: 160 }} />
+            <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+              Đang tải lại: <b>{reloadSt.total - reloadSt.left}/{reloadSt.total}</b> frame đã về
+              {reloadSt.chunks.map((c) => (
+                <span key={c.k}> · chunk {c.k}: {c.got === 0 ? `chờ máy chủ dựng (${c.secs} s, thường 20–30 s)` : `đang nhận ${c.got}/${c.count} file (${c.secs} s)`}</span>
+              ))}
+              {reloadSt.chunks.length === 0 ? ' · đang tải từng frame' : ''}
+            </span>
+          </div>
+        </Notice>
       )}
       {!storeHealth.ok && (
-        <div role="alert" style={{ background: '#ffe5e5', border: '2px solid #c00', color: '#900', padding: '6px 8px', margin: '6px 0', fontWeight: 600 }}>
-          ⚠ Tool KHÔNG lưu được dữ liệu ({storeHealth.reason === 'orphan' ? 'extension vừa được Reload / cập nhật trong khi cửa sổ tool này còn mở'
+        <Notice tone="error">
+          Tool KHÔNG lưu được dữ liệu ({storeHealth.reason === 'orphan' ? 'extension vừa được Reload / cập nhật trong khi cửa sổ tool này còn mở'
             : storeHealth.reason === 'quota' ? 'kho của extension đã đầy' : storeHealth.detail}): ca / KPI, bản nháp, ghi chú QC… từ giờ sẽ mất khi tải lại.{' '}
           {storeHealth.reason === 'orphan' ? 'Hãy tải lại tab CVAT (F5) rồi bấm lại biểu tượng extension trước khi làm tiếp.' : 'Hãy xoá bớt ca cũ ở tab Ca / KPI hoặc bản nháp không dùng, rồi tải lại tab.'}
-        </div>
+        </Notice>
       )}
       {/* Chỉ hiện ở lần tải / tính đầu của job (tải lại có thanh riêng ở trên): sau đó sửa box làm vài frame tính lại (kể cả phải tải lại
-          point cloud đã bị đẩy khỏi bộ nhớ) thì tính ngầm, ô chưa đủ có viền vàng; không chèn thêm dòng đẩy cả tool xuống rồi lùi lại (giật). */}
-      {data && passView.pending > 0 && doneJob !== data.job.id && (
-        <div style={{ background: '#eef4ff', border: '1px solid #7aa2e3', padding: '4px 8px', margin: '6px 0', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <progress value={passView.loading > 0 ? passView.total - passView.loading - passView.failed : passView.total - passView.pending - passView.failed} max={Math.max(1, passView.total - passView.failed)} style={{ width: 160 }} />
-          <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-            ⏳ Đã tải <b>{passView.total - passView.loading - passView.failed}/{passView.total}</b> frame
-            {passView.loading > 0
-              ? <> (còn <b>{passView.loading}</b> đang tải; mặt đường và ít điểm tính sau khi tải xong)</>
-              : <> · {ready ? 'đang tính phần còn lại' : 'đang tính'}: đã tính xong <b>{passView.total - passView.pending - passView.failed}/{passView.total}</b> frame (mặt đường, ít điểm)</>}{passView.failed ? ` · ${passView.failed} frame tải lỗi, bỏ qua` : ''} · trôi box: đã tính.{' '}
-            {ready ? <>Ô có <span style={PENDING_STYLE}>viền vàng</span>: số liệu chưa đủ, tự cập nhật khi tải xong.</> : `Batch Review mở được khi ${Math.min(UNLOCK_FRAMES, passView.total)} frame đầu tải xong.`}{' '}
-            <button onClick={retryFailedNow} title="Tải lại các frame lỗi ngay (frame đang tải thì giữ nguyên)">↻ Tải lại</button>
-          </span>
-        </div>
+          point cloud đã bị đẩy khỏi bộ nhớ) thì tính ngầm, ô chưa đủ có viền vàng. Khi đã mở được Batch Review thì chi tiết gọn vào chip
+          trên thanh đầu (bấm chip để xem), không chèn thêm dòng đẩy cả tool xuống rồi lùi lại (giật). */}
+      {data && loading && (!ready || showProgress) && (
+        <Notice
+          tone="info" onClose={ready ? () => setShowProgress(false) : undefined}
+          actions={<button onClick={retryFailedNow} title="Tải lại các frame lỗi ngay (frame đang tải thì giữ nguyên)"><Icon name="reload" />Tải lại</button>}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <progress value={passView.loading > 0 ? loadedFrames : passView.total - passView.pending - passView.failed} max={Math.max(1, passView.total - passView.failed)} style={{ width: 160 }} />
+            <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+              Đã tải <b>{loadedFrames}/{passView.total}</b> frame
+              {passView.loading > 0
+                ? <> (còn <b>{passView.loading}</b> đang tải; mặt đường và ít điểm tính sau khi tải xong)</>
+                : <> · {ready ? 'đang tính phần còn lại' : 'đang tính'}: đã tính xong <b>{passView.total - passView.pending - passView.failed}/{passView.total}</b> frame (mặt đường, ít điểm)</>}{passView.failed ? ` · ${passView.failed} frame tải lỗi, bỏ qua` : ''} · trôi box: đã tính.{' '}
+              {ready ? <>Ô có <span style={PENDING_STYLE}>viền vàng</span>: số liệu chưa đủ, tự cập nhật khi tải xong.</> : `Batch Review mở được khi ${Math.min(UNLOCK_FRAMES, passView.total)} frame đầu tải xong.`}
+            </span>
+          </div>
+        </Notice>
       )}
       {data && passView.failed > 0 && (
-        <div style={{ background: '#fff4e5', border: '1px solid #e0a040', padding: '4px 8px', margin: '6px 0', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          ⚠ <b>{passView.failed}</b> frame tải lỗi (thường do máy chủ báo bận), nên chưa có số liệu mặt đường / ít điểm của các frame đó.
-          <button onClick={() => { autoRetry.current = 0; retryFailedNow(); }}>↻ Tải lại các frame lỗi</button>
-          <span style={{ color: '#666' }}>{autoRetry.current < 3 ? `Tự thử lại sau 20 giây (đã thử ${autoRetry.current}/3).` : 'Đã tự thử 3 lần; bấm nút để thử tiếp.'}</span>
-        </div>
-      )}
-      {doneNote && (
-        <div style={{ background: '#e8ffe8', border: '1px solid #0a0', padding: 6, margin: '6px 0' }}>
-          ✅ <b>Đã tải xong.</b> {doneNote} <button onClick={() => setDoneNote('')}>×</button>
-        </div>
-      )}
-      {toast && (
-        <div style={{ background: '#e8ffe8', border: '1px solid #0a0', padding: 6, margin: '6px 0' }}>
-          {toast} <button onClick={() => setToast('')}>×</button>
-        </div>
+        <Notice
+          tone="warn"
+          actions={<button onClick={() => { autoRetry.current = 0; retryFailedNow(); }}><Icon name="reload" />Tải lại các frame lỗi</button>}
+        >
+          <b>{passView.failed}</b> frame tải lỗi (thường do máy chủ báo bận), nên chưa có số liệu mặt đường / ít điểm của các frame đó.{' '}
+          <span style={{ opacity: .75 }}>{autoRetry.current < 3 ? `Tự thử lại sau 20 giây (đã thử ${autoRetry.current}/3).` : 'Đã tự thử 3 lần; bấm nút để thử tiếp.'}</span>
+        </Notice>
       )}
       {state.kind === 'loading' && (
         <div>
@@ -943,11 +961,9 @@ export function App() {
           )}
         </div>
       )}
-      {state.kind === 'error' && <p style={{ color: '#b00' }}>Lỗi: {state.message}</p>}
+      {state.kind === 'error' && <Notice tone="error">Lỗi: {state.message}</Notice>}
       {data && data.removedIds.length > 0 && (
-        <div style={{ background: '#fdd', border: '1px solid #b00', padding: 8, marginBottom: 8 }}>
-          CẢNH BÁO: ID đã biến mất so với lần đọc trước: {data.removedIds.join(', ')}
-        </div>
+        <Notice tone="error">CẢNH BÁO: ID đã biến mất so với lần đọc trước: {data.removedIds.join(', ')}</Notice>
       )}
       {data && work && tab === 'objects' && (
         <ObjectTable
@@ -1001,6 +1017,13 @@ export function App() {
       {tab === 'shift' && <ShiftPanel />}
       {tab === 'keys' && <KeysPanel map={keymap} setMap={setKeymap} />}
       {data && tab === 'job' && <JobInfo s={summarize(data.job, data.labels, data.ann)} />}
+      {/* thông báo thoáng qua: dính ở đáy khung nhìn, không chèn vào luồng trang nên không đẩy nội dung */}
+      {(doneNote || toast) && (
+        <div className="cvla-toasts">
+          {doneNote && <Notice tone="success" onClose={() => setDoneNote('')}><b>Đã tải xong.</b> {doneNote}</Notice>}
+          {toast && <Notice tone="success" onClose={() => setToast('')}>{toast}</Notice>}
+        </div>
+      )}
     </div>
   );
 }

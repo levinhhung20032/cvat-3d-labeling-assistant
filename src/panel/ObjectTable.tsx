@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { askConfirm } from './confirmStore';
 import type { ObjectRow } from '../shared/table';
 import type { CvatLabel, CvatTrack } from '../shared/types';
 import { sortedShapes, stateAt } from '../shared/interp';
@@ -138,7 +139,7 @@ export function ObjectTable({ jobId, rows, hints, overlapFrames, overlapPairs, o
         {seen.size > 0 && (
           <span style={{ marginLeft: 10 }} title="ID gạch chân = object đã mở xem trong Batch Review (lưu theo job)">
             <span style={SEEN_STYLE}>ID</span> đã xem: {rows.filter((r) => seen.has(r.id)).length}{' '}
-            <button onClick={() => { if (confirm('Bỏ đánh dấu "đã xem" của mọi object trong job này?')) seenStore.clear(jobId); }} style={{ padding: '0 5px' }}>↺ bỏ đánh dấu</button>
+            <button onClick={() => { void askConfirm({ title: 'Bỏ đánh dấu đã xem', message: 'Bỏ đánh dấu "đã xem" của mọi object trong job này?', confirmLabel: 'Bỏ đánh dấu' }).then((ok) => { if (ok) seenStore.clear(jobId); }); }} style={{ padding: '0 5px' }}>↺ bỏ đánh dấu</button>
           </span>
         )}
       </div>
