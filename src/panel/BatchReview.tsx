@@ -33,7 +33,8 @@ import { CameraPanel } from './CameraPanel';
 import { useCameraShow } from './cameraStore';
 import { qcStore, useQcMode, useQcNotes } from './qcStore';
 import { qcKey } from '../shared/qc';
-import { onAction, useKeyHint, useKeyOf } from './actions';
+import { actionOfTitle, onAction, useKeyHint, useKeyOf } from './actions';
+import { KeyBindMenu } from './KeyBindMenu';
 import { DEFAULT_FIT, fitGroundOf, fitReport, type FitReport } from '../shared/fit';
 import { thresholdStore, useThresholdVersion } from './thresholdStore';
 import { sym, useSymbols } from './symbolStore';
@@ -710,6 +711,9 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   const { start_frame: start, stop_frame: stop } = job;
   const hint = useKeyHint();
   const keyOf = useKeyOf();
+  // Chuột phải vào nút có phím tắt: menu gán / gỡ phím (cùng dữ liệu với tab Phím tắt)
+  const brRoot = useRef<HTMLDivElement>(null);
+  const [bindMenu, setBindMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [prefs, setPrefs] = useState(() => loadPrefs());
   const [showCmp, setShowCmp] = useState(false);
   const thrVer = useThresholdVersion(); // ngưỡng cảnh báo chỉnh tay (tab Threshold) đổi thì tính lại cảnh báo
@@ -1391,7 +1395,19 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   }
 
   return (
-    <>
+    <div
+      ref={brRoot} style={{ position: 'relative' }}
+      onContextMenu={(e) => {
+        const t = e.target as Element | null;
+        if (!t || t.ownerDocument !== document) return; // nút trong cửa sổ rời: để menu mặc định
+        const btn = t.closest('button');
+        const id = btn ? actionOfTitle(btn.getAttribute('title') ?? '') : null;
+        if (!btn || !id) return;
+        e.preventDefault();
+        const b = brRoot.current?.getBoundingClientRect();
+        setBindMenu({ id, x: e.clientX - (b?.left ?? 0), y: e.clientY - (b?.top ?? 0) });
+      }}
+    >
       {/* Nhóm điều khiển: người dùng tự sắp (kéo ⠿ ở tiêu đề để chuyển nhóm, kéo vạch để đổi rộng / cao), xem ControlLayout.
           Mặc định 3 hàng (chủ dự án 2026-10-30): Keyframe & kích thước + Outside · Gợi ý & mặt đất + QC · Object & cửa sổ + Hiển thị. */}
       <ControlLayout groups={{
@@ -1671,7 +1687,8 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
           </div>
         </div>
       )}
+      {bindMenu && <KeyBindMenu id={bindMenu.id} x={bindMenu.x} y={bindMenu.y} maxW={brRoot.current?.getBoundingClientRect().width ?? 600} onClose={() => setBindMenu(null)} />}
       {camShow ? <CameraPanel frame={selCol?.f ?? null} azimuth={az} /> : <p style={{ color: '#666' }}>Ảnh camera đang tắt (bật lại ở tab Camera).</p>}
-    </>
+    </div>
   );
 }

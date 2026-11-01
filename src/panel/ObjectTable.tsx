@@ -31,8 +31,16 @@ const issueTip = (by: Record<string, number>) => {
   return lines.length ? lines.join(String.fromCharCode(10)) : 'Không có lỗi luật QC';
 };
 
-export function ObjectTable({ jobId, rows, hints, overlapFrames, overlapPairs, onOpen, onSelect, selectedNum, onDelete, incomplete, tracks, labels: jobLabels, start, stop, cvatFrame }: {
+/** Cờ cảnh báo của một object (tính khi mở menu chuột phải): frame đi xa (lỗi D), frame ít điểm, và cờ sớm nhất (kind: motion / sparse / drift / overlap hoặc mã lỗi luật). */
+export interface ObjFlags { far: number[]; motion: number[]; sparse: number[]; first: { frame: number; kind: string } | null; pending: boolean }
+
+export function ObjectTable({ jobId, flagsOf, onOutside, onAcceptHints, onIgnoreMotion, onOpenAt, rows, hints, overlapFrames, overlapPairs, onOpen, onSelect, selectedNum, onDelete, incomplete, tracks, labels: jobLabels, start, stop, cvatFrame }: {
   jobId: number;
+  flagsOf: (num: number) => ObjFlags; // menu chuột phải: cờ cảnh báo của object
+  onOutside: (num: number, kind: 'far' | 'sparse') => void; // outside toàn bộ frame đi xa (lỗi D) / ít điểm của object
+  onAcceptHints: (num: number) => void; // chấp nhận mọi gợi ý attribute của object
+  onIgnoreMotion: (num: number) => void; // bỏ qua lỗi đi xa bất thường (Y) ở mọi frame của object
+  onOpenAt: (num: number, frame: number) => void; // mở Batch Review của object ở frame cho trước
   labels: CvatLabel[];
   selectedNum: number | null; onSelect: (num: number) => void; // bấm 1 lần: chọn dòng (chọn object); bấm đúp: mở Batch Review (onOpen)
   onDelete: (r: ObjectRow) => void; rows: ObjectRow[]; hints: Map<number, number>; overlapFrames: Map<number, number>; overlapPairs: OverlapPair[]; onOpen: (num: number, first: number | null) => void;
@@ -42,6 +50,15 @@ export function ObjectTable({ jobId, rows, hints, overlapFrames, overlapPairs, o
 }) {
   useSymbols();
   const [label, setLabel] = useState('');
+  // Menu chuột phải: tác động lên đúng dòng (object) được bấm, không đổi dòng đang chọn. Toạ độ tính theo khung bọc bảng (không dùng fixed vì chế độ tối đảo màu cả trang bằng filter).
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [ctx, setCtx] = useState<{ x: number; y: number; row: ObjectRow; flags: ObjFlags } | null>(null);
+  useEffect(() => {
+    if (!ctx) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setCtx(null); };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [ctx]);
   const seen = useSeen(jobId);
   const [sort, setSort] = useState<SortKey>('num');
   const [onlyMissing, setOnlyMissing] = useState(false);
@@ -123,7 +140,7 @@ export function ObjectTable({ jobId, rows, hints, overlapFrames, overlapPairs, o
   const far = DEFAULT_GROUND.maxRange;
   const pendingTip = 'Chưa đủ dữ liệu: object còn frame đang tải ngầm / chưa tính ít điểm (P), con số có thể còn tăng; viền vàng tự mất khi tính xong.';
   return (
-    <>
+    <div ref={wrapRef} style={{ position: 'relative' }}>
       <div style={{ marginBottom: 6 }}>
         Nhãn: <select value={label} onChange={(e) => setLabel(e.target.value)}>
           <option value="">tất cả</option>
@@ -165,6 +182,11 @@ export function ObjectTable({ jobId, rows, hints, overlapFrames, overlapPairs, o
           {shown.map((r, i) => (
             <tr
               key={r.num} ref={r.num === selectedNum ? selRow : undefined} onClick={() => onSelect(r.num)} onDoubleClick={() => onOpen(r.num, r.first)} aria-selected={r.num === selectedNum}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                const b = wrapRef.current?.getBoundingClientRect();
+                setCtx({ x: e.clientX - (b?.left ?? 0), y: e.clientY - (b?.top ?? 0), row: r, flags: flagsOf(r.num) });
+              }}
               style={{ cursor: 'pointer', userSelect: 'none', borderTop: '1px solid #ddd', background: r.num === selectedNum ? SEL_BG : r.made === 'draft' ? '#dff5df' : r.made === 'server' ? '#e3ecff' : i % 2 ? ODD_BG : undefined }}
             >
               <td><b style={seen.has(r.id) ? SEEN_STYLE : undefined} title={seen.has(r.id) ? 'Đã xem trong Batch Review' : undefined}>{r.num}</b> {r.made === 'draft' ? <span title="Object do tool tạo, đang trong NHÁP (chưa có trên CVAT)" style={{ background: '#2e9d3b', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 mới</span> : r.made === 'server' ? <span title="Object do tool tạo và đã upload; chỉ loại này mới xóa được bằng tool" style={{ background: '#2f5fd0', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 tool</span> : <span style={{ color: "#999", fontSize: 10 }}>db {r.id}</span>}</td><td>{r.label}</td>
@@ -193,6 +215,34 @@ export function ObjectTable({ jobId, rows, hints, overlapFrames, overlapPairs, o
           ))}
         </tbody>
       </table>
-    </>
+      {ctx && (() => {
+        const { row, flags: fl } = ctx;
+        const close = () => setCtx(null);
+        const run = (f: () => void) => () => { close(); f(); };
+        const first = fl.first;
+        const kindText = first ? (first.kind === 'motion' ? 'đi xa bất thường' : first.kind === 'sparse' ? 'ít điểm' : first.kind === 'drift' ? 'trôi box' : first.kind === 'overlap' ? 'chồng lấn' : `lỗi ${sym(first.kind)}`) : '';
+        const nHints = h(row);
+        const wrapW = wrapRef.current?.getBoundingClientRect().width ?? 600;
+        return (
+          <>
+            <div className="cvla-backdrop" onClick={close} onContextMenu={(e) => { e.preventDefault(); close(); }} />
+            <div className="cvla-menu cvla-ctxmenu" role="menu" aria-label={`Menu object ${row.num}`} style={{ left: Math.max(0, Math.min(ctx.x, wrapW - 280)), top: ctx.y, right: 'auto' }}>
+              <h4>Object #{row.num} · {row.label}</h4>
+              <button role="menuitem" disabled={!fl.far.length} onClick={run(() => onOutside(row.num, 'far'))} title="Đặt outside cho mọi frame của object này bị lỗi D (quá xa: khoảng cách tới ego vượt rule distance ở Cài đặt → Threshold; không tính frame đã bỏ qua). Có hộp xác nhận, hoàn tác được.">⛔ Outside toàn bộ frame đi xa — lỗi D ({fl.far.length})</button>
+              <button role="menuitem" disabled={!fl.sparse.length} onClick={run(() => onOutside(row.num, 'sparse'))} title="Đặt outside cho mọi frame của object này có quá ít điểm trong box (theo ngưỡng ở Cài đặt → Threshold, chỉ frame đã tải point cloud). Có hộp xác nhận, hoàn tác được.">⛔ Outside toàn bộ frame ít điểm ({fl.sparse.length}){fl.pending ? ' ⏳' : ''}</button>
+              <button role="menuitem" disabled={!fl.motion.length} onClick={run(() => onIgnoreMotion(row.num))} title="Bỏ qua cảnh báo đi xa bất thường (Y: vật nhảy vị trí so với các frame trước) ở mọi frame đang báo của object này. Các object khác không bị ảnh hưởng; hoàn lại từng frame ở Batch Review.">🚫 Bỏ qua lỗi đi xa bất thường ({fl.motion.length})</button>
+              <button role="menuitem" disabled={!first} onClick={run(() => first && onOpenAt(row.num, first.frame))} title="Mở Batch Review của object, cửa sổ bắt đầu ở frame có cờ cảnh báo sớm nhất (lỗi luật gồm D, đi xa bất thường, ít điểm, trôi box, chồng lấn)">⚑ Nhảy tới cờ cảnh báo đầu tiên{first ? ` (frame ${first.frame}: ${kindText})` : ' (không có)'}</button>
+              <button role="menuitem" disabled={!nHints} onClick={run(() => onAcceptHints(row.num))} title="Chấp nhận mọi gợi ý attribute còn hiệu lực của object này, một lần hoàn tác">✔ Chấp nhận attribute gợi ý ({nHints})</button>
+              <hr />
+              <button role="menuitem" onClick={run(() => onOpen(row.num, row.first))}>▶ Mở Batch Review (từ frame đầu)</button>
+              <button role="menuitem" onClick={run(() => onSelect(row.num))} title="Chọn object này (CVAT chọn theo nếu đang bật đồng bộ)">◎ Chọn object trong tool và CVAT</button>
+              <button role="menuitem" disabled={!(row.id > 0)} title={row.id > 0 ? undefined : 'Object mới trong nháp chưa có ID trên CVAT nên không đánh dấu được'} onClick={run(() => { if (seen.has(row.id)) seenStore.remove(jobId, row.id); else seenStore.add(jobId, row.id); })}>{seen.has(row.id) ? '↺ Bỏ đánh dấu đã xem' : '✓ Đánh dấu đã xem'}</button>
+              <button role="menuitem" onClick={run(() => { try { void navigator.clipboard?.writeText(`#${row.num}`); } catch { /* bỏ qua */ } })}>⧉ Sao chép số thứ tự (#{row.num})</button>
+              {row.made !== null && <button role="menuitem" className="cvla-danger" onClick={run(() => onDelete(row))}>🗑 Xóa object do tool tạo</button>}
+            </div>
+          </>
+        );
+      })()}
+    </div>
   );
 }

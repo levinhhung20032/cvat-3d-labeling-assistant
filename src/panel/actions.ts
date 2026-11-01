@@ -29,9 +29,16 @@ const keySubs = new Set<() => void>();
 const subscribeKeys = (f: () => void) => { keySubs.add(f); return () => { keySubs.delete(f); }; };
 const currentKeymap = () => (current ??= loadKeymapPref());
 
+// App giữ keymap (useKeymap); màn hình khác (menu chuột phải ở Batch Review) đổi phím qua applyKeymap.
+let externalSet: ((m: Keymap) => void) | null = null;
+export const applyKeymap = (m: Keymap): boolean => { if (!externalSet) return false; externalSet(m); return true; };
+/** Keymap hiện hành, tự vẽ lại khi đổi. */
+export const useCurrentKeymap = (): Keymap => useSyncExternalStore(subscribeKeys, currentKeymap);
+
 export function useKeymap(): [Keymap, (m: Keymap) => void] {
   const [map, setMap] = useState<Keymap>(loadKeymapPref);
   useEffect(() => { saveKeymapPref(map); current = map; keySubs.forEach((f) => f()); }, [map]);
+  useEffect(() => { externalSet = setMap; return () => { if (externalSet === setMap) externalSet = null; }; }, [setMap]);
   return [map, setMap];
 }
 
@@ -42,7 +49,15 @@ export function useKeyOf(): (id: string) => string | null {
 }
 
 /** Tooltip của nút: mô tả chức năng + phím tắt đang gán. Tên nút không ghi phím. */
+// Tooltip → mã thao tác: menu chuột phải tìm thao tác của nút từ chính tooltip của nó (mọi nút dùng hint() đều gán phím được).
+const titleIds = new Map<string, string>();
+export const actionOfTitle = (title: string): string | null => titleIds.get(title) ?? null;
 export function useKeyHint(): (id: string, tip: string) => string {
   const keyOf = useKeyOf();
-  return (id, tip) => `${tip}\nPhím tắt: ${keyOf(id) ?? 'chưa gán (gán ở tab Phím tắt)'}`;
+  return (id, tip) => {
+    const s = `${tip}\nPhím tắt: ${keyOf(id) ?? 'chưa gán (chuột phải vào nút hoặc dùng tab Phím tắt để gán)'}`;
+    if (titleIds.size > 5000) titleIds.clear(); // hint() chạy lại ở mỗi lần vẽ nên bản ghi tự dựng lại
+    titleIds.set(s, id);
+    return s;
+  };
 }

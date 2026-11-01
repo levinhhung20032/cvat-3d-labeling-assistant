@@ -105,6 +105,9 @@ body { margin: 0; }
 .cvla-tutorial-dots { display: flex; justify-content: center; gap: 6px; }
 .cvla-root button.cvla-dot { width: 9px; height: 9px; padding: 0; border-radius: 50%; border: 1px solid #9aa4b2; background: #fff; }
 .cvla-root button.cvla-dot-on { background: #2563eb; border-color: #2563eb; }
+.cvla-menu button { text-align: left; }
+.cvla-menu hr { width: 100%; border: 0; border-top: 1px solid #d5dbe3; margin: 2px 0; }
+.cvla-ctxmenu { min-width: 260px; }
 /* Hộp xác nhận */
 .cvla-modal-back { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; padding: 16px; }
 .cvla-modal { background: #fff; color: #111; border-radius: 10px; padding: 14px 16px; max-width: 520px; width: 100%; box-shadow: 0 10px 40px rgba(0,0,0,.4); display: flex; flex-direction: column; gap: 10px; }

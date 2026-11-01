@@ -35,6 +35,12 @@ export const seenStore = {
     if (!(id > 0) || read(jobId).has(id)) return;
     write(jobId, new Set([...read(jobId), id]));
   },
+  remove(jobId: number, id: number) {
+    if (!read(jobId).has(id)) return;
+    const next = new Set(read(jobId));
+    next.delete(id);
+    write(jobId, next);
+  },
   clear(jobId: number) { write(jobId, new Set()); },
 };
 export const useSeen = (jobId: number) => useSyncExternalStore(subscribe, () => read(jobId));

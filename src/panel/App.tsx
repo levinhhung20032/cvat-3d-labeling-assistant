@@ -40,14 +40,17 @@ import { DeleteDialog } from './DeleteDialog';
 import { madeStore, useMadeIds } from './madeStore';
 import { defaultDyn, dynClassStore, useDynClasses, useDynRules } from './dynClassStore';
 import { resolveDyn } from '../shared/dynrule';
-import { ATTRS_OF, SIZE_SYNC } from '../shared/qcrules';
+import { ATTRS_OF, SIZE_SYNC, trackIssues } from '../shared/qcrules';
 import { ShiftPanel } from './ShiftPanel';
-import { attrKey, issueKey, motionKey, overlapKey, shiftStore, useIgnored, useShifts } from './shiftStore';
+import { attrKey, ignoreStore, issueKey, motionKey, overlapKey, shiftStore, useIgnored, useShifts } from './shiftStore';
 import { getAttr, parseLabelSpecs } from '../shared/attributes';
 import { suggestAttributes } from '../shared/attrSuggest';
 import { fmtDuration, shiftName, computeKpi } from '../shared/shift';
 import { emitAction, isCapturing, useKeymap } from './actions';
-import { ObjectTable } from './ObjectTable';
+import { ObjectTable, type ObjFlags } from './ObjectTable';
+import { motionJump } from '../shared/motion';
+import { setOutsideRange } from '../shared/keyframes';
+import { setAttrFrom, setAttrStatic } from '../shared/attributes';
 import { STYLE } from './styles';
 import { Notice } from './Notice';
 import { Icon } from './Icon';
@@ -710,6 +713,122 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
     [data, work, ignAll, madeIds, drift, sparseAll, thrVer],
   );
 
+  // ---- Menu chuột phải ở bảng object: tác động lên đúng object của dòng được bấm ----
+  /** Các frame cảnh báo của một object: đi xa (lỗi D), đi xa bất thường (Y), ít điểm, lỗi luật QC, trôi box, chồng lấn (không tính cái đã bỏ qua). */
+  const objectFlags = (num: number): ObjFlags => {
+    const none: ObjFlags = { far: [], motion: [], sparse: [], first: null, pending: false };
+    if (!data || !work) return none;
+    const t = work.tracks[num - 1];
+    if (!t) return none;
+    const label = labelNames.get(t.label_id) ?? '';
+    const jid = data.job.id;
+    const frames: number[] = [];
+    for (let f = data.job.start_frame; f <= data.job.stop_frame; f++) frames.push(f);
+    const far: number[] = [], sparse: number[] = [], motion: number[] = [];
+    for (const f of frames) {
+      const c = stateAt(t, f).cuboid;
+      if (!c) continue;
+      if (motionJump(t, f, label) && !ignAll.has(motionKey(jid, num, f))) motion.push(f);
+      const e = passRes.current.get(f)?.get(num);
+      if (e?.sparse && e.sig === sigOf(c) && !ignAll.has(issueKey(jid, num, f, 'P'))) sparse.push(f);
+    }
+    const cand: { frame: number; kind: string }[] = [
+      ...motion.map((frame) => ({ frame, kind: 'motion' })),
+      ...sparse.map((frame) => ({ frame, kind: 'sparse' })),
+      ...(drift.get(num) ?? []).map((x) => ({ frame: x.f, kind: 'drift' })),
+      ...overlaps.filter((o) => o.a === num || o.b === num).map((o) => ({ frame: o.frame, kind: 'overlap' })),
+    ];
+    for (const [f, list] of trackIssues(t, label, frames, undefined, num)) {
+      for (const i of list) {
+        if (ignAll.has(issueKey(jid, num, f, i.kind))) continue;
+        cand.push({ frame: f, kind: i.kind });
+        if (i.kind === 'D') far.push(f); // lỗi D (quá xa: khoảng cách tới ego vượt rule distance)
+      }
+    }
+    cand.sort((x, y) => x.frame - y.frame);
+    return { far: far.sort((x, y) => x - y), motion, sparse, first: cand[0] ?? null, pending: passView.incomplete.has(num) };
+  };
+  /** Outside toàn bộ frame đã gắn cờ (đi xa = lỗi D / ít điểm) của một object: gom thành các đoạn liên tiếp, hoàn tác được. */
+  const outsideFlagged = async (num: number, kind: 'far' | 'sparse') => {
+    if (!data || !work) return;
+    const t = work.tracks[num - 1];
+    if (!t) return;
+    const fl = objectFlags(num);
+    const frames = kind === 'far' ? fl.far : fl.sparse;
+    const what = kind === 'far' ? 'đi xa (lỗi D)' : 'ít điểm';
+    if (!frames.length) { setToast(`Object #${num}: không có frame ${what} nào để đặt outside.`); return; }
+    const list = frames.length > 12 ? `${frames.slice(0, 12).join(', ')}… (+${frames.length - 12})` : frames.join(', ');
+    const warn = fl.pending && kind === 'sparse' ? '\nLưu ý: object còn frame chưa tải / chưa tính, danh sách có thể chưa đủ.' : '';
+    if (!await askConfirm({
+      title: `Outside frame ${what} · object #${num}`,
+      message: `Đặt outside cho ${frames.length} frame: ${list}.\nSau mỗi đoạn, frame kế tiếp giữ nguyên trạng thái. Chỉ nằm trong nháp tới khi bạn upload, hoàn tác được.${warn}`,
+      confirmLabel: 'Đặt outside',
+    })) return;
+    // sao lưu box (cùng sổ với Batch Review) để "đưa object trở lại" khôi phục đúng vị trí cũ
+    const bakKey = `cvla-bak:${data.job.id}:${num}`;
+    try {
+      const m = JSON.parse(kv.get(bakKey) ?? '{}') as Record<string, unknown>;
+      for (const f of frames) { const c = stateAt(t, f).cuboid; if (c) m[String(f)] = c; }
+      kv.set(bakKey, JSON.stringify(m));
+    } catch { /* bỏ qua */ }
+    let cur = t;
+    const changed = new Set<number>();
+    let a = frames[0]!, prev = a;
+    const runs: [number, number][] = [];
+    for (const f of frames.slice(1)) { if (f === prev + 1) { prev = f; continue; } runs.push([a, prev]); a = f; prev = f; }
+    runs.push([a, prev]);
+    for (const [x, y] of runs) {
+      const r = setOutsideRange(cur, x, y, data.job.stop_frame);
+      if (r) { cur = r.track; r.frames.forEach((f) => changed.add(f)); }
+    }
+    if (!changed.size) { setToast(`Object #${num}: không đổi được frame nào.`); return; }
+    dispatch({ t: 'track', idx: num - 1, track: cur, frames: [...changed] });
+    shiftStore.edit(data.job.id, num);
+    setToast(`Object #${num}: đã đặt outside ${frames.length} frame ${what} (${runs.length} đoạn). Hoàn tác ở ô Nháp.`);
+  };
+  /** Bỏ qua lỗi đi xa bất thường (Y) ở mọi frame đang báo của MỘT object (như nút "bỏ qua tất cả" ở Batch Review: chỉ object này). */
+  const ignoreMotionAll = (num: number) => {
+    if (!data) return;
+    const frames = objectFlags(num).motion;
+    if (!frames.length) { setToast(`Object #${num}: không có lỗi đi xa bất thường nào để bỏ qua.`); return; }
+    ignoreStore.set(frames.map((f) => motionKey(data.job.id, num, f)), true);
+    setToast(`Object #${num}: đã bỏ qua lỗi đi xa bất thường ở ${frames.length} frame (${frames.length > 8 ? `${frames.slice(0, 8).join(', ')}…` : frames.join(', ')}). Hoàn lại từng frame ở Batch Review.`);
+  };
+  /** Chấp nhận mọi gợi ý attribute còn hiệu lực của một object (một lần hoàn tác); tính ở frame có box đầu tiên như dấu ! ở bảng. */
+  const acceptHints = (num: number) => {
+    if (!data || !work) return;
+    const t = work.tracks[num - 1];
+    const specs = parseLabelSpecs(data.labels);
+    const spec = t ? specs.get(t.label_id) : undefined;
+    const first = t?.shapes.find((s) => !s.outside);
+    if (!t || !spec || !first) { setToast(`Object #${num}: không có attribute hoặc chưa có box để gợi ý.`); return; }
+    const peds = work.tracks
+      .filter((x) => specs.get(x.label_id)?.name.toLowerCase() === 'pedestrian')
+      .map((x) => stateAt(x, first.frame).cuboid)
+      .filter((c): c is NonNullable<typeof c> => !!c);
+    const live = suggestAttributes({ track: t, label: spec.name, spec, frame: first.frame, box: stateAt(t, first.frame).cuboid, pedestrians: peds })
+      .filter((h) => !ignAll.has(attrKey(data.job.id, num, h.spec.id, h.scope === 'frame' ? first.frame : null)));
+    if (!live.length) { setToast(`Object #${num}: không có gợi ý attribute nào.`); return; }
+    let cur = t;
+    const frames = new Set<number>();
+    for (const h of live) {
+      const r = !h.spec.mutable ? setAttrStatic(cur, h.spec, h.suggested) : setAttrFrom(cur, h.spec, first.frame, h.suggested);
+      if (r) { cur = r.track; r.frames.forEach((f) => frames.add(f)); }
+    }
+    if (!frames.size) { setToast(`Object #${num}: các attribute đã đúng giá trị gợi ý.`); return; }
+    dispatch({ t: 'track', idx: num - 1, track: cur, frames: [...frames] });
+    shiftStore.edit(data.job.id, num);
+    setToast(`Object #${num}: đã chấp nhận ${live.length} gợi ý attribute (${live.map((h) => `${h.spec.name} → ${h.suggested}`).join(', ')}).`);
+  };
+  /** Mở Batch Review của object, cửa sổ bắt đầu ở frame cho trước. */
+  const openAtFrame = (num: number, frame: number) => {
+    if (!data) return;
+    selectFromTool(num);
+    setStartFrame(frame);
+    openAtRef.current = frame;
+    openReview();
+  };
+
   /** Xóa object do tool tạo: trong nháp thì bỏ khỏi nháp; đã upload thì mở hộp thoại xóa trên CVAT (chỉ ID trong sổ của tool). */
   const deleteMade = async (r: { num: number; id: number; made: 'draft' | 'server' | null }) => {
     if (!data || r.made === null) return;
@@ -967,7 +1086,7 @@ Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', dange
       )}
       {data && work && tab === 'objects' && (
         <ObjectTable
-          jobId={data.job.id} onDelete={deleteMade} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs} incomplete={passView.incomplete}
+          jobId={data.job.id} onDelete={deleteMade} flagsOf={objectFlags} onOutside={(n, k) => { void outsideFlagged(n, k); }} onAcceptHints={acceptHints} onIgnoreMotion={ignoreMotionAll} onOpenAt={openAtFrame} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs} incomplete={passView.incomplete}
           tracks={work.tracks} labels={data.labels} start={data.job.start_frame} stop={data.job.stop_frame} cvatFrame={focus?.frame ?? null}
           selectedNum={selectedNum} onSelect={selectFromTool}
           onOpen={(num) => {
