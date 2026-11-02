@@ -1,11 +1,19 @@
 import { build } from 'vite';
 import react from '@vitejs/plugin-react';
-import { cpSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 // node build.mjs                    → dist/          (Edge / Chrome, manifest.json)
 // node build.mjs --target=firefox   → dist-firefox/  (Firefox, manifest.firefox.json)
+// node build.mjs --target=dev       → dist-dev/      (bản DEV: một extension riêng song song với bản chính; Claude chỉ build ở đây)
 const firefox = process.argv.includes('--target=firefox');
-const out = firefox ? 'dist-firefox' : 'dist';
+const dev = process.argv.includes('--target=dev');
+// --out=<thư mục> (tuỳ chọn): build thử ra chỗ khác mà không đụng tới dist đang được nạp vào trình duyệt.
+const outArg = process.argv.find((x) => x.startsWith('--out='));
+const out = outArg ? outArg.slice(6) : firefox ? 'dist-firefox' : dev ? 'dist-dev' : 'dist';
+// Móc DEV (tự Reload, tự chèn, ép chế độ nhúng): chỉ bản DEV nạp src/dev/hooks.local.ts (bị git bỏ qua); mọi bản khác dùng bản rỗng hooks.stub.ts.
+const devHooks = dev && existsSync('src/dev/hooks.local.ts') ? 'src/dev/hooks.local.ts' : 'src/dev/hooks.stub.ts';
+const alias = { 'dev-hooks': resolve(devHooks) };
 // content script chứa cả React (chế độ nhúng dự phòng); thư viện đọc process.env.NODE_ENV nên phải khai báo ở build dạng lib.
 const define = { __FIREFOX__: JSON.stringify(firefox), 'process.env.NODE_ENV': JSON.stringify('production') };
 
@@ -21,6 +29,7 @@ for (const [name, entry] of [
     publicDir: false,
     logLevel: 'warn',
     define,
+    resolve: { alias },
     plugins: [react()], // content script chứa cả panel (chế độ nhúng dự phòng)
     build: {
       outDir: out,
@@ -53,7 +62,27 @@ for (const f of readdirSync(out, { recursive: true })) {
   if (/[￾￿]/.test(text)) throw new Error(`${out}/${f} chứa ký tự không hợp lệ (U+FFFE / U+FFFF); trình duyệt sẽ từ chối nạp`);
 }
 
-cpSync(firefox ? 'public/manifest.firefox.json' : 'public/manifest.json', `${out}/manifest.json`);
+// Bản chính không bao giờ chứa móc DEV: nếu lọt chuỗi nào thì dừng build.
+if (!dev) {
+  for (const f of readdirSync(out, { recursive: true })) {
+    if (!String(f).endsWith('.js')) continue;
+    const text = readFileSync(`${out}/${f}`, 'utf8');
+    for (const marker of ['cvla-dev-buildcheck', 'cvla-panel-mode']) {
+      if (text.includes(marker)) throw new Error(`${out}/${f} chứa móc DEV (${marker}); bản chính không được có`);
+    }
+  }
+}
+
+if (dev) {
+  // Bản DEV là extension khác hẳn: tên, nhãn phiên bản và tiêu đề riêng (ID extension khác vì nạp từ thư mục khác).
+  const m = JSON.parse(readFileSync('public/manifest.json', 'utf8'));
+  m.name = `${m.name} (DEV)`;
+  m.version_name = `${m.version}-dev.${Date.now().toString(36)}`;
+  m.action.default_title = '[DEV] ' + m.action.default_title;
+  writeFileSync(`${out}/manifest.json`, JSON.stringify(m, null, 2));
+} else {
+  cpSync(firefox ? 'public/manifest.firefox.json' : 'public/manifest.json', `${out}/manifest.json`);
+}
 // Icon extension (PNG 16/32/48/128; icon.svg là bản gốc để vẽ lại)
 for (const n of [16, 32, 48, 128]) cpSync(`public/icons/icon-${n}.png`, `${out}/icons/icon-${n}.png`);
 // Giấy phép của mã bên thứ ba đóng gói kèm (Patchwork++, BSD-2: bản phân phối phải kèm thông báo bản quyền)

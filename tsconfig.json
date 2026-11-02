@@ -9,7 +9,9 @@
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
     "types": ["chrome", "vite/client", "node"],
-    "noEmit": true
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": { "dev-hooks": ["src/dev/hooks.stub.ts"] }
   },
   "include": ["src", "test", "build.mjs"]
 }

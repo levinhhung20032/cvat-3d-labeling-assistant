@@ -7,6 +7,7 @@ import { CvatClient } from './cvatClient';
 import { activateObject, blurFrameInput, gotoFrame, readCvatState } from './cvatDom';
 import { runDelete, runRevert, runUpload, type LogEntry, type UploadDeps } from './uploader';
 import type { InPagePanel } from '../panel/inpage';
+import { devContentStart, devForceInPage } from 'dev-hooks';
 
 declare global {
   interface Window {
@@ -233,6 +234,9 @@ function main() {
     // chế độ nhúng trực tiếp trong trang thay vì để cửa sổ trống.
     window.clearTimeout(watchdog);
     watchdog = window.setTimeout(() => { if (!gotReady && host) void fallbackToInPage('khung tool không gửi "ready" sau 5 giây'); }, 5000);
+    // Khung có thể gửi "ready" mà vẫn hiện trắng (ví dụ trình duyệt đang bị điều khiển tự động) nên watchdog không bắt được:
+    // bản DEV cho phép ép chế độ nhúng bằng tay (xem src/dev/hooks.local.ts); bản chính luôn false.
+    if (devForceInPage()) void fallbackToInPage('chế độ nhúng được bật bằng tay (bản DEV)');
     }
 
     // nhớ kích thước khi người dùng kéo góc dưới phải
@@ -475,3 +479,4 @@ function main() {
 }
 
 main();
+devContentStart(); // chỉ bản DEV (build:dev); bản chính không làm gì

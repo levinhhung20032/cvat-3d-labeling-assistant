@@ -11,6 +11,7 @@ import { fmtIou, type OverlapPair } from '../shared/overlap';
 import { PENDING_STYLE } from './ui';
 import { seenStore, useSeen } from './seenStore';
 import { scrollToTopOfPanel } from './scrollTo';
+import { onAction, useKeyHint } from './actions';
 
 /** ID đã xem trong Batch Review: gạch chân. */
 const SEEN_STYLE = { textDecoration: 'underline', textDecorationThickness: 2, textUnderlineOffset: 2 } as const;
@@ -18,6 +19,8 @@ const SEEN_STYLE = { textDecoration: 'underline', textDecorationThickness: 2, te
 type SortKey = 'num' | 'assigned' | 'outside' | 'missing' | 'jumps' | 'issues' | 'drift' | 'overlap' | 'dist';
 /** Dòng đang chọn và dòng so le (giao diện tối / xám đảo màu cả trang nên màu sáng vẫn dùng được). */
 const SEL_BG = '#bcd7ff';
+/** Ô có flag (thiếu keyframe outside, đi xa bất thường, lỗi luật, trôi box, chồng lấn, gợi ý attribute): nền cam nhạt, đè lên màu dòng (kể cả dòng đang chọn). */
+const FLAG_CELL: React.CSSProperties = { background: '#ffd9a8' };
 const ODD_BG = '#f1f4f8';
 // Tiêu đề cột dính ngay dưới thanh đầu trang (.cvla-head) khi cuộn xuống; `top` do ObjectTable đo; nền đặc để dòng bên dưới không lộ ra.
 const HEAD_CELL: React.CSSProperties = { position: 'sticky', top: 0, zIndex: 5, background: '#fff', boxShadow: '0 1px 0 #c5ccd6' };
@@ -49,6 +52,7 @@ export function ObjectTable({ jobId, flagsOf, onOutside, onAcceptHints, onIgnore
   cvatFrame: number | null; // frame đang mở trên CVAT (nếu biết): mặc định đo khoảng cách tại frame này
 }) {
   useSymbols();
+  const hint = useKeyHint();
   const [label, setLabel] = useState('');
   // Menu chuột phải: tác động lên đúng dòng (object) được bấm, không đổi dòng đang chọn. Toạ độ tính theo khung bọc bảng (không dùng fixed vì chế độ tối đảo màu cả trang bằng filter).
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -112,7 +116,7 @@ export function ObjectTable({ jobId, flagsOf, onOutside, onAcceptHints, onIgnore
   }, [tracks, jobLabels]);
   // Mở bảng (vd. từ Batch Review): cuộn để object đang chọn nằm ở đầu trang, dòng đã được tô sáng như vừa bấm 1 lần.
   const selRow = useRef<HTMLTableRowElement>(null);
-  useLayoutEffect(() => { scrollToTopOfPanel(selRow.current); }, []);
+  useLayoutEffect(() => { scrollToTopOfPanel(selRow.current, tableRef.current?.tHead?.getBoundingClientRect().height ?? 0); }, []); // trừ cả dòng tên cột dính dưới thanh đầu, nếu không dòng đang chọn bị nó che
   const ov = (r: ObjectRow) => overlapFrames.get(r.num) ?? 0;
   const h = (r: ObjectRow) => hints.get(r.num) ?? 0;
   const labels = useMemo(() => [...new Set(rows.map((r) => r.label))], [rows]);
@@ -120,6 +124,40 @@ export function ObjectTable({ jobId, flagsOf, onOutside, onAcceptHints, onIgnore
     const r = rows.filter((x) => (!label || x.label === label) && (!onlyMissing || x.missing > 0) && (!onlyJumps || x.jumps > 0) && (!onlyMade || x.made !== null) && (!onlyHints || h(x) > 0) && (!onlyOverlap || ov(x) > 0));
     return r.sort((a, b) => (sort === 'num' ? a.num - b.num : sort === 'dist' ? byDist(a, b) : sort === 'overlap' ? ov(b) - ov(a) : b[sort] - a[sort]));
   }, [rows, hints, overlapFrames, label, sort, onlyMissing, onlyJumps, onlyHints, onlyOverlap, onlyMade, dist, distAsc]);
+  // Flag: object có ít nhất một ô được tô (cột thiếu KF outside, đi xa, luật QC, trôi box, chồng lấn, và gợi ý attribute `!`).
+  const flagged = (r: ObjectRow) => r.missing > 0 || r.jumps > 0 || r.issues > 0 || r.drift > 0 || ov(r) > 0 || h(r) > 0;
+  const flagCount = useMemo(() => shown.filter(flagged).length, [shown, overlapFrames, hints]);
+  const [flagNote, setFlagNote] = useState('');
+  const pendingScroll = useRef(false);
+  /** Nhảy tới object có flag kế tiếp (theo thứ tự đang hiển thị, sau dòng đang chọn; hết thì quay vòng): chọn dòng đó và cuộn tới. */
+  const nextFlag = () => {
+    const cur = shown.findIndex((r) => r.num === selectedNum);
+    for (let k = 1; k <= shown.length; k++) {
+      const r = shown[((cur < 0 ? -1 : cur) + k) % shown.length]!;
+      if (!flagged(r)) continue;
+      if (r.num === selectedNum) { setFlagNote('Chỉ còn object này có flag.'); return; }
+      setFlagNote('');
+      pendingScroll.current = true;
+      onSelect(r.num);
+      return;
+    }
+    setFlagNote('Không có object nào có flag trong danh sách đang hiển thị.');
+  };
+  const nextFlagRef = useRef(nextFlag);
+  nextFlagRef.current = nextFlag;
+  useEffect(() => onAction((id) => { if (id === 'table.nextFlag') nextFlagRef.current(); }), []);
+  // Sau khi chọn: cuộn dòng mới chọn vào vùng nhìn, dưới thanh đầu dính và dòng tên cột dính (nếu đã nhìn thấy rõ thì không cuộn).
+  useEffect(() => {
+    if (!pendingScroll.current) return;
+    pendingScroll.current = false;
+    const el = selRow.current;
+    if (!el) return;
+    const doc = el.ownerDocument;
+    const headH = (el.getRootNode() as Document | ShadowRoot).querySelector<HTMLElement>('.cvla-head')?.getBoundingClientRect().height ?? 0;
+    const theadH = tableRef.current?.tHead?.getBoundingClientRect().height ?? 0;
+    const r = el.getBoundingClientRect();
+    if (r.top < headH + theadH + 4 || r.bottom > (doc.defaultView?.innerHeight ?? 800)) el.scrollIntoView({ block: 'center' });
+  }, [selectedNum]);
   // Đo chiều cao thanh đầu trang cố định để tiêu đề cột dính ngay dưới nó (đổi khi thanh đầu trang xuống dòng).
   const tableRef = useRef<HTMLTableElement>(null);
   const [headTop, setHeadTop] = useState(0);
@@ -151,7 +189,9 @@ export function ObjectTable({ jobId, flagsOf, onOutside, onAcceptHints, onIgnore
         <label title="Object do chính tool tạo (xanh lá: trong nháp, xanh dương: đã upload); chỉ loại này xóa được"><input type="checkbox" checked={onlyMade} onChange={(e) => setOnlyMade(e.target.checked)} /> chỉ object do tool tạo</label>{' '}
         <label title="Object có thuộc tính (attribute) khác với gợi ý theo kích thước box"><input type="checkbox" checked={onlyHints} onChange={(e) => setOnlyHints(e.target.checked)} /> chỉ ID có gợi ý thuộc tính</label>{' '}
         <label title="Object chồng lên object khác (xét chéo giữa các ID) ở ít nhất một frame"><input type="checkbox" checked={onlyOverlap} onChange={(e) => setOnlyOverlap(e.target.checked)} /> chỉ ID có chồng lấn</label>{' '}
-        — {shown.length}/{rows.length} object
+        — {shown.length}/{rows.length} object{' '}
+        <button onClick={nextFlag} disabled={flagCount === 0} title={hint('table.nextFlag', 'Nhảy tới object có flag tiếp theo (ô cảnh báo tô cam): chọn dòng đó và cuộn tới; hết danh sách thì quay vòng')}>⚑ Flag tiếp{flagCount ? ` (${flagCount} object)` : ''}</button>
+        {flagNote && <span style={{ color: '#7a4b00', marginLeft: 6 }}>{flagNote}</span>}
         <span style={{ color: '#777', fontSize: 11, marginLeft: 8 }}>bấm 1 lần để chọn dòng, bấm đúp để mở Batch Review</span>
         {seen.size > 0 && (
           <span style={{ marginLeft: 10 }} title="ID gạch chân = object đã mở xem trong Batch Review (lưu theo job)">
@@ -193,18 +233,18 @@ export function ObjectTable({ jobId, flagsOf, onOutside, onAcceptHints, onIgnore
               {(() => {
                 const at = attrsOf.get(r.num) ?? [];
                 return (
-                  <td style={{ fontSize: 11, maxWidth: 260 }} title={at.map((a) => `${a.name} = ${a.value}`).join(String.fromCharCode(10)) || 'Nhãn này không có attribute'}>
+                  <td style={{ fontSize: 11, maxWidth: 260, ...(h(r) > 0 ? FLAG_CELL : null) }} title={at.map((a) => `${a.name} = ${a.value}`).join(String.fromCharCode(10)) || 'Nhãn này không có attribute'}>
                     {at.length ? at.map((a, j) => <span key={a.name}>{j > 0 && ', '}<span style={{ color: '#666' }}>{a.name}</span> {a.value || '—'}</span>) : <span style={{ color: '#999' }}>—</span>}
                     {h(r) > 0 && <b style={{ color: '#c2410c', marginLeft: 4, fontSize: 13 }} title={`Có ${h(r)} gợi ý đổi attribute ở object này (mở Batch Review để xem và áp)`}>!</b>}
                   </td>
                 );
               })()}
               <td>{r.assigned}</td><td>{r.outside}</td>
-              <td style={{ color: r.missing ? '#b00' : undefined, fontWeight: r.missing ? 700 : 400 }}>{r.missing}</td>
-              <td style={{ color: r.jumps ? '#a05a00' : undefined, fontWeight: r.jumps ? 700 : 400 }}>{r.jumps}</td>
-              <td style={{ color: r.issues ? '#a0006e' : undefined, fontWeight: r.issues ? 700 : 400, ...(incomplete.has(r.num) ? PENDING_STYLE : null) }} title={incomplete.has(r.num) ? `${pendingTip}\n${issueTip(r.issuesByKind)}` : issueTip(r.issuesByKind)}>{r.issues}</td>
-              <td style={{ color: r.drift ? '#a0006e' : undefined, fontWeight: r.drift ? 700 : 400 }} title={r.drift ? `Toạ độ ego của box không đổi trong khi xe chạy (box đi theo xe), frame ${r.driftFrames.join(', ')}` : 'Không có trôi box'}>{r.drift}</td>
-              <td style={{ color: ov(r) ? '#b45a00' : undefined, fontWeight: ov(r) ? 700 : 400 }} title={overlapPairs.filter((p) => p.a === r.num || p.b === r.num).map((p) => `#${p.a}–#${p.b}: frame ${p.frames.join(', ')} (tối đa ${fmtIou(p.max)})`).join('\n')}>{ov(r)}</td>
+              <td style={{ color: r.missing ? '#b00' : undefined, fontWeight: r.missing ? 700 : 400, ...(r.missing ? FLAG_CELL : null) }}>{r.missing}</td>
+              <td style={{ color: r.jumps ? '#a05a00' : undefined, fontWeight: r.jumps ? 700 : 400, ...(r.jumps ? FLAG_CELL : null) }}>{r.jumps}</td>
+              <td style={{ color: r.issues ? '#a0006e' : undefined, fontWeight: r.issues ? 700 : 400, ...(incomplete.has(r.num) ? PENDING_STYLE : r.issues ? FLAG_CELL : null) }} title={incomplete.has(r.num) ? `${pendingTip}\n${issueTip(r.issuesByKind)}` : issueTip(r.issuesByKind)}>{r.issues}</td>
+              <td style={{ color: r.drift ? '#a0006e' : undefined, fontWeight: r.drift ? 700 : 400, ...(r.drift ? FLAG_CELL : null) }} title={r.drift ? `Toạ độ ego của box không đổi trong khi xe chạy (box đi theo xe), frame ${r.driftFrames.join(', ')}` : 'Không có trôi box'}>{r.drift}</td>
+              <td style={{ color: ov(r) ? '#b45a00' : undefined, fontWeight: ov(r) ? 700 : 400, ...(ov(r) ? FLAG_CELL : null) }} title={overlapPairs.filter((p) => p.a === r.num || p.b === r.num).map((p) => `#${p.a}–#${p.b}: frame ${p.frames.join(', ')} (tối đa ${fmtIou(p.max)})`).join('\n')}>{ov(r)}</td>
               {(() => {
                 const d = dist.get(r.num);
                 return <td style={{ color: d && d.d > far ? '#999' : undefined }} title={d ? `${d.d.toFixed(2)} m tại frame ${d.frame}${d.d > far ? ` — ngoài ${far} m: không đo mặt đường` : ''}` : distMode === 'frame' ? `Không có box ở frame ${distFrame}` : 'Không có box'}>{d ? d.d.toFixed(1) : '—'}</td>;

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
+    "build:dev": "node build.mjs --target=dev",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "build:firefox": "node build.mjs --target=firefox",

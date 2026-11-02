@@ -1,6 +1,7 @@
 // Service worker (Edge / Chrome) hoặc event page (Firefox): chỉ bật/tắt theo tab. Không chạm dữ liệu nhãn.
 import { api, IS_FIREFOX } from '../shared/api';
 import { jobOrigin, originPattern } from '../shared/hosts';
+import { devBackgroundStart } from 'dev-hooks';
 
 /**
  * Chạy trên trang job (/tasks/<id>/jobs/<id>) của máy chủ CVAT người dùng đã thêm: host mặc định trong manifest + tên miền đã
@@ -83,3 +84,5 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     .catch((e) => sendResponse({ ok: false, reason: String(e) }));
   return true; // trả lời bất đồng bộ
 });
+
+devBackgroundStart(); // chỉ bản DEV (build:dev); bản chính không làm gì

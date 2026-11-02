@@ -5,7 +5,7 @@ import { onViewport, viewport } from './bridge';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { azimuthDeg, type Cuboid } from '../shared/cuboid';
 import {
-  applyLocalBox, viewFrame, dragCorner, dragEdge, dragMove, dragRotateRel, dragTilt, dragYawByX, hitTest, identityBox, localBoxOf, type Hit, type LocalBox,
+  applyLocalBox, viewFrame, dragCorner, dragEdge, dragMove, dragRotateRel, dragTilt, dragYawByX, hitTest, identityBox, localBoxOf, screenRect, type Hit, type LocalBox,
 } from '../shared/edit';
 import { referenceCuboid, stateAt, type FrameState } from '../shared/interp';
 import { upsertKeyframe as upsertKf } from '../shared/edit';
@@ -151,7 +151,9 @@ const loadFrameSel = (key: string): Record<number, GroundKind> => {
 
 interface DragState { hit: NonNullable<Hit>; x0: number; y0: number; base: LocalBox; moved: boolean }
 
-function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, tiltOn, autoSnap, lockKind, onPreview, onCommit, onZoom, pan, onPan, reflect, pwPlane }: {
+function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, tiltOn, autoSnap, lockKind, onPreview, onCommit, onZoom, pan, onPan, reflect, pwPlane, ovCount, onPreviewOther, onCommitOther }: {
+  ovCount: number; // overlays[0 … ovCount − 1] là box của object khác đang chồng lấn (kéo được); phần còn lại (box gương ref) không kéo
+  onPreviewOther: (i: number, b: LocalBox | null) => void; onCommitOther: (i: number, delta: [number, number, number]) => void; // dời box chồng lấn: xem trước / ghi (độ dời tâm theo hệ của khung nhìn)
   pwPlane: EgoPlane | null; // mặt đường Patchwork++ gợi ý (tím) trong hệ của khung nhìn
   lockKind: GroundKind | null; // nguồn mặt đường của lock (frame chọn đúng 1 nguồn); null: không lock
   reflect: { pts: Local | null; plane: number } | null; // ref mode (chỉ ở tab Ref)
@@ -167,6 +169,7 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
   const ref = useRef<HTMLCanvasElement>(null);
   const drag = useRef<DragState | null>(null);
   const panDrag = useRef<{ x0: number; y0: number; base: Pan } | null>(null);
+  const ovDrag = useRef<{ i: number; base: LocalBox; x0: number; y0: number; last: LocalBox; moved: boolean } | null>(null);
   const k = size / (2 * half);
   const [ox, oy] = panOffset(view, pan, k);
   const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -195,6 +198,18 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
     return [e.clientX - r.left - ox, e.clientY - r.top - oy] as const;
   };
 
+  /** Box chồng lấn dưới con trỏ (vùng bao của hình chiếu, kể cả khi box bị xoay so với box đang xét): chỉ dời, không đổi cỡ / xoay. -1 nếu không có. */
+  const ovAt = (px: number, py: number): number => {
+    for (let i = Math.min(ovCount, overlays.length) - 1; i >= 0; i--) {
+      const o = overlays[i]!;
+      const cs = Math.abs(Math.cos(o.dyaw)), sn = Math.abs(Math.sin(o.dyaw));
+      const sx = o.sx * cs + o.sy * sn, sy = o.sx * sn + o.sy * cs; // cỡ vùng bao theo trục u, v
+      const r = screenRect(view, { ...o, dyaw: 0, sx, sy }, size, half);
+      if (px >= r.left - 4 && px <= r.right + 4 && py >= r.top - 4 && py <= r.bottom + 4) return i;
+    }
+    return -1;
+  };
+
   const down = (e: React.PointerEvent) => {
     if (e.button === 2) {
       // Giữ chuột phải kéo = dời khung nhìn (mọi frame cùng dời), không sửa box.
@@ -209,6 +224,13 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
     const base = identityBox(st.cuboid);
     // Giữ Alt: kéo ở bất kỳ đâu trong ô = xoay thay vì di chuyển (cạnh vẫn đổi kích thước).
     let hit = hitTest(view, base, px, py, size, half);
+    // Box chồng lấn: kéo ở phần chỉ thuộc box đó (ngoài box đang xét), hoặc giữ Shift để kéo nó ngay cả ở vùng chồng lên box đang xét.
+    const oi = e.altKey ? -1 : ovAt(px, py);
+    if (oi >= 0 && (e.shiftKey || !hit)) {
+      ref.current!.setPointerCapture(e.pointerId);
+      ovDrag.current = { i: oi, base: overlays[oi]!, x0: px, y0: py, last: overlays[oi]!, moved: false };
+      return;
+    }
     if (e.altKey && (!hit || hit.mode === 'move')) hit = { mode: 'move' };
     if (!hit || (hit.mode === 'rotate' && view !== 'top')) return;
     ref.current!.setPointerCapture(e.pointerId);
@@ -219,9 +241,20 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
     const p = panDrag.current;
     if (p) { onPan(panBy(view, p.base, (e.clientX - p.x0) / k, (e.clientY - p.y0) / k)); return; }
     const [px, py] = pos(e);
+    const od = ovDrag.current;
+    if (od) {
+      const dx = px - od.x0, dy = py - od.y0;
+      if (Math.hypot(dx, dy) > 1) od.moved = true;
+      od.last = dragMove(view, od.base, dx, dy, k);
+      onPreviewOther(od.i, od.last);
+      return;
+    }
     const d = drag.current;
     if (!d) {
-      if (ref.current && st.cuboid) ref.current.style.cursor = cursorFor(view, hitTest(view, identityBox(st.cuboid), px, py, size, half), e.altKey);
+      if (ref.current && st.cuboid) {
+        const h = hitTest(view, identityBox(st.cuboid), px, py, size, half);
+        ref.current.style.cursor = !e.altKey && !h && ovAt(px, py) >= 0 ? 'move' : cursorFor(view, h, e.altKey);
+      }
       return;
     }
     const dx = px - d.x0, dy = py - d.y0;
@@ -247,6 +280,13 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
       if (ref.current) ref.current.style.cursor = 'default';
       return;
     }
+    const od = ovDrag.current;
+    if (od) {
+      ovDrag.current = null;
+      if (od.moved) onCommitOther(od.i, [od.last.cu - od.base.cu, od.last.cv - od.base.cv, od.last.cw - od.base.cw]);
+      onPreviewOther(od.i, null);
+      return;
+    }
     const d = drag.current;
     drag.current = null;
     if (!d || !st.cuboid) return;
@@ -269,7 +309,7 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
     <canvas
       ref={ref} width={Math.round(size * dpr)} height={Math.round(size * dpr)}
       style={{ display: 'block', width: size, height: size, touchAction: 'none' }}
-      onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => { drag.current = null; panDrag.current = null; onPreview(null); }}
+      onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => { const od = ovDrag.current; ovDrag.current = null; drag.current = null; panDrag.current = null; onPreview(null); if (od) onPreviewOther(od.i, null); }}
       onContextMenu={(e) => e.preventDefault()}
     />
   );
@@ -303,7 +343,7 @@ const CHIP_BTN: React.CSSProperties = { padding: '0 3px', lineHeight: 1, height:
 interface FileFlag { kind: IssueKind; state: FlagState; msg?: string; det: boolean }
 const NO_FLAGS: FileFlag[] = [];
 
-function Column({ kind, onKind, showAll, advise, onAdvice, pwShow = false, groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan, refl = null, onBelow, onRefPlane, horizontal = false }: {
+function Column({ kind, onKind, showAll, advise, onAdvice, pwShow = false, groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, overlayNums, onCommitOther, ignoredOverlap, onRestoreOverlap, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan, refl = null, onBelow, onRefPlane, horizontal = false }: {
   horizontal?: boolean; // tab Ref: 3 view Trên | Bên | Trước xếp ngang
   pwShow?: boolean; // hiện mặt đường Patchwork++ gợi ý (vạch tím) ở view Bên / Trước
   kind: GroundKind; onKind: (f: number, k: GroundKind) => void; // nguồn mặt đường của RIÊNG frame này (đổi ở frame khác không đụng tới)
@@ -318,7 +358,7 @@ function Column({ kind, onKind, showAll, advise, onAdvice, pwShow = false, groun
   tiltOn: boolean;
   issues: FrameIssue[]; issueIgnored: (kind: string) => boolean; onIgnoreIssue: (f: number, kind: string, on: boolean) => void;
   qcOn: boolean; qcNote: string; onQcNote: (f: number, text: string) => void;
-  overlap: { other: number; ratio: number }[]; overlayCubs: Cuboid[]; onIgnoreOverlap: (other: number) => void; onOpenObject: (other: number) => void;
+  overlap: { other: number; ratio: number }[]; overlayCubs: Cuboid[]; overlayNums: number[]; onCommitOther: (num: number, f: number, c: Cuboid) => void; ignoredOverlap: number[]; onRestoreOverlap: (other: number) => void; onIgnoreOverlap: (other: number) => void; onOpenObject: (other: number) => void;
   onToggleOutside: (f: number) => void; onHover: (f: number | null) => void; scene: Scene;
   motion: MotionWarning | null; motionIgnored: boolean; onIgnoreMotion: (f: number, on: boolean) => void;
   autoSnap: boolean; onSnap: (f: number, g: GroundResult | null) => void; onGround: (f: number) => void;
@@ -450,10 +490,20 @@ function Column({ kind, onKind, showAll, advise, onAdvice, pwShow = false, groun
   const below = useMemo(() => (onBelow && !refl && ptsView && st.cuboid ? pointsBelow(ptsView, identityBox(st.cuboid), roadW, egoW) : 0), [!!onBelow, refl, ptsView, st.cuboid, roadW, egoW, thrVer]);
   useEffect(() => { onBelow?.(f, below); }, [f, below]);
   useEffect(() => { onRefPlane?.(f, plane && box ? plane.w - (box.cw - box.sz / 2) : null); }, [f, plane?.w, box?.cw, box?.sz]);
+  const [ovPrev, setOvPrev] = useState<{ i: number; box: LocalBox } | null>(null); // box chồng lấn đang được kéo (xem trước ở cả 3 view)
   const overlays = useMemo(() => {
     const o = refCub ? overlayCubs.map((x) => boxV(localBoxOf(refCub, x))) : [];
+    if (ovPrev && o[ovPrev.i]) o[ovPrev.i] = { ...ovPrev.box, color: o[ovPrev.i]!.color };
     return plane && box ? [...o, { ...mirrorBox(box, plane.w), color: REF_COLOR }] : o;
-  }, [refCub, overlayCubs, M, plane?.w, plane ? box : null]); // ref tắt: không phụ thuộc box (box tạo mới mỗi lần vẽ)
+  }, [refCub, overlayCubs, M, ovPrev, plane?.w, plane ? box : null]);
+  /** Ghi vị trí mới của box chồng lấn: dời tâm theo độ dời trong hệ khung nhìn (đã quy về hệ yaw của box đang xét), giữ nguyên cỡ / góc của nó. */
+  const commitOther = (i: number, delta: [number, number, number]) => {
+    const other = overlayCubs[i], num = overlayNums[i];
+    if (!refCub || !other || num === undefined) return;
+    const [du, dv, dw] = M ? apply(transpose(M), delta) : delta;
+    const cos = Math.cos(refCub.yaw), sin = Math.sin(refCub.yaw);
+    onCommitOther(num, f, { ...other, x: other.x + du * cos - dv * sin, y: other.y + du * sin + dv * cos, z: other.z + dw });
+  }; // ref tắt: không phụ thuộc box (box tạo mới mỗi lần vẽ)
   const color = statusColor(st.status);
   return (
     <div
@@ -507,7 +557,8 @@ function Column({ kind, onKind, showAll, advise, onAdvice, pwShow = false, groun
         {bad && !sug && <span style={{ ...CHIP, background: '#ffe0f7', color: '#5a0040' }} title={bad.message}>⚠ {bad.level === 'misfit' ? 'lệch' : 'ít điểm'}</span>}
         {bad && sug && <span style={{ ...CHIP, background: '#ffe0f7', color: '#5a0040' }} title={bad.message}>⚠ lệch</span>}
         {issues.filter((i) => !issueIgnored(i.kind)).map((i) => <span key={i.kind} style={{ ...CHIP, background: '#f9d4ee', color: '#5a0040' }} title={i.message}>⚠ {sym(i.kind)}</span>)}
-        {overlap.map((o) => <span key={o.other} style={{ ...CHIP, background: '#ffd9a8', color: '#5a2d00' }} title={`Chồng với #${o.other} (IoU ${fmtIou(o.ratio)})`}>⚠ O #{o.other}</span>)}
+        {ignoredOverlap.map((o) => <span key={`ig${o}`} style={{ ...CHIP, background: '#e5e7eb', color: '#4b5563' }} title={`Cặp chồng lấn với #${o} ở frame này đã được bỏ qua (không báo lỗi). Hoàn lại ở dòng ghi chú bên dưới cột.`}>⊘ O #{o} bỏ qua</span>)}
+        {overlap.map((o) => <span key={o.other} style={{ ...CHIP, background: '#ffd9a8', color: '#5a2d00' }} title={`Chồng với #${o.other} (IoU ${fmtIou(o.ratio)}). Kéo box cam nét đứt trong view để dời object #${o.other} ở frame này (giữ Shift để kéo ở vùng chồng lên box đang xét).`}>⚠ O #{o.other}</span>)}
         {fileFlags.filter((ff) => ff.state === 'open').map((ff) => <span key={ff.kind} style={{ ...CHIP, background: '#ffd6d6', color: '#600' }} title="Flag từ file QC mà tool không tự phát hiện">QC {ff.kind}</span>)}
         {shownMotion && <span style={{ ...CHIP, background: '#ffe9c7', color: '#6b3a00' }} title={shownMotion.message}>⚠ {sym('M')} đi xa</span>}
         {kind === 'measured' && snap?.warn && <span style={{ ...CHIP, background: '#eaf6d8', color: '#2d5a00' }} title={groundTip(snap)}>⏬ {groundAction(snap)}</span>}
@@ -520,7 +571,7 @@ function Column({ kind, onKind, showAll, advise, onAdvice, pwShow = false, groun
       </div>
       <div style={{ position: 'relative', ...(horizontal ? { display: 'flex', gap: VIEW_GAP } : null) }}>
       {VIEWS.map((v) => (
-        <Cell key={v} reflect={reflect} pwPlane={pwPlane} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap && lockKind !== null} lockKind={lockKind} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} pan={pan} onPan={onPan} />
+        <Cell key={v} reflect={reflect} pwPlane={pwPlane} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap && lockKind !== null} lockKind={lockKind} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} pan={pan} onPan={onPan} ovCount={overlayCubs.length} onPreviewOther={(i, b) => setOvPrev(b ? { i, box: b } : null)} onCommitOther={commitOther} />
       ))}
       </div>
       {reflect && plane && (
@@ -560,6 +611,12 @@ function Column({ kind, onKind, showAll, advise, onAdvice, pwShow = false, groun
           style={{ width: '100%', boxSizing: 'border-box', fontSize: 11, background: '#fffbe0', border: 0, borderBottom: '1px solid #e0b000' }}
         />
       )}
+      {ignoredOverlap.map((o) => (
+        <div key={`ig${o}`} style={{ background: '#e5e7eb', color: '#4b5563', fontSize: 11, padding: '1px 4px' }} title="Cặp này đã được bỏ qua ở mọi frame nên không báo lỗi O; ghi chú này cho biết ở frame này hai object vẫn đang chồng nhau.">
+          ⊘ đã bỏ qua cặp chồng lấn với <button onClick={(e) => { e.stopPropagation(); onOpenObject(o); }} style={{ padding: '0 4px' }}>#{o}</button>{' '}
+          <button onClick={(e) => { e.stopPropagation(); onRestoreOverlap(o); }} style={{ padding: '0 4px' }} title="Báo lại lỗi chồng lấn của cặp này ở mọi frame">↺ hoàn lại</button>
+        </div>
+      ))}
       {overlap.map((o) => (
         <div key={o.other} style={{ background: '#ffd9a8', color: '#5a2d00', fontSize: 11, padding: '1px 4px' }} title="Phần giao trên hình chiếu từ trên / diện tích box nhỏ hơn. Box cam nét đứt trên ô là object kia.">
           ⚠ chồng với <button onClick={(e) => { e.stopPropagation(); onOpenObject(o.other); }} style={{ padding: '0 4px' }}>#{o.other}</button> {fmtIou(o.ratio)}{' '}
@@ -691,11 +748,12 @@ function Group({ id, title, bg, children }: { id: string; title: ReactNode; bg?:
   );
 }
 
-export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, selectedNum, setSelectedNum, initialFrame, edited, onEdit, onTrack, focus, onView, onSel, onHoverFrame, labels, overlaps, refView = false, onOpenRef, onCloseRef, openAt = null }: {
+export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, selectedNum, setSelectedNum, initialFrame, edited, onEdit, onTrack, focus, onView, onSel, onHoverFrame, labels, overlaps, ignoredOverlaps, refView = false, onOpenRef, onCloseRef, openAt = null }: {
   openAt?: number | null; // mở từ bảng object: cửa sổ bắt đầu đúng ở frame này (frame đầu của object), không nhảy theo frame CVAT lúc vừa mở
   refView?: boolean; // tab Ref: một frame (initialFrame), hai cột Gốc / Gộp đối xứng
   onOpenRef?: (frame?: number) => void; onCloseRef?: () => void;
   overlaps: OverlapItem[]; // chồng lấn của cả job (đã bỏ cặp được bỏ qua)
+  ignoredOverlaps: OverlapItem[]; // các chồng lấn thuộc cặp ĐÃ bỏ qua: không báo lỗi nhưng vẫn ghi chú ở frame đó (và cho hoàn lại)
   onSplit: (trackIndex: number, resume: number) => number | null; // tách ID tại frame resume; trả số thứ tự object mới, null nếu không tách được
   onHoverFrame: (f: number | null) => void;
   onFocusFrame: (f: number) => void; // bấm đúp vào cột frame
@@ -866,14 +924,27 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     for (const o of overlaps) if (o.a === num || o.b === num) m.set(o.frame, [...(m.get(o.frame) ?? []), { other: o.a === num ? o.b : o.a, ratio: o.ratio }]);
     return m;
   }, [overlaps, num]);
-  const ovCubs = useMemo(() => {
-    const m = new Map<number, Cuboid[]>();
+  const ovData = useMemo(() => {
+    const cubs = new Map<number, Cuboid[]>(), nums = new Map<number, number[]>();
     for (const f of frames) for (const o of ovAt.get(f) ?? []) {
       const c = ann.tracks[o.other - 1] ? stateAt(ann.tracks[o.other - 1]!, f).cuboid : null;
-      if (c) m.set(f, [...(m.get(f) ?? []), c]);
+      if (c) { cubs.set(f, [...(cubs.get(f) ?? []), c]); nums.set(f, [...(nums.get(f) ?? []), o.other]); }
     }
-    return m;
+    return { cubs, nums };
   }, [ovAt, framesKey, ann]);
+  const ovCubs = ovData.cubs, ovNums = ovData.nums;
+  // Cặp đã bỏ qua: ghi chú ở từng frame mà hai object vẫn chồng nhau (frame → số thứ tự object kia)
+  const ovIgnAt = useMemo(() => {
+    const m = new Map<number, number[]>();
+    for (const o of ignoredOverlaps) if (o.a === num || o.b === num) m.set(o.frame, [...(m.get(o.frame) ?? []), o.a === num ? o.b : o.a]);
+    return m;
+  }, [ignoredOverlaps, num]);
+  const EMPTY_NUMS: number[] = [];
+  /** Dời box của object kia (đang chồng lấn với object đang chọn) ở frame f: ghi vào nháp như một lần sửa của object đó, hoàn tác được. */
+  const commitOther = (n: number, f: number, cub: Cuboid) => {
+    onEdit(n - 1, f, cub, false);
+    setNote(`Đã dời object #${n} ở frame ${f} (đang chồng lấn với #${num}). Hoàn tác được.`);
+  };
   useEffect(() => { onSel(selFrame); }, [selFrame]);
 
   const updatePrefs = (p: Prefs) => { setPrefs(p); savePrefs(p); };
@@ -1072,9 +1143,10 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   };
   useEffect(() => {
     if (!pick) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setPick(null); setNote('Đã hủy chọn khoảng.'); } };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    // pha bắt (capture) và chặn lan truyền: Esc hủy chọn khoảng thì không đồng thời đưa tool về Bảng object
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setPick(null); setNote('Đã hủy chọn khoảng.'); } };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [pick]);
   /** ② Current window: outside cho mọi frame có box trong cửa sổ đang hiển thị. */
   const outsideRange = () => {
@@ -1174,7 +1246,8 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
       : `Không có gì để snap${hoverRef.current !== null || selFrame !== null ? ` ở frame ${hoverRef.current ?? selFrame}` : ''} (đã nằm trên mặt đường, thiếu điểm mặt đường, mặt đường mơ hồ như có vỉa hè, hoặc lệch quá 1 m)${list.length === 1 && snapWhy.current ? `. Lý do: ${snapWhy.current}` : ''}.`);
   };
   // Outside dài (≥ SPLIT_OUTSIDE_FRAMES frame) rồi có box lại: gợi ý tách ID, có hộp xác nhận (xem trước) trước khi áp.
-  const outGaps = useMemo(() => (track ? findLongOutsideGaps(track, start, stop) : []), [track, start, stop]);
+  // thrVer: ngưỡng (rule "outsideGap" ở Cài đặt → Threshold) đổi thì tính lại; thiếu nó thì gợi ý không hiện / không mất tới khi object đổi
+  const outGaps = useMemo(() => (track ? findLongOutsideGaps(track, start, stop) : []), [track, start, stop, thrVer]);
   const splitAt = async (g: OutsideGap) => {
     if (!track) return;
     const msg = `Tách ID object #${num}?\n\n`
@@ -1309,7 +1382,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
       onSuggest={(f, s) => setSugs((m) => (m.get(f) === s ? m : new Map(m).set(f, s)))} onAccept={accept}
       onFit={(f, r) => setFits((m) => (m.get(f) === r ? m : new Map(m).set(f, r)))} onSelect={() => onPickSelect(c.f)}
       onLoaded={(f) => setLoaded((s) => new Set(s).add(f))}
-      onCommit={commit} onZoom={zoomBy} onToggleKf={toggleKf} overlap={ovAt.get(c.f) ?? []} overlayCubs={ovCubs.get(c.f) ?? EMPTY_CUBS} onIgnoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], true); setNote(`Đã bỏ qua cặp #${Math.min(num, o)}–#${Math.max(num, o)} (mọi frame).`); }} onOpenObject={setSelectedNum} tiltOn={prefs.tilt} onFocusFrame={onFocusFrame} fileFlags={(fileFlags.get(c.f) ?? NO_FLAGS).filter((x) => !x.det)} onMarkFlag={markFlagAsk} issues={issueMap.get(c.f) ?? NO_ISSUES} issueIgnored={(k) => ign.has(issueKey(job.id, num, c.f, k))} onIgnoreIssue={ignoreIssueAsk} qcOn={qcOn} qcNote={qcNotes[qcKey(job.id, num, c.f)] ?? ''} onQcNote={(f, t) => qcStore.set(job.id, num, f, t)} onToggleOutside={toggleOutside} onHover={(f) => { hoverRef.current = f; onHoverFrame(f); }} scene={scene}
+      onCommit={commit} onZoom={zoomBy} onToggleKf={toggleKf} overlap={ovAt.get(c.f) ?? []} overlayCubs={ovCubs.get(c.f) ?? EMPTY_CUBS} overlayNums={ovNums.get(c.f) ?? EMPTY_NUMS} onCommitOther={commitOther} ignoredOverlap={ovIgnAt.get(c.f) ?? EMPTY_NUMS} onRestoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], false); setNote(`Đã hoàn lại cặp #${Math.min(num, o)}–#${Math.max(num, o)}: báo lại chồng lấn ở mọi frame.`); }} onIgnoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], true); setNote(`Đã bỏ qua cặp #${Math.min(num, o)}–#${Math.max(num, o)} (mọi frame).`); }} onOpenObject={setSelectedNum} tiltOn={prefs.tilt} onFocusFrame={onFocusFrame} fileFlags={(fileFlags.get(c.f) ?? NO_FLAGS).filter((x) => !x.det)} onMarkFlag={markFlagAsk} issues={issueMap.get(c.f) ?? NO_ISSUES} issueIgnored={(k) => ign.has(issueKey(job.id, num, c.f, k))} onIgnoreIssue={ignoreIssueAsk} qcOn={qcOn} qcNote={qcNotes[qcKey(job.id, num, c.f)] ?? ''} onQcNote={(f, t) => qcStore.set(job.id, num, f, t)} onToggleOutside={toggleOutside} onHover={(f) => { hoverRef.current = f; onHoverFrame(f); }} scene={scene}
       refl={extra.refl ?? null} onBelow={extra.onBelow} onRefPlane={extra.onRefPlane}
     />
   );

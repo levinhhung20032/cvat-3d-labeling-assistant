@@ -30,3 +30,7 @@ patchwork_plan.md
 audit.txt
 bug_fix.txt
 .claude/
+
+# Bản DEV song song với bản chính (Claude làm việc ở đây); hooks.local.ts chỉ dùng ở máy
+dist-dev
+src/dev/hooks.local.ts

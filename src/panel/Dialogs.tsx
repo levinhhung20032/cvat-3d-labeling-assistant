@@ -1,14 +1,18 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { confirmStore } from './confirmStore';
+import { useViewportOverlay } from './overlay';
 
 /** Vẽ hộp xác nhận đang chờ (một hộp tại một thời điểm). Esc = Hủy, Enter = Đồng ý. */
 export function ConfirmHost() {
   const c = useSyncExternalStore(confirmStore.subscribe, confirmStore.get);
   const okRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => { if (c) okRef.current?.focus(); }, [c]);
+  const backRef = useRef<HTMLDivElement>(null);
+  useViewportOverlay(backRef, !!c);
+  // preventScroll: focus() không được kéo trang cuộn đi (làm bảng object nhảy tới chỗ khác khi hộp xác nhận mở)
+  useEffect(() => { if (c) okRef.current?.focus({ preventScroll: true }); }, [c]);
   if (!c) return null;
   return (
-    <div className="cvla-modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget) confirmStore.answer(false); }}>
+    <div ref={backRef} className="cvla-modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget) confirmStore.answer(false); }}>
       <div
         className="cvla-modal" role="alertdialog" aria-modal="true" aria-label={c.title ?? 'Xác nhận'}
         onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); confirmStore.answer(false); } }}

@@ -317,6 +317,8 @@ export function App() {
 
   const keymapRef = useRef(keymap);
   keymapRef.current = keymap;
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
   // Báo cho content script phím bật tắt cửa sổ hiện hành để nó nghe được cả khi con trỏ đang ở trang CVAT.
   useEffect(() => { post({ type: 'hotkeys', toggle: keymap['window.toggle'] ?? [] }); }, [keymap]);
   useEffect(() => { post({ type: 'dblOpen', on: sync }); }, [sync]);
@@ -324,7 +326,18 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       if (isCapturing()) return;
       const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const inField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+      // Esc ở tab bất kỳ: về Bảng object (riêng tab Ref: về Batch Review). Bỏ qua khi Esc đã có việc khác (menu / hộp thoại đang mở, đang chọn khoảng, phím bổ trợ).
+      if (e.key === 'Escape') {
+        if (e.defaultPrevented || e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return;
+        if (rootRef.current?.querySelector('.cvla-modal-back, .cvla-menu')) return;
+        // Đang đứng trong ô nhập / ô chọn (vd. ô Object ID, ô chọn mặt đường của cột frame): Esc đầu tiên chỉ rời ô đó (tránh bỏ dở lúc đang gõ), Esc kế tiếp mới đổi tab.
+        if (inField) { (e.target as HTMLElement).blur(); return; }
+        if (tabRef.current === 'ref') setTab('review');
+        else if (tabRef.current !== 'objects') setTab('objects');
+        return;
+      }
+      if (inField) return;
       const combo = comboOf(e);
       const id = combo ? actionFor(keymapRef.current, combo) : null;
       if (!id) return;
@@ -466,12 +479,15 @@ export function App() {
   // Chồng lấn CHÉO giữa các object ở mọi frame của job (tính lại khi nháp đổi), bỏ các cặp đã được bỏ qua.
   const labelNames = useMemo(() => new Map((data?.labels ?? []).map((l) => [l.id, l.name])), [data]);
   const trackLabels = useMemo(() => (work ? work.tracks.map((t) => labelNames.get(t.label_id) ?? '') : []), [work, labelNames]);
-  const overlaps = useMemo(() => {
+  // Chồng lấn thô (kể cả cặp đã bỏ qua): cặp đã bỏ qua không báo lỗi nhưng vẫn được ghi chú ở từng frame trong Batch Review.
+  const overlapsRaw = useMemo(() => {
     if (!data || !work) return [];
     const frames: number[] = [];
     for (let f = data.job.start_frame; f <= data.job.stop_frame; f++) frames.push(f);
-    return findOverlaps(work.tracks, frames, work.tracks.map((t) => labelNames.get(t.label_id) ?? '')).filter((o) => !ignAll.has(overlapKey(data.job.id, o.a, o.b)));
-  }, [data, work, ignAll, labelNames, thrVer]);
+    return findOverlaps(work.tracks, frames, work.tracks.map((t) => labelNames.get(t.label_id) ?? ''));
+  }, [data, work, labelNames, thrVer]);
+  const overlaps = useMemo(() => (data ? overlapsRaw.filter((o) => !ignAll.has(overlapKey(data.job.id, o.a, o.b))) : []), [overlapsRaw, ignAll, data]);
+  const overlapsIgnored = useMemo(() => (data ? overlapsRaw.filter((o) => ignAll.has(overlapKey(data.job.id, o.a, o.b))) : []), [overlapsRaw, ignAll, data]);
   const overlapFrames = useMemo(() => {
     const m = new Map<number, number>();
     for (const o of overlaps) { m.set(o.a, (m.get(o.a) ?? 0) + 1); m.set(o.b, (m.get(o.b) ?? 0) + 1); }
@@ -1108,7 +1124,7 @@ Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', dange
       {data && work && (tab === 'review' || tab === 'ref') && (
         <BatchReview
           key={tab} refView={tab === 'ref'} onOpenRef={openRef} onCloseRef={() => setTab('review')} openAt={openAtRef.current}
-          overlaps={overlaps} drift={driftAll}
+          overlaps={overlaps} ignoredOverlaps={overlapsIgnored} drift={driftAll}
           labels={data.labels} job={data.job} ann={work} rows={rows} selectedNum={selectedNum} setSelectedNum={selectFromTool}
           onSel={(f) => { selFrameRef.current = f; }}
           onHoverFrame={(f) => { hoverFrameRef.current = f; }}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { kv } from './storage';
+import { useViewportOverlay } from './overlay';
 
 /** Hướng dẫn dùng lần đầu: hiện một lần khi mở tool, bỏ qua được, xem lại ở menu ⚙ → "Hướng dẫn sử dụng". Nhớ cục bộ đã xem. */
 const KEY = 'cvla-tutorial-done';
@@ -40,7 +41,7 @@ const STEPS: { title: string; body: ReactNode }[] = [
         <p><b>Batch Review</b> hiện nhiều frame cạnh nhau, mỗi frame có 3 view Trên / Bên / Trước của object đang chọn.</p>
         <ul>
           <li>Cửa sổ frame: chọn khoảng a → b, số frame tuỳ chỉnh, ◀ ▶ để lật cửa sổ.</li>
-          <li>Kéo box để chỉnh; kéo góc để đổi 2 cạnh cùng lúc.</li>
+          <li>Kéo box để chỉnh; kéo góc để đổi 2 cạnh cùng lúc. Ở frame có chồng lấn, kéo box cam nét đứt để dời luôn object kia (giữ Shift nếu muốn kéo nó ở vùng chồng lên box đang xét).</li>
           <li>Các <b>nhóm điều khiển</b> phía trên sắp xếp tuỳ ý: kéo ⠿ để chuyển, ⧉ để mở ở cửa sổ riêng, ▴ để ẩn cả thanh, ↺ để về bố cục mặc định.</li>
           <li>Bấm đúp tiêu đề frame (hoặc phím <code>`</code>) để thu nhỏ tool và đưa camera CVAT tới object.</li>
         </ul>
@@ -103,6 +104,7 @@ const STEPS: { title: string; body: ReactNode }[] = [
         <ul>
           <li><b>⚙</b> ở góc trên: đồng bộ chọn object với CVAT, đổi giao diện (tự động / tối / xám / sáng), chế độ tải point cloud, tải lại frame lỗi.</li>
           <li>Tab <b>Cài đặt</b> gom Dynamic size, Threshold, Camera, Màu sắc, Phím tắt, Thông tin job.</li>
+          <li>Nhấn <b>Esc</b> ở tab bất kỳ để quay về Bảng object; riêng tab Ref thì Esc về Batch Review (Esc vẫn đóng menu hoặc hộp thoại đang mở trước).</li>
           <li>Rê chuột lên dấu <b>?</b> hoặc nút bất kỳ để đọc giải thích.</li>
           <li>Xem lại hướng dẫn này: <b>⚙ → Hướng dẫn sử dụng</b>.</li>
         </ul>
@@ -116,10 +118,12 @@ export function Tutorial({ onClose }: { onClose: () => void }) {
   const last = i === STEPS.length - 1;
   const nextRef = useRef<HTMLButtonElement>(null);
   const done = () => { markSeen(); onClose(); };
-  useEffect(() => { nextRef.current?.focus(); }, [i]);
+  const backRef = useRef<HTMLDivElement>(null);
+  useViewportOverlay(backRef, true);
+  useEffect(() => { nextRef.current?.focus({ preventScroll: true }); }, [i]);
   const s = STEPS[i]!;
   return (
-    <div className="cvla-modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget) done(); }}>
+    <div ref={backRef} className="cvla-modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget) done(); }}>
       <div
         className="cvla-modal cvla-tutorial" role="dialog" aria-modal="true" aria-label="Hướng dẫn sử dụng"
         onKeyDown={(e) => {

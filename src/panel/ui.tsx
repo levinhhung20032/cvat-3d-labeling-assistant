@@ -40,7 +40,7 @@ export function Slider({ value, min, max, step, def, unit = '', decimals = 0, di
           onChange={(e) => setEdit(e.target.value)}
           onFocus={(e) => e.target.select()}
           onBlur={commit}
-          onKeyDown={(e) => { if (e.key === 'Enter') commit(); else if (e.key === 'Escape') setEdit(null); }}
+          onKeyDown={(e) => { if (e.key === 'Enter') commit(); else if (e.key === 'Escape') { e.preventDefault(); setEdit(null); } }}
         />
       )}
     </span>
