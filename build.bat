@@ -65,26 +65,24 @@ if errorlevel 1 (
 )
 :noupdate
 
-where node >nul 2>nul
-if errorlevel 1 (
-    echo Node.js chua duoc cai. Dang cai dat Node.js LTS...
+rem --- Can Node.js >= %NODEMIN% (build.mjs dung top-level await; Node cu bao "Unexpected reserved word"). Thieu / cu thi tu cai LTS. ---
+set "NODEMIN=18"
+call :nodecheck
+if not defined NODEOK (
+    if defined NODEVER (echo Node.js %NODEVER% qua cu, can ban %NODEMIN% tro len. Dang cai dat Node.js LTS...) else (echo Node.js chua duoc cai. Dang cai dat Node.js LTS...)
     where winget >nul 2>nul
     if errorlevel 1 (
-        echo Khong tim thay winget. Hay cai Node.js thu cong tai https://nodejs.org roi chay lai.
+        echo Khong tim thay winget. Hay cai Node.js %NODEMIN% tro len thu cong tai https://nodejs.org roi chay lai.
         pause
         exit /b 1
     )
     winget install --id OpenJS.NodeJS.LTS -e --silent --accept-package-agreements --accept-source-agreements
-    if errorlevel 1 (
-        echo Cai Node.js that bai.
-        pause
-        exit /b 1
-    )
-    rem Cap nhat PATH cho phien hien tai
-    set "PATH=%PATH%;%ProgramFiles%\nodejs;%APPDATA%\npm"
-    where node >nul 2>nul
-    if errorlevel 1 (
-        echo Da cai Node.js nhung phien nay chua nhan PATH. Hay dong cua so nay va chay lai build.bat.
+    if errorlevel 1 winget upgrade --id OpenJS.NodeJS.LTS -e --silent --accept-package-agreements --accept-source-agreements
+    rem Cap nhat PATH cho phien hien tai, dat len dau de ban moi thang ban cu.
+    set "PATH=%ProgramFiles%\nodejs;%APPDATA%\npm;%PATH%"
+    call :nodecheck
+    if not defined NODEOK (
+        echo Da cai Node.js nhung phien nay chua nhan ban moi. Hay dong cua so nay va chay lai build.bat.
         pause
         exit /b 1
     )
@@ -116,6 +114,18 @@ pause
 exit /b 0
 
 rem ============================================================================
+rem :nodecheck - dat NODEVER (ban dang co, rong neu chua cai) va NODEOK=1 neu major >= NODEMIN.
+:nodecheck
+set "NODEVER="
+set "NODEOK="
+where node >nul 2>nul || exit /b 0
+for /f "usebackq delims=" %%v in (`node -p "process.versions.node" 2^>nul`) do set "NODEVER=%%v"
+set "NODEMAJOR="
+for /f "usebackq delims=" %%v in (`node -p "process.versions.node.split('.')[0]" 2^>nul`) do set "NODEMAJOR=%%v"
+if not defined NODEMAJOR exit /b 0
+if %NODEMAJOR% GEQ %NODEMIN% set "NODEOK=1"
+exit /b 0
+
 rem :tryfetch "duong\dan\git.exe" - fetch bang ban git nay; that bai thi thu lai voi Git Credential Manager
 rem (hien hop dang nhap GitHub neu chua dang nhap). Thanh cong thi dat OKGIT.
 :tryfetch
