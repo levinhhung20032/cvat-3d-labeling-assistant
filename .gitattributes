@@ -1,3 +1,4 @@
+* text=auto eol=lf
 # File .bat/.cmd phai xuong dong CRLF, neu khong cmd.exe co the khong tim thay nhan goto
 *.bat text eol=crlf
 *.cmd text eol=crlf

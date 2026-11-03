@@ -12,6 +12,7 @@ import { PENDING_STYLE } from './ui';
 import { seenStore, useSeen } from './seenStore';
 import { scrollToTopOfPanel } from './scrollTo';
 import { onAction, useKeyHint } from './actions';
+import { clientIdOf, useCvatIdVersion } from './cvatIds';
 
 /** ID đã xem trong Batch Review: gạch chân. */
 const SEEN_STYLE = { textDecoration: 'underline', textDecorationThickness: 2, textUnderlineOffset: 2 } as const;
@@ -51,6 +52,7 @@ export function ObjectTable({ jobId, flagsOf, onOutside, onAcceptHints, onIgnore
   tracks: CvatTrack[]; start: number; stop: number;
   cvatFrame: number | null; // frame đang mở trên CVAT (nếu biết): mặc định đo khoảng cách tại frame này
 }) {
+  useCvatIdVersion(); // ID lấy từ CVAT đổi → vẽ lại bảng
   useSymbols();
   const hint = useKeyHint();
   const [label, setLabel] = useState('');
@@ -229,7 +231,7 @@ export function ObjectTable({ jobId, flagsOf, onOutside, onAcceptHints, onIgnore
               }}
               style={{ cursor: 'pointer', userSelect: 'none', borderTop: '1px solid #ddd', background: r.num === selectedNum ? SEL_BG : r.made === 'draft' ? '#dff5df' : r.made === 'server' ? '#e3ecff' : i % 2 ? ODD_BG : undefined }}
             >
-              <td><b style={seen.has(r.id) ? SEEN_STYLE : undefined} title={seen.has(r.id) ? 'Đã xem trong Batch Review' : undefined}>{r.num}</b> {r.made === 'draft' ? <span title="Object do tool tạo, đang trong NHÁP (chưa có trên CVAT)" style={{ background: '#2e9d3b', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 mới</span> : r.made === 'server' ? <span title="Object do tool tạo và đã upload; chỉ loại này mới xóa được bằng tool" style={{ background: '#2f5fd0', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 tool</span> : <span style={{ color: "#999", fontSize: 10 }}>db {r.id}</span>}</td><td>{r.label}</td>
+              <td><b style={seen.has(r.id) ? SEEN_STYLE : undefined} title={seen.has(r.id) ? 'Đã xem trong Batch Review' : undefined}>{clientIdOf(tracks, r.num)}</b>{clientIdOf(tracks, r.num) !== r.num ? <span style={{ color: '#999', fontSize: 10 }} title="Số thứ tự trong tool (CVAT đã cấp ID khác)"> (#{r.num})</span> : null} {r.made === 'draft' ? <span title="Object do tool tạo, đang trong NHÁP (chưa có trên CVAT)" style={{ background: '#2e9d3b', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 mới</span> : r.made === 'server' ? <span title="Object do tool tạo và đã upload; chỉ loại này mới xóa được bằng tool" style={{ background: '#2f5fd0', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 tool</span> : <span style={{ color: "#999", fontSize: 10 }}>db {r.id}</span>}</td><td>{r.label}</td>
               {(() => {
                 const at = attrsOf.get(r.num) ?? [];
                 return (

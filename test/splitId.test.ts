@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findLongOutsideGaps, splitTrack } from '../src/shared/splitId';
+import { findLateStart, findLongOutsideGaps, relocateLateStart, splitTrack } from '../src/shared/splitId';
 import { stateAt } from '../src/shared/interp';
 import { missingOutsideKeyframes } from '../src/shared/rules';
 import { serializeCuboid } from '../src/shared/cuboid';
@@ -50,5 +50,21 @@ describe('tách ID khi outside dài', () => {
     expect(splitTrack(orig, 0, STOP)).toBeNull(); // không có phần trước
     splitTrack(orig, 10, STOP);
     expect(orig).toEqual(snapshot);
+  });
+});
+
+describe('ID xuất hiện giữa chừng', () => {
+  it('A outside toàn bộ · B outside tới frame xuất hiện rồi sao chép A', () => {
+    const t = track(5, [box(3), box(6), box(8, true)]);
+    const r = relocateLateStart(t, 0, STOP)!;
+    expect(r.oldTrack.id).toBe(5);
+    expect(r.oldTrack.shapes.length).toBe(STOP + 1);
+    expect(r.oldTrack.shapes.every((s) => s.outside)).toBe(true);
+    expect(missingOutsideKeyframes(r.oldTrack, STOP)).toEqual([]);
+    expect(r.newTrack.id).toBeUndefined();
+    expect(r.newTrack.shapes.map((s) => [s.frame, s.outside])).toEqual([[0, true], [1, true], [2, true], [3, false], [6, false], [8, true]]);
+    expect(stateAt(r.newTrack, 6).cuboid?.x).toBe(6);
+    expect(findLateStart(t, 0, STOP)).toEqual({ first: 3 });
+    expect(relocateLateStart(track(5, [box(0), box(4)]), 0, STOP)).toBeNull();
   });
 });

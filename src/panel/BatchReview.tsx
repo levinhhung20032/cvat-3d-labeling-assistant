@@ -38,7 +38,7 @@ import { KeyBindMenu } from './KeyBindMenu';
 import { DEFAULT_FIT, fitGroundOf, fitReport, type FitReport } from '../shared/fit';
 import { thresholdStore, useThresholdVersion } from './thresholdStore';
 import { sym, useSymbols } from './symbolStore';
-import { findLongOutsideGaps, SPLIT_OUTSIDE_FRAMES, type OutsideGap } from '../shared/splitId';
+import { findLateStart, findLongOutsideGaps, SPLIT_OUTSIDE_FRAMES, type OutsideGap } from '../shared/splitId';
 import { useColors } from './colorStore';
 import { adviseGround, type GroundAdvice } from '../shared/groundSuggest';
 import { confirmSnap, DEFAULT_GROUND, egoGround, enforceConsistency, GROUND_KINDS, groundSnap, groundSnapBy, pwGroundPlane, type ConsistencyItem, tiltFromPlane, type GroundKind, type GroundResult, type GroundSector } from '../shared/ground';
@@ -1259,6 +1259,17 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     const n = onSplit(num - 1, g.resume);
     setNote(n === null ? 'Không tách được: frame này không phải keyframe có box ngay sau đoạn outside.' : `Đã tách: object mới #${n} (từ frame ${g.resume}); #${num} outside từ frame ${g.resume}. Nằm trong nháp, chưa upload.`);
   };
+  const lateStart = useMemo(() => (track ? findLateStart(track, start, stop) : null), [track, start, stop]);
+  const relocateLate = async () => {
+    if (!track || !lateStart) return;
+    const msg = `• Object #${num} xuất hiện từ frame ${lateStart.first} (không phải frame ${start}).\n`
+      + `• #${num} sẽ outside TOÀN BỘ (keyframe outside ở mọi frame ${start}–${stop}).\n`
+      + `• Object MỚI (cuối danh sách): outside từ frame ${start} tới ${lateStart.first - 1}, từ frame ${lateStart.first} sao chép vị trí, kích thước, hướng, thuộc tính của #${num}.\n\n`
+      + 'Không xóa ID nào. Chỉ nằm trong nháp tới khi bạn upload.';
+    if (!await askConfirm({ title: `Chuyển object #${num} sang ID mới`, message: msg, confirmLabel: 'Chuyển' })) return;
+    const n = onSplit(num - 1, -1);
+    setNote(n === null ? 'Không chuyển được: object này không xuất hiện muộn.' : `Đã chuyển: object mới #${n} (từ frame ${lateStart.first}); #${num} outside toàn bộ. Nằm trong nháp, chưa upload.`);
+  };
   const misfitFrames = prefs.suggest ? frames.filter((f) => fits.get(f)?.level === 'misfit') : [];
   const sparseFrames = frames.filter((f) => fits.get(f)?.level === 'sparse');
 
@@ -1600,6 +1611,12 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
               >✖ bỏ qua tất cả</button>
             </span>
           ))}
+          {lateStart && (
+            <span style={{ color: '#7a1f1f', fontWeight: 600 }} title={`Object bắt đầu từ frame ${lateStart.first}, không phải frame đầu job.`}>
+              ⚠ xuất hiện từ frame {lateStart.first}{' '}
+              <button onClick={relocateLate} style={{ padding: '0 4px', fontWeight: 600 }} title="Outside toàn bộ ID này, tạo ID mới: outside tới frame xuất hiện, sau đó sao chép nguyên box. Có hộp xác nhận.">⇢ chuyển sang ID mới</button>
+            </span>
+          )}
           {outGaps.map((g) => (
             <span key={g.from} style={{ color: '#7a1f1f', fontWeight: 600 }} title={`Outside liên tục ${g.len} frame (${g.from}–${g.to}) rồi có box lại từ frame ${g.resume}. Từ ${SPLIT_OUTSIDE_FRAMES} frame trở lên nên tách ID (guideline).`}>
               ⚠ outside {g.len} frame ({g.from}–{g.to}){' '}

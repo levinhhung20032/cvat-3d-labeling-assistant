@@ -410,7 +410,20 @@ function main() {
     else if (m.type === 'toggleWindow') toggleWindow();
     else if (m.type === 'hotkeys') toggleCombos = m.toggle;
     else if (m.type === 'dblOpen') dblOpen = m.on;
-    else if (m.type === 'cvatFocus') void focusInCvat(m.num, m.frame, !!m.zoom, !!m.minimize);
+    else if (m.type === 'ackRemoved') {
+      void (async () => {
+        const key = `ids:${location.origin}:${jobId}`;
+        const stored = ((await api.storage.local.get(key))[key] as number[] | undefined) ?? [];
+        const drop = new Set(m.ids);
+        await api.storage.local.set({ [key]: stored.filter((v) => !drop.has(v)) });
+      })();
+    } else if (m.type === 'readIds') {
+      void (async () => {
+        let r: { ok?: boolean; reason?: string; pairs?: [number, number][] } | undefined;
+        try { r = (await api.runtime.sendMessage({ type: 'cvla-ids' })) as typeof r; } catch (e) { r = { ok: false, reason: String(e) }; }
+        send({ type: 'cvatIds', ok: !!r?.ok, reason: r?.reason, pairs: r?.pairs ?? [] });
+      })();
+    } else if (m.type === 'cvatFocus') void focusInCvat(m.num, m.frame, !!m.zoom, !!m.minimize);
     else if (m.type === 'upload') void rpcUpload(m.reqId, () => runUpload(uploadDeps, m.req));
     else if (m.type === 'deleteOwn') void rpcUpload(m.reqId, () => runDelete(uploadDeps, m.req));
     else if (m.type === 'abortLoads') client.abortLoads();

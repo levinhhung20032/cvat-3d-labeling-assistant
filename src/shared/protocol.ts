@@ -16,6 +16,8 @@ export type PanelMessage = Envelope<typeof PANEL_SOURCE> &
     | { type: 'chunk'; index: number; first: number; count: number; reqId: number }
     // chuyển focus trong giao diện CVAT sang object (đổi frame nếu cần); zoom = camera 3D của CVAT lại gần object; minimize = thu nhỏ tool
     | { type: 'reloadCvat' } // tải lại tab CVAT (sau upload) rồi tự mở lại tool
+    | { type: 'ackRemoved'; ids: number[] } // người dùng xác nhận đã biết các ID biến mất: bỏ khỏi sổ ID đã thấy của tool (không đụng tới CVAT)
+    | { type: 'readIds' } // đọc ID hiển thị CVAT đang cấp cho từng track
     | { type: 'toggleWindow' } // thu nhỏ / mở lại cửa sổ tool
     | { type: 'dblOpen'; on: boolean } // ô "CVAT → tool": tắt thì bấm đúp trong CVAT không tự mở rộng / chọn object trong tool
     | { type: 'hotkeys'; toggle: string[] } // phím bật tắt cửa sổ để content script nghe ngay trên trang CVAT
@@ -31,6 +33,7 @@ export type ContentMessage = Envelope<typeof CONTENT_SOURCE> &
     | { type: 'loading' }
     | { type: 'cvatDbl'; num: number; frame: number | null } // bấm đúp vào object trong CVAT: mở rộng tool với object đó
     | { type: 'cvat'; num: number | null; frame: number | null } // object/frame đang chọn trong giao diện CVAT
+    | { type: 'cvatIds'; ok: boolean; reason?: string; pairs: [number, number][] } // [ID server của track, ID hiển thị trong CVAT]
     | { type: 'focusFailed'; num: number; reason: string } // Focus không zoom được vào object trong CVAT (kèm lý do)
     | { type: 'error'; message: string }
     | {

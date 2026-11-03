@@ -28,6 +28,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'zoom.reset', label: 'Zoom về vừa object', defaults: ['0'] },
   { id: 'view.center', label: '⌖ Về giữa: đưa khung nhìn (đã dời bằng chuột phải) về giữa box', defaults: [] },
   { id: 'table.nextFlag', label: 'Bảng object: nhảy tới object có flag tiếp theo (chọn và cuộn tới dòng đó)', defaults: ['n'] },
+  { id: 'ids.remap', label: 'Lấy ID từ CVAT: đọc ID hiển thị hiện tại của từng object trong CVAT (sau khi tạo / xóa object ở CVAT) và cập nhật bảng object', defaults: ['shift+r'] },
   { id: 'undo', label: 'Hoàn tác', defaults: ['ctrl+z'] },
   { id: 'redo', label: 'Làm lại', defaults: ['ctrl+y', 'ctrl+shift+z'] },
 ];

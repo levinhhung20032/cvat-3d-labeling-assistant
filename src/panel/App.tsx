@@ -10,6 +10,7 @@ import type { Cuboid } from '../shared/cuboid';
 import { upsertKeyframe } from '../shared/edit';
 import { actionFor, comboOf } from '../shared/keymap';
 import { estimateEgo, setEgo } from '../shared/ego';
+import { clientIdOf, numOfClientId, setCvatIds, useCvatIdVersion } from './cvatIds';
 import { configureLoading, LOAD_MODES, loadMode, setLoadMode, type LoadMode } from './loadMode';
 import { stateAt } from '../shared/interp';
 import type { ContentMessage } from '../shared/protocol';
@@ -35,7 +36,7 @@ import { dropSupported, findDrift } from '../shared/drift';
 import { fitReportAt } from '../shared/fit';
 import { loadPass, savePass, sigOf, type PassEntry } from './passStore';
 import { DEFAULT_GROUND } from '../shared/ground';
-import { splitTrack } from '../shared/splitId';
+import { relocateLateStart, splitTrack } from '../shared/splitId';
 import { DeleteDialog } from './DeleteDialog';
 import { madeStore, useMadeIds } from './madeStore';
 import { defaultDyn, dynClassStore, useDynClasses, useDynRules } from './dynClassStore';
@@ -265,6 +266,7 @@ export function App() {
         setRestorable(restorableRef.current);
         if (!chk.ok && chk.reason !== 'none') { setDraftNote(chk.message); kv.remove(draftKey(m.job.id)); }
         countRef.current = m.annotations.tracks.length;
+        window.setTimeout(() => post({ type: 'readIds' }), 1500); // CVAT đã nạp xong danh sách object chưa thì chưa chắc: người dùng bấm phím để đọc lại
         dynClassStore.ensure(m.job.id, m.labels.map((l) => l.name)); // lấy class của job một lần
         // Point cloud tải theo chunk như giao diện CVAT (ít request, máy chủ không phải đọc lại chunk cho từng frame); không biết cỡ chunk
         // hoặc job không phải 3D thì chỉ tải từng frame.
@@ -274,11 +276,15 @@ export function App() {
           : null;
         chunkSrcRef.current = chunkSrc;
         configureLoading(m.job.start_frame, m.job.stop_frame, chunkSrc);
+      } else if (m.type === 'cvatIds') {
+        if (m.ok) { setCvatIds(m.pairs); setToast(`Đã lấy ID từ CVAT cho ${m.pairs.length} object.`); }
+        else setToast(`Chưa đọc được ID từ CVAT (${m.reason ?? 'không rõ lý do'}). Mở một frame có object trong CVAT rồi bấm lại.`);
       } else if (m.type === 'cvatDbl') {
         // Bấm đúp trong CVAT: chọn object đó và chuyển sang Batch Review; ô "CVAT → tool" tắt thì bỏ qua (content script cũng không gửi).
-        if (syncRef.current && m.num >= 1 && m.num <= countRef.current) {
-          lastCvatNum.current = m.num;
-          setSelectedNum(m.num);
+        const dn = workRef.current ? numOfClientId(workRef.current.tracks, m.num) : null;
+        if (syncRef.current && dn !== null) {
+          lastCvatNum.current = dn;
+          setSelectedNum(dn);
           if (readyRef.current) setTab('review'); // Batch Review chỉ mở khi đã tải xong
           if (m.frame !== null) {
             lastCvatFrame.current = m.frame;
@@ -287,9 +293,10 @@ export function App() {
         }
       } else if (m.type === 'cvat') {
         // Chọn object / đổi frame trong giao diện CVAT → tool chọn đúng object đó.
-        if (syncRef.current && m.num !== null && m.num !== lastCvatNum.current && Date.now() - toolSelAt.current > 5000 && m.num >= 1 && m.num <= countRef.current) {
-          lastCvatNum.current = m.num;
-          setSelectedNum(m.num);
+        const cn = m.num !== null && workRef.current ? numOfClientId(workRef.current.tracks, m.num) : null;
+        if (syncRef.current && cn !== null && cn !== lastCvatNum.current && Date.now() - toolSelAt.current > 5000) {
+          lastCvatNum.current = cn;
+          setSelectedNum(cn);
           setTab((t) => (t === 'job' || t === 'keys' || !readyRef.current ? t : 'review')); // Batch Review chỉ mở khi đã tải xong
         } else if (m.num === null) lastCvatNum.current = null;
         // Đổi frame trong CVAT → cửa sổ của tool chạy theo.
@@ -346,6 +353,7 @@ export function App() {
       else if (id === 'redo') dispatch({ t: 'redo' });
       else if (id === 'focus.cvat') focusRef.current();
       else if (id === 'window.toggle') post({ type: 'toggleWindow' });
+      else if (id === 'ids.remap') syncIdsRef.current();
       else emitAction(id);
     };
     const kt = keyTarget();
@@ -407,7 +415,7 @@ export function App() {
     if (frame !== null) lastCvatFrame.current = frame;
     lastCvatNum.current = selectedNum;
     pointClouds.pauseBackground(30_000); // nhường server cho CVAT nạp frame rồi mới zoom
-    post({ type: 'cvatFocus', num: selectedNum, frame, zoom: true, minimize: true });
+    post({ type: 'cvatFocus', num: clientIdOf(workRef.current?.tracks ?? [], selectedNum), frame, zoom: true, minimize: true });
   };
 
   /** Chọn object từ phía tool (ô nhập ID, ↑/↓, bảng object) → chuyển focus bên CVAT sang object đó. */
@@ -432,7 +440,7 @@ export function App() {
     }
     if (frame !== null) lastCvatFrame.current = frame; // không để cửa sổ tool nhảy theo chính thao tác này
     if (frame !== null) pointClouds.pauseBackground(8_000);
-    post({ type: 'cvatFocus', num, frame });
+    post({ type: 'cvatFocus', num: clientIdOf(w.tracks, num), frame });
   };
   const ignAll = useIgnored();
   // Ngưỡng cảnh báo chỉnh tay (tab Threshold): mỗi lần đổi, các phép tính dùng ngưỡng tính lại; ngưỡng riêng theo object nạp theo job.
@@ -700,6 +708,10 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
   const saveResume = () => {
     if (here.current.job) kv.set('cvla-resume', JSON.stringify({ ...here.current, at: Date.now() }));
   };
+  // Lấy ID hiển thị đang dùng trong CVAT (CVAT không đánh lại ID khi tạo / xóa object) để bảng object và việc chọn object khớp với CVAT.
+  const syncIds = () => post({ type: 'readIds' });
+  const syncIdsRef = useRef(syncIds);
+  syncIdsRef.current = syncIds;
   const [resumeTab, setResumeTab] = useState<Tab | null>(null);
   useEffect(() => {
     if (!data) return;
@@ -1098,7 +1110,7 @@ Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', dange
       )}
       {state.kind === 'error' && <Notice tone="error">Lỗi: {state.message}</Notice>}
       {data && data.removedIds.length > 0 && (
-        <Notice tone="error">CẢNH BÁO: ID đã biến mất so với lần đọc trước: {data.removedIds.join(', ')}</Notice>
+        <Notice tone="error" actions={<button onClick={() => { post({ type: 'ackRemoved', ids: data.removedIds }); setState((s) => (s.kind === 'ok' ? { kind: 'ok', data: { ...s.data, removedIds: [] } } : s)); }} title="Dùng khi ID biến mất là do bạn chủ động (ví dụ merge / xóa trong CVAT). Chỉ quên ID đó trong tool, không đổi gì trên CVAT.">Đã biết, bỏ cảnh báo</button>}>CẢNH BÁO: ID đã biến mất so với lần đọc trước: {data.removedIds.join(', ')}</Notice>
       )}
       {data && work && tab === 'objects' && (
         <ObjectTable
@@ -1137,7 +1149,7 @@ Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', dange
           onTrack={(idx, track, frames) => { dispatch({ t: 'track', idx, track, frames }); shiftStore.edit(data.job.id, idx + 1); }}
           onSplit={(idx, resume) => {
             const t = work.tracks[idx];
-            const r = t ? splitTrack(t, resume, data.job.stop_frame) : null;
+            const r = !t ? null : resume < 0 ? relocateLateStart(t, data.job.start_frame, data.job.stop_frame) : splitTrack(t, resume, data.job.stop_frame);
             if (!r) return null;
             dispatch({ t: 'split', idx, oldTrack: r.oldTrack, newTrack: r.newTrack, frames: r.frames });
             shiftStore.edit(data.job.id, idx + 1);

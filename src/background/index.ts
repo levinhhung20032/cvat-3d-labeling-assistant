@@ -58,6 +58,40 @@ function focusObject3d(num: number, frame: number | null): { ok: boolean; reason
   return { ok: true };
 }
 
+/** Đọc ID hiển thị (clientID) mà CVAT đang cấp cho từng track, kèm ID server: chỉ đọc, không đổi gì. Chạy trong ngữ cảnh trang. */
+async function readCvatIds(): Promise<{ ok: boolean; reason?: string; pairs?: [number, number][] }> {
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const root = document.getElementById('root') as any;
+  const key = root && Object.keys(root).find((k) => k.startsWith('__reactContainer'));
+  if (!key) return { ok: false, reason: 'no-root' };
+  let store: any = null;
+  const seen = new Set<unknown>();
+  const stack: any[] = [root[key]];
+  let n = 0;
+  while (stack.length && !store && n++ < 5000) {
+    const f = stack.pop();
+    if (!f || seen.has(f)) continue;
+    seen.add(f);
+    const p = f.memoizedProps;
+    if (p && p.store && typeof p.store.getState === 'function') { store = p.store; break; }
+    if (f.child) stack.push(f.child);
+    if (f.sibling) stack.push(f.sibling);
+  }
+  const st = store?.getState()?.annotation;
+  if (!st) return { ok: false, reason: 'no-store' };
+  const pairs = new Map<number, number>();
+  const take = (states: any[] | undefined) => {
+    for (const o of states ?? []) if (o && o.objectType === 'track' && Number.isInteger(o.serverID) && Number.isInteger(o.clientID)) pairs.set(o.serverID, o.clientID);
+  };
+  take(st.annotations?.states);
+  try {
+    const job = st.job?.instance;
+    const frame = st.player?.frame?.number;
+    if (job?.annotations?.get && Number.isInteger(frame)) take(await job.annotations.get(frame, true, []));
+  } catch { /* chỉ dùng danh sách object của frame hiện tại */ }
+  return pairs.size ? { ok: true, pairs: [...pairs] } : { ok: false, reason: 'no-tracks' };
+}
+
 // Sau upload: tải lại tab CVAT để giao diện CVAT hiện đúng dữ liệu mới (nó còn giữ bản cũ trong bộ nhớ, bấm Save sẽ ghi đè),
 // rồi tự mở lại tool. Cờ chỉ có hiệu lực 60 giây và chỉ cho đúng tab đó.
 const REOPEN_KEY = 'cvla-reopen';
@@ -75,6 +109,13 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const tabId = sender.tab?.id;
   if (msg?.type === 'cvla-reload' && sender.id === api.runtime.id && tabId !== undefined) {
     void api.storage.local.set({ [REOPEN_KEY]: { tabId, at: Date.now() } }).then(() => api.tabs.reload(tabId)).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (msg?.type === 'cvla-ids' && sender.id === api.runtime.id && tabId !== undefined) {
+    api.scripting
+      .executeScript({ target: { tabId }, world: 'MAIN', func: readCvatIds })
+      .then((r) => sendResponse(r[0]?.result ?? { ok: false }))
+      .catch((e) => sendResponse({ ok: false, reason: String(e) }));
     return true;
   }
   if (msg?.type !== 'cvla-focus3d' || sender.id !== api.runtime.id || tabId === undefined || !Number.isInteger(msg.num)) return;
