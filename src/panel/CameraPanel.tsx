@@ -157,14 +157,14 @@ function CameraSetupEditor({ files, setup, onChange, onCount }: { files: string[
         </label>
         <span style={{ color: '#888' }}>Góc nhìn là ước lượng ±15°, chỉnh được.</span>
       </div>
-      <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+      <table style={{ borderCollapse: 'collapse', width: '100%', tableLayout: 'auto' }}>
         <thead>
           <tr style={{ textAlign: 'left' }}><th>Tên camera trong job</th><th>Hướng</th><th title="Theo la bàn nhìn từ trên: dương = lệch phải, âm = lệch trái so với hướng trước xe">Yaw (°, + phải / − trái)</th><th>Ống kính</th><th>Nửa FOV (°)</th></tr>
         </thead>
         <tbody>
           {cams.map((c, i) => (
             <tr key={c.key}>
-              <td>{files[i]!.split('/').pop()}</td>
+              <td style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={files[i]!.split('/').pop()}>{files[i]!.split('/').pop()}</td>
               <td>
                 <select
                   value={c.dir}

@@ -25,8 +25,9 @@ const TAKEOVER = 'cvla-takeover';
 
 type Out = ContentMessage extends infer M ? (M extends unknown ? Omit<M, 'source' | 'session'> : never) : never;
 
-interface Geo { x: number; y: number; w: number; h: number; max: boolean; min: boolean }
+interface Geo { x: number; y: number; w: number; h: number; max: boolean; min: boolean; mx?: number; my?: number }
 
+const ICON = 35; // cạnh icon khi thu nhỏ
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
 function defaultGeo(): Geo {
@@ -86,6 +87,8 @@ function main() {
   let body: HTMLElement | null = null; // phần thân cửa sổ: iframe, hoặc vùng chứa panel ở chế độ nhúng
   let inPage: InPagePanel | null = null;
   let titleEl: HTMLSpanElement | null = null;
+  let barEl: HTMLDivElement | null = null;
+  let miniEl: HTMLDivElement | null = null;
   let gotReady = false;
   let watchdog = 0;
   let toggleCombos: string[] = ['`']; // phím thu nhỏ / mở cửa sổ; panel gửi lại khi người dùng đổi phím
@@ -146,21 +149,23 @@ function main() {
     if (!host || !body) return;
     const vw = window.innerWidth, vh = window.innerHeight;
     // Thu nhỏ (collapse) chỉ gập thành thanh tiêu đề ở vị trí cũ và GIỮ cờ toàn màn hình: mở lại thì về đúng kích thước trước đó.
+    // Thu nhỏ = chỉ còn một icon (ICON px) kéo được, vị trí riêng (mx, my); kích thước / cờ toàn màn hình trước đó được giữ nguyên.
     if (geo.min) {
-      geo.w = clamp(geo.w, 320, vw);
-      geo.x = clamp(geo.x, -geo.w + 120, vw - 120); // luôn còn thanh tiêu đề trong tầm nhìn để kéo lại
-      geo.y = clamp(geo.y, 0, vh - TITLE_H);
-      Object.assign(host.style, { left: `${geo.x}px`, top: `${geo.y}px`, width: `${geo.w}px`, height: `${TITLE_H}px`, resize: 'none' });
+      geo.mx = clamp(geo.mx ?? Math.max(0, geo.x + geo.w - ICON), 0, vw - ICON);
+      geo.my = clamp(geo.my ?? Math.max(0, geo.y), 0, vh - ICON);
+      Object.assign(host.style, { left: `${geo.mx}px`, top: `${geo.my}px`, width: `${ICON}px`, height: `${ICON}px`, minWidth: '0', resize: 'none', borderRadius: '50%' });
     } else if (geo.max) {
-      Object.assign(host.style, { left: '0px', top: '0px', width: `${vw}px`, height: `${vh}px`, resize: 'none' });
+      Object.assign(host.style, { left: '0px', top: '0px', width: `${vw}px`, height: `${vh}px`, resize: 'none', minWidth: '320px', borderRadius: '4px' });
     } else {
       geo.w = clamp(geo.w, 320, vw);
       geo.h = clamp(geo.h, 200, vh);
       geo.x = clamp(geo.x, -geo.w + 120, vw - 120);
       geo.y = clamp(geo.y, 0, vh - TITLE_H);
-      Object.assign(host.style, { left: `${geo.x}px`, top: `${geo.y}px`, width: `${geo.w}px`, height: `${geo.h}px`, resize: 'both' });
+      Object.assign(host.style, { left: `${geo.x}px`, top: `${geo.y}px`, width: `${geo.w}px`, height: `${geo.h}px`, resize: 'both', minWidth: '320px', borderRadius: '4px' });
     }
     body.style.display = geo.min ? 'none' : 'block';
+    if (barEl) barEl.style.display = geo.min ? 'none' : 'flex';
+    if (miniEl) miniEl.style.display = geo.min ? 'flex' : 'none';
   }
 
   function show() {
@@ -195,6 +200,46 @@ function main() {
       mk('✕', 'Đóng', hide),
     );
     bar.append(title, btns);
+    barEl = bar;
+
+    // icon thu nhỏ: kéo để di chuyển, bấm (không kéo) để mở lại
+    const mini = document.createElement('div');
+    miniEl = mini;
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('width', '22');
+    svg.setAttribute('height', '22');
+    svg.style.cssText = 'display:block;pointer-events:none;';
+    const path = document.createElementNS(NS, 'path');
+    path.setAttribute('fill', '#fff');
+    path.setAttribute('d', 'M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z');
+    svg.append(path);
+    mini.append(svg);
+    mini.title = 'Mở lại CVAT 3D Assistant (phím tắt cũng được); kéo để di chuyển';
+    mini.style.cssText = `flex:1;display:none;align-items:center;justify-content:center;background:#24292f;cursor:grab;user-select:none;touch-action:none;`;
+    let mdrag: { px: number; py: number; x: number; y: number; moved: boolean } | null = null;
+    mini.onpointerdown = (e) => {
+      if (e.button !== 0) return;
+      mini.setPointerCapture(e.pointerId);
+      mdrag = { px: e.clientX, py: e.clientY, x: geo.mx ?? 0, y: geo.my ?? 0, moved: false };
+    };
+    mini.onpointermove = (e) => {
+      if (!mdrag) return;
+      const dx = e.clientX - mdrag.px, dy = e.clientY - mdrag.py;
+      if (!mdrag.moved && Math.hypot(dx, dy) < 4) return;
+      mdrag.moved = true;
+      geo.mx = mdrag.x + dx;
+      geo.my = mdrag.y + dy;
+      applyGeo();
+    };
+    mini.onpointerup = () => {
+      if (!mdrag) return;
+      const moved = mdrag.moved;
+      mdrag = null;
+      if (moved) persist();
+      else { geo.min = false; applyGeo(); persist(); focusPanel(); }
+    };
 
     // kéo cửa sổ bằng thanh tiêu đề
     let drag: { px: number; py: number; x: number; y: number } | null = null;
@@ -218,7 +263,7 @@ function main() {
       // Máy chủ người dùng tự thêm trong Cài đặt: trang của extension chỉ nhúng được vào các host trong web_accessible_resources của
       // manifest (danh sách này không đổi được lúc chạy; mở cho mọi trang thì trang nào cũng nhúng được panel và đọc được bản nháp)
       // → dựng panel thẳng trong trang ngay, không tạo iframe.
-      host.append(bar);
+      host.append(bar, mini);
       document.documentElement.append(host);
       void fallbackToInPage('máy chủ thêm trong Cài đặt (ngoài danh sách nhúng iframe của manifest)', true);
     } else {
@@ -227,7 +272,7 @@ function main() {
     frame.style.cssText = 'flex:1;width:100%;border:0;background:#fff;min-height:0;';
     body = frame;
     frame.addEventListener('load', () => log('khung tool đã tải xong'));
-    host.append(bar, frame);
+    host.append(bar, mini, frame);
     document.documentElement.append(host);
     log('đã tạo khung tool', { src: frame.src.split('#')[0], extOrigin, pageOrigin: location.origin });
     // Nếu khung không gửi "ready" (bị trình duyệt / chính sách của trang chặn, hoặc tin nhắn bị chặn âm thầm) thì chuyển sang
@@ -270,6 +315,8 @@ function main() {
     body = null;
     inPage = null;
     titleEl = null;
+    barEl = null;
+    miniEl = null;
   }
 
   /** Trang của extension (panel.html) chỉ nhúng được vào các host trong web_accessible_resources của manifest. */
