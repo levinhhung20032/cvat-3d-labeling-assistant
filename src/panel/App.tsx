@@ -36,7 +36,7 @@ import { dropSupported, findDrift } from '../shared/drift';
 import { fitReportAt } from '../shared/fit';
 import { loadPass, savePass, sigOf, type PassEntry } from './passStore';
 import { DEFAULT_GROUND } from '../shared/ground';
-import { relocateLateStart, splitTrack } from '../shared/splitId';
+import { findLateStart, relocateLateStart, splitTrack } from '../shared/splitId';
 import { DeleteDialog } from './DeleteDialog';
 import { madeStore, useMadeIds } from './madeStore';
 import { defaultDyn, dynClassStore, useDynClasses, useDynRules } from './dynClassStore';
@@ -858,6 +858,23 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
   };
 
   /** Xóa object do tool tạo: trong nháp thì bỏ khỏi nháp; đã upload thì mở hộp thoại xóa trên CVAT (chỉ ID trong sổ của tool). */
+  /** Menu chuột phải bảng object: chuyển object xuất hiện muộn sang ID mới (cùng logic nút trong Batch Review). */
+  const relocateLate = async (num: number) => {
+    if (!data || !work) return;
+    const t = work.tracks[num - 1];
+    const { start_frame: a, stop_frame: b } = data.job;
+    const late = t ? findLateStart(t, a, b) : null;
+    const r = late && t ? relocateLateStart(t, a, b) : null;
+    if (!late || !r) { setToast(`Object #${num} không xuất hiện muộn.`); return; }
+    const msg = `• Object #${num} xuất hiện từ frame ${late.first} (không phải frame ${a}).\n`
+      + `• #${num} sẽ outside TOÀN BỘ (keyframe outside ở mọi frame ${a}–${b}).\n`
+      + `• Object MỚI (cuối danh sách): outside từ frame ${a} tới ${late.first - 1}, từ frame ${late.first} sao chép vị trí, kích thước, hướng, thuộc tính của #${num}.\n\n`
+      + 'Không xóa ID nào. Chỉ nằm trong nháp tới khi bạn upload.';
+    if (!await askConfirm({ title: `Chuyển object #${num} sang ID mới`, message: msg, confirmLabel: 'Chuyển' })) return;
+    dispatch({ t: 'split', idx: num - 1, oldTrack: r.oldTrack, newTrack: r.newTrack, frames: r.frames });
+    shiftStore.edit(data.job.id, num);
+    setToast(`Đã chuyển: object mới #${work.tracks.length + 1} (từ frame ${late.first}); #${num} outside toàn bộ. Nằm trong nháp, chưa upload.`);
+  };
   const deleteMade = async (r: { num: number; id: number; made: 'draft' | 'server' | null }) => {
     if (!data || r.made === null) return;
     if (r.made === 'draft') {
@@ -1114,7 +1131,7 @@ Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', dange
       )}
       {data && work && tab === 'objects' && (
         <ObjectTable
-          jobId={data.job.id} onDelete={deleteMade} flagsOf={objectFlags} onOutside={(n, k) => { void outsideFlagged(n, k); }} onAcceptHints={acceptHints} onIgnoreMotion={ignoreMotionAll} onOpenAt={openAtFrame} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs} incomplete={passView.incomplete}
+          jobId={data.job.id} onRelocate={(n) => { void relocateLate(n); }} onDelete={deleteMade} flagsOf={objectFlags} onOutside={(n, k) => { void outsideFlagged(n, k); }} onAcceptHints={acceptHints} onIgnoreMotion={ignoreMotionAll} onOpenAt={openAtFrame} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs} incomplete={passView.incomplete}
           tracks={work.tracks} labels={data.labels} start={data.job.start_frame} stop={data.job.stop_frame} cvatFrame={focus?.frame ?? null}
           selectedNum={selectedNum} onSelect={selectFromTool}
           onOpen={(num) => {

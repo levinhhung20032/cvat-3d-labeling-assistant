@@ -64,6 +64,9 @@ export interface LateStart {
 
 /** Track có box đầu tiên muộn hơn frame đầu job (xuất hiện giữa chừng). Null nếu bắt đầu từ frame đầu hoặc không có box nào. */
 export function findLateStart(track: CvatTrack, start: number, stop: number): LateStart | null {
+  // Track đã có keyframe (kể cả outside) từ frame đầu job = đã ở dạng "outside tới lúc xuất hiện", không phải xuất hiện muộn.
+  const firstShape = sortedShapes(track)[0];
+  if (firstShape && firstShape.frame <= start) return null;
   for (let f = start; f <= stop; f++) {
     if (stateAt(track, f).cuboid) return f > start ? { first: f } : null;
   }

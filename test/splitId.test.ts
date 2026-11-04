@@ -66,5 +66,8 @@ describe('ID xuất hiện giữa chừng', () => {
     expect(stateAt(r.newTrack, 6).cuboid?.x).toBe(6);
     expect(findLateStart(t, 0, STOP)).toEqual({ first: 3 });
     expect(relocateLateStart(track(5, [box(0), box(4)]), 0, STOP)).toBeNull();
+    // đã có keyframe outside từ frame đầu job (dạng sau khi chuyển ID) → không báo xuất hiện muộn
+    expect(findLateStart(track(5, [box(0, true), box(1, true), box(2, true), box(3)]), 0, STOP)).toBeNull();
+    expect(relocateLateStart(track(5, [box(0, true), box(3)]), 0, STOP)).toBeNull();
   });
 });
