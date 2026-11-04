@@ -39,8 +39,9 @@ const issueTip = (by: Record<string, number>) => {
 /** Cờ cảnh báo của một object (tính khi mở menu chuột phải): frame đi xa (lỗi D), frame ít điểm, và cờ sớm nhất (kind: motion / sparse / drift / overlap hoặc mã lỗi luật). */
 export interface ObjFlags { far: number[]; motion: number[]; sparse: number[]; first: { frame: number; kind: string } | null; pending: boolean }
 
-export function ObjectTable({ jobId, onRelocate, flagsOf, onOutside, onAcceptHints, onIgnoreMotion, onOpenAt, rows, hints, overlapFrames, overlapPairs, onOpen, onSelect, selectedNum, onDelete, incomplete, tracks, labels: jobLabels, start, stop, cvatFrame }: {
+export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flagsOf, onOutside, onAcceptHints, onIgnoreMotion, onOpenAt, rows, hints, overlapFrames, overlapPairs, onOpen, onSelect, selectedNum, onDelete, incomplete, tracks, labels: jobLabels, start, stop, cvatFrame }: {
   jobId: number;
+  locked: readonly number[] | null; onLock: () => void; onUnlock: () => void; // khóa danh sách ID gốc (không xóa được)
   onRelocate: (num: number) => void; // chuyển object xuất hiện muộn sang ID mới
   flagsOf: (num: number) => ObjFlags; // menu chuột phải: cờ cảnh báo của object
   onOutside: (num: number, kind: 'far' | 'sparse') => void; // outside toàn bộ frame đi xa (lỗi D) / ít điểm của object
@@ -203,6 +204,16 @@ export function ObjectTable({ jobId, onRelocate, flagsOf, onOutside, onAcceptHin
         <button onClick={nextFlag} disabled={flagCount === 0} title={hint('table.nextFlag', 'Nhảy tới object có flag tiếp theo (ô cảnh báo tô cam): chọn dòng đó và cuộn tới; hết danh sách thì quay vòng')}>⚑ Flag tiếp{flagCount ? ` (${flagCount} object)` : ''}</button>
         {flagNote && <span style={{ color: '#7a4b00', marginLeft: 6 }}>{flagNote}</span>}
         <span style={{ color: '#777', fontSize: 11, marginLeft: 8 }}>bấm 1 lần để chọn dòng, bấm đúp để mở Batch Review</span>
+        <span style={{ marginLeft: 10 }}>
+          {locked ? (
+            <>
+              <b style={{ color: '#7a4b00' }} title="ID gốc đã khóa: không xóa được, chỉ chỉnh sửa. Object ngoài danh sách (🔓) xóa được.">🔒 Đã khóa {locked.length} ID gốc</b>{' '}
+              <button onClick={onUnlock} style={{ padding: '0 5px' }} title="Mở khóa: quay về chỉ xóa được object do tool tạo">mở khóa</button>
+            </>
+          ) : (
+            <button onClick={onLock} style={{ padding: '0 5px' }} title="Chụp danh sách ID hiện có trên server làm ID gốc: các ID này không bao giờ xóa được; object ngoài danh sách (vẽ thêm trên CVAT hoặc tạo trên tool) xóa được">🔒 Khóa danh sách ID gốc</button>
+          )}
+        </span>
         {seen.size > 0 && (
           <span style={{ marginLeft: 10 }} title="ID gạch chân = object đã mở xem trong Batch Review (lưu theo job)">
             <span style={SEEN_STYLE}>ID</span> đã xem: {rows.filter((r) => seen.has(r.id)).length}{' '}
@@ -239,7 +250,7 @@ export function ObjectTable({ jobId, onRelocate, flagsOf, onOutside, onAcceptHin
               }}
               style={{ cursor: 'pointer', userSelect: 'none', borderTop: '1px solid #ddd', background: r.num === selectedNum ? SEL_BG : r.made === 'draft' ? '#dff5df' : r.made === 'server' ? '#e3ecff' : i % 2 ? ODD_BG : undefined }}
             >
-              <td><b style={seen.has(r.id) ? SEEN_STYLE : undefined} title={seen.has(r.id) ? 'Đã xem trong Batch Review' : undefined}>{clientIdOf(tracks, r.num)}</b>{clientIdOf(tracks, r.num) !== r.num ? <span style={{ color: '#999', fontSize: 10 }} title="Số thứ tự trong tool (CVAT đã cấp ID khác)"> (#{r.num})</span> : null} {r.made === 'draft' ? <span title="Object do tool tạo, đang trong NHÁP (chưa có trên CVAT)" style={{ background: '#2e9d3b', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 mới</span> : r.made === 'server' ? <span title="Object do tool tạo và đã upload; chỉ loại này mới xóa được bằng tool" style={{ background: '#2f5fd0', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 tool</span> : <span style={{ color: "#999", fontSize: 10 }}>db {r.id}</span>}</td><td>{r.label}</td>
+              <td><b style={seen.has(r.id) ? SEEN_STYLE : undefined} title={seen.has(r.id) ? 'Đã xem trong Batch Review' : undefined}>{clientIdOf(tracks, r.num)}</b>{clientIdOf(tracks, r.num) !== r.num ? <span style={{ color: '#999', fontSize: 10 }} title="Số thứ tự trong tool (CVAT đã cấp ID khác)"> (#{r.num})</span> : null} {r.made === 'draft' ? <span title="Object do tool tạo, đang trong NHÁP (chưa có trên CVAT)" style={{ background: '#2e9d3b', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 mới</span> : r.ext ? <span title="Object có trên server nhưng NGOÀI danh sách ID gốc đã khóa: xóa được" style={{ background: '#a05a00', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🔓 ngoài list</span> : r.made === 'server' ? <span title="Object do tool tạo và đã upload; xóa được bằng tool" style={{ background: '#2f5fd0', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 tool</span> : <span style={{ color: "#999", fontSize: 10 }}>{locked?.includes(r.id) ? '🔒 ' : ''}db {r.id}</span>}</td><td>{r.label}</td>
               {(() => {
                 const at = attrsOf.get(r.num) ?? [];
                 return (
@@ -289,7 +300,7 @@ export function ObjectTable({ jobId, onRelocate, flagsOf, onOutside, onAcceptHin
               <button role="menuitem" onClick={run(() => onSelect(row.num))} title="Chọn object này (CVAT chọn theo nếu đang bật đồng bộ)">◎ Chọn object trong tool và CVAT</button>
               <button role="menuitem" disabled={!(row.id > 0)} title={row.id > 0 ? undefined : 'Object mới trong nháp chưa có ID trên CVAT nên không đánh dấu được'} onClick={run(() => { if (seen.has(row.id)) seenStore.remove(jobId, row.id); else seenStore.add(jobId, row.id); })}>{seen.has(row.id) ? '↺ Bỏ đánh dấu đã xem' : '✓ Đánh dấu đã xem'}</button>
               <button role="menuitem" onClick={run(() => { try { void navigator.clipboard?.writeText(`#${row.num}`); } catch { /* bỏ qua */ } })}>⧉ Sao chép số thứ tự (#{row.num})</button>
-              {row.made !== null && <button role="menuitem" className="cvla-danger" onClick={run(() => onDelete(row))}>🗑 Xóa object do tool tạo</button>}
+              {row.made !== null && <button role="menuitem" className="cvla-danger" onClick={run(() => onDelete(row))}>🗑 {row.ext ? 'Xóa object ngoài list' : 'Xóa object do tool tạo'}</button>}
             </div>
           </>
         );

@@ -111,6 +111,15 @@ describe('xóa object do tool tạo', () => {
     expect(s.deleted).toEqual([]);
     expect(JSON.stringify(s.state)).toBe(before);
   });
+  it('ID nằm trong danh sách ID gốc đã khóa bị từ chối dù có mặt trong madeIds', async () => {
+    const { s, b, newId } = await setup();
+    const existing = b.tracks[0]!.id!;
+    const before = JSON.stringify(s.state);
+    const r = await runDelete(s.deps, { real: true, ids: [existing], madeIds: [newId, existing], lockedIds: [existing], baselineIds: [...b.tracks.map((t) => t.id!), newId] });
+    expect(r.ok).toBe(false);
+    expect(s.deleted).toEqual([]);
+    expect(JSON.stringify(s.state)).toBe(before);
+  });
   it('chạy thử không xóa; xóa thật chỉ bỏ đúng object do tool tạo và các track khác giữ nguyên', async () => {
     const { s, b, newId } = await setup();
     const req = { real: false, ids: [newId], madeIds: [newId], baselineIds: [...b.tracks.map((t) => t.id!), newId] };

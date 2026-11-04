@@ -4,13 +4,15 @@ import type { UploadResult } from '../content/uploader';
 import type { CvatAnnotations, CvatJob, CvatLabel } from '../shared/types';
 import { post, rpc } from './bridge';
 import { madeStore } from './madeStore';
+import { lockStore } from './lockStore';
 
 /**
  * Xóa object do CHÍNH TOOL tạo khỏi CVAT. Chỉ ID nằm trong sổ object do tool tạo mới xóa được; object có sẵn trên server
  * không có đường nào để xóa. Mặc định chạy thử; xóa thật cần tick xác nhận. Không hoàn tác được trên CVAT (nội dung trước khi xóa
  * được ghi vào nhật ký cục bộ).
  */
-export function DeleteDialog({ job, baseline, labels, ids, onClose, onDone, onBeforeReload }: {
+export function DeleteDialog({ job, baseline, labels, ids, allowed, onClose, onDone, onBeforeReload }: {
+  allowed: ReadonlySet<number>; // ID được phép xóa (sổ do tool tạo + object ngoài danh sách khóa)
   job: CvatJob; baseline: CvatAnnotations; labels: CvatLabel[]; ids: number[]; onClose: () => void; onDone: () => void;
   onBeforeReload: () => void; // ngay trước khi tải lại tab CVAT: ghi lại chỗ đang làm
 }) {
@@ -29,7 +31,7 @@ export function DeleteDialog({ job, baseline, labels, ids, onClose, onDone, onBe
     setBusy(true); setResult(null);
     const r = await rpc<UploadResult>((reqId) => ({
       type: 'deleteOwn', reqId,
-      req: { real, ids, madeIds: madeStore.ids(job.id), baselineIds: baseline.tracks.map((t) => t.id!).filter((x) => typeof x === 'number') },
+      req: { real, ids, madeIds: [...allowed], lockedIds: lockStore.ids(job.id) ?? [], baselineIds: baseline.tracks.map((t) => t.id!).filter((x) => typeof x === 'number') },
     }));
     setBusy(false); setResult(r);
     if (real && r.ok && r.sent && r.stage === 'done') {
@@ -41,12 +43,12 @@ export function DeleteDialog({ job, baseline, labels, ids, onClose, onDone, onBe
   return (
     <div ref={root} style={{ border: '2px solid #b00', background: '#fff5f5', padding: 10, margin: '8px 0' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <b>Xóa object do tool tạo khỏi CVAT (job {job.id})</b>
+        <b>Xóa object ngoài danh sách gốc khỏi CVAT (job {job.id})</b>
         <button onClick={onClose} disabled={busy}>Đóng</button>
       </div>
       <p style={{ margin: '6px 0' }}>
         Sẽ xóa <b>{rows.length}</b> object: {rows.map((r) => `#${r.num} ${r.label} (db ${r.id})`).join(', ')}.
-        Chỉ object do tool tạo mới xóa được; mọi object có sẵn trên server được giữ nguyên và tool kiểm tra lại bằng cách đọc server sau khi xóa.
+        Chỉ object do tool tạo hoặc nằm ngoài danh sách ID gốc đã khóa mới xóa được; mọi object khác được giữ nguyên và tool kiểm tra lại bằng cách đọc server sau khi xóa.
         ID hiển thị của các object đứng sau chúng (nếu có) sẽ lùi lại.
       </p>
       <p style={{ margin: '6px 0' }}>

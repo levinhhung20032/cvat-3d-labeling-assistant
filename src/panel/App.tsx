@@ -39,6 +39,7 @@ import { DEFAULT_GROUND } from '../shared/ground';
 import { findLateStart, relocateLateStart, splitTrack } from '../shared/splitId';
 import { DeleteDialog } from './DeleteDialog';
 import { madeStore, useMadeIds } from './madeStore';
+import { deletableIds, lockStore, useLockedIds } from './lockStore';
 import { defaultDyn, dynClassStore, useDynClasses, useDynRules } from './dynClassStore';
 import { resolveDyn } from '../shared/dynrule';
 import { ATTRS_OF, SIZE_SYNC, trackIssues } from '../shared/qcrules';
@@ -503,6 +504,8 @@ export function App() {
   }, [overlaps]);
   const overlapPairs = useMemo(() => groupPairs(overlaps), [overlaps]);
   const madeIds = useMadeIds(data?.job.id ?? 0);
+  const lockedIds = useLockedIds(data?.job.id ?? 0);
+  const deletable = useMemo(() => deletableIds(madeIds, lockedIds, (data?.ann.tracks ?? []).map((t) => t.id).filter((x): x is number => typeof x === 'number')), [madeIds, lockedIds, data]);
   const [deleting, setDeleting] = useState<number[] | null>(null);
   // Trôi box: toạ độ ego của box không đổi trong khi xe chạy (box đi theo xe), tính trên cả job, bỏ các frame đã bỏ qua.
   // Kết quả vòng tính nền (ít điểm, số điểm trong box) theo frame → số thứ tự object; khai báo ở đây vì cảnh báo trôi box cũng dùng.
@@ -733,12 +736,12 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
   }, [resumeTab, ready]);
   const rows = useMemo(
     () => (data && work
-      ? buildRows(work, data.labels, data.job.start_frame, data.job.stop_frame, (num, f) => ignAll.has(motionKey(data.job.id, num, f)), (num, f, k) => ignAll.has(issueKey(data.job.id, num, f, k)), new Set(madeIds)).map((r) => {
+      ? buildRows(work, data.labels, data.job.start_frame, data.job.stop_frame, (num, f) => ignAll.has(motionKey(data.job.id, num, f)), (num, f, k) => ignAll.has(issueKey(data.job.id, num, f, k)), new Set(madeIds), deletable.external).map((r) => {
         const dr = drift.get(r.num) ?? [], sn = sparseAll.get(r.num) ?? 0;
         return { ...r, drift: dr.length, driftFrames: dr.map((x) => x.f), issues: r.issues + sn, issuesByKind: { ...r.issuesByKind, ...(sn ? { P: sn } : {}) } };
       })
       : []),
-    [data, work, ignAll, madeIds, drift, sparseAll, thrVer],
+    [data, work, ignAll, madeIds, deletable, drift, sparseAll, thrVer],
   );
 
   // ---- Menu chuột phải ở bảng object: tác động lên đúng object của dòng được bấm ----
@@ -874,6 +877,18 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
     dispatch({ t: 'split', idx: num - 1, oldTrack: r.oldTrack, newTrack: r.newTrack, frames: r.frames });
     shiftStore.edit(data.job.id, num);
     setToast(`Đã chuyển: object mới #${work.tracks.length + 1} (từ frame ${late.first}); #${num} outside toàn bộ. Nằm trong nháp, chưa upload.`);
+  };
+  const lockBaseline = async () => {
+    if (!data) return;
+    const ids = data.ann.tracks.map((t) => t.id).filter((x): x is number => typeof x === 'number' && !madeIds.includes(x)); // object do tool tạo không phải ID gốc
+    if (!await askConfirm({ title: 'Khóa danh sách ID gốc', message: `Khóa ${ids.length} ID hiện có trên server của job này.\n• Các ID này KHÔNG bao giờ xóa được bằng tool, chỉ chỉnh sửa.\n• Object nằm ngoài danh sách (vẽ thêm trên CVAT hoặc tạo trên tool) được coi là object ngoài và được phép xóa.\n\nChỉ khóa khi trên server lúc này toàn là object gốc (chưa có object vẽ thêm cần xóa).`, confirmLabel: 'Khóa danh sách' })) return;
+    lockStore.lock(data.job.id, ids);
+    setToast(`Đã khóa ${ids.length} ID gốc.`);
+  };
+  const unlockBaseline = async () => {
+    if (!data) return;
+    if (!await askConfirm({ title: 'Mở khóa danh sách ID gốc', message: 'Mở khóa: chỉ object do tool tạo mới xóa được (như trước khi khóa). Object ngoài danh sách không còn xóa được cho tới khi khóa lại.', confirmLabel: 'Mở khóa' })) return;
+    lockStore.unlock(data.job.id);
   };
   const deleteMade = async (r: { num: number; id: number; made: 'draft' | 'server' | null }) => {
     if (!data || r.made === null) return;
@@ -1040,7 +1055,7 @@ Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', dange
       {draftNote && <Notice tone="warn" onClose={() => setDraftNote('')}>{draftNote}</Notice>}
       {deleting && data && (
         <DeleteDialog
-          job={data.job} baseline={data.ann} labels={data.labels} ids={deleting}
+          job={data.job} baseline={data.ann} labels={data.labels} ids={deleting} allowed={deletable.all}
           onClose={() => setDeleting(null)} onDone={() => { setDeleting(null); post({ type: 'load' }); }} onBeforeReload={saveResume}
         />
       )}
@@ -1131,7 +1146,7 @@ Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', dange
       )}
       {data && work && tab === 'objects' && (
         <ObjectTable
-          jobId={data.job.id} onRelocate={(n) => { void relocateLate(n); }} onDelete={deleteMade} flagsOf={objectFlags} onOutside={(n, k) => { void outsideFlagged(n, k); }} onAcceptHints={acceptHints} onIgnoreMotion={ignoreMotionAll} onOpenAt={openAtFrame} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs} incomplete={passView.incomplete}
+          jobId={data.job.id} locked={lockedIds} onLock={lockBaseline} onUnlock={unlockBaseline} onRelocate={(n) => { void relocateLate(n); }} onDelete={deleteMade} flagsOf={objectFlags} onOutside={(n, k) => { void outsideFlagged(n, k); }} onAcceptHints={acceptHints} onIgnoreMotion={ignoreMotionAll} onOpenAt={openAtFrame} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs} incomplete={passView.incomplete}
           tracks={work.tracks} labels={data.labels} start={data.job.start_frame} stop={data.job.stop_frame} cvatFrame={focus?.frame ?? null}
           selectedNum={selectedNum} onSelect={selectFromTool}
           onOpen={(num) => {

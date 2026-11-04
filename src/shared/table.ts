@@ -16,6 +16,7 @@ export interface ObjectRow {
   last: number | null;
   keyframes: number;
   jumps: number; // số frame bị cảnh báo "đi xa bất thường" (không tính frame đã bỏ qua)
+  ext?: boolean; // object có sẵn trên server nhưng nằm NGOÀI danh sách ID gốc đã khóa (xóa được như object do tool tạo)
   made: 'draft' | 'server' | null; // do tool tạo: 'draft' = mới tạo trong nháp (chưa upload), 'server' = đã upload, có trong sổ của tool
   issuesByKind: Record<string, number>; // số frame vi phạm theo mã (S K Z H D, cộng T trôi box ở App)
   issues: number; // số (frame, loại) vi phạm luật QC S/K/Z/H/D (không tính cái đã bỏ qua)
@@ -28,6 +29,7 @@ export function buildRows(
   isIgnored: (num: number, frame: number) => boolean = () => false,
   isIssueIgnored: (num: number, frame: number, kind: string) => boolean = () => false,
   madeIds: ReadonlySet<number> = new Set(),
+  externalIds: ReadonlySet<number> = new Set(),
 ): ObjectRow[] {
   const names = new Map(labels.map((l) => [l.id, l.name]));
   const rows: ObjectRow[] = [];
@@ -46,7 +48,7 @@ export function buildRows(
       for (const i of list) if (!isIssueIgnored(index + 1, f, i.kind)) { issues++; issuesByKind[i.kind] = (issuesByKind[i.kind] ?? 0) + 1; }
     }
     rows.push({
-      num: index + 1, id: t.id ?? 0, made: typeof t.id !== 'number' ? 'draft' : madeIds.has(t.id) ? 'server' : null, labelId: t.label_id, label: names.get(t.label_id) ?? `#${t.label_id}`,
+      num: index + 1, id: t.id ?? 0, made: typeof t.id !== 'number' ? 'draft' : madeIds.has(t.id) || externalIds.has(t.id) ? 'server' : null, ext: typeof t.id === 'number' && externalIds.has(t.id) && !madeIds.has(t.id), labelId: t.label_id, label: names.get(t.label_id) ?? `#${t.label_id}`,
       assigned, outside, missing: missingOutsideKeyframes(t, stop).length, first, last,
       keyframes: t.shapes.length, jumps, issues, issuesByKind, drift: 0, driftFrames: [],
     });

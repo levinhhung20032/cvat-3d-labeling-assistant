@@ -31,6 +31,7 @@ export interface DeleteReq {
   ids: number[]; // ID database cần xóa
   madeIds: number[]; // sổ các ID do tool tạo (chỉ những ID này được xóa)
   baselineIds: number[]; // mọi ID lúc đọc
+  lockedIds?: number[]; // danh sách ID gốc đã khóa: không bao giờ xóa
 }
 
 export interface LogEntry {
@@ -182,8 +183,11 @@ export async function runDelete(deps: UploadDeps, req: DeleteReq): Promise<Uploa
   const ids = [...new Set(req.ids)];
   if (!ids.length) return fail('rules', 'Không có object nào để xóa.');
   const made = new Set(req.madeIds);
+  const locked = new Set(req.lockedIds ?? []);
+  const hitLocked = ids.filter((id) => locked.has(id));
+  if (hitLocked.length) return fail('rules', `Từ chối: ID ${hitLocked.join(', ')} nằm trong danh sách ID gốc đã khóa.`);
   const notMade = ids.filter((id) => !made.has(id));
-  if (notMade.length) return fail('rules', `Từ chối: ID ${notMade.join(', ')} không phải object do tool tạo. Object có sẵn trên server không bao giờ xóa được.`);
+  if (notMade.length) return fail('rules', `Từ chối: ID ${notMade.join(', ')} không phải object do tool tạo hoặc nằm ngoài danh sách ID gốc đã khóa. Object trong danh sách khóa (hoặc khi chưa khóa: object có sẵn trên server) không bao giờ xóa được.`);
   let server: CvatAnnotations;
   try { server = await deps.read(); } catch (e) { return fail('read', `Không đọc được annotation: ${String(e)}`); }
   const sById = byId(server);
