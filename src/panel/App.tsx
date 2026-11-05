@@ -785,11 +785,22 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
     const t = work.tracks[num - 1];
     if (!t) return;
     const fl = objectFlags(num);
-    const frames = kind === 'far' ? fl.far : fl.sparse;
+    const flagged = kind === 'far' ? fl.far : fl.sparse;
     const what = kind === 'far' ? 'đi xa (lỗi D)' : 'ít điểm';
-    if (!frames.length) { setToast(`Object #${num}: không có frame ${what} nào để đặt outside.`); return; }
+    if (!flagged.length) { setToast(`Object #${num}: không có frame ${what} nào để đặt outside.`); return; }
+    // Chỉ outside đoạn ĐẦU (vật chưa xuất hiện) và đoạn CUỐI (vật đã biến mất); frame cờ nằm giữa track phải để nội suy.
+    const flagSet = new Set(flagged);
+    const present: number[] = [];
+    for (let f = data.job.start_frame; f <= data.job.stop_frame; f++) if (stateAt(t, f).cuboid) present.push(f);
+    const keep = new Set<number>();
+    for (let i = 0; i < present.length && flagSet.has(present[i]!); i++) keep.add(present[i]!);
+    for (let i = present.length - 1; i >= 0 && flagSet.has(present[i]!); i--) keep.add(present[i]!);
+    const frames = flagged.filter((f) => keep.has(f));
+    const middle = flagged.filter((f) => !keep.has(f));
+    if (!frames.length) { setToast(`Object #${num}: ${middle.length} frame ${what} đều nằm giữa track (${middle.slice(0, 8).join(', ')}${middle.length > 8 ? '…' : ''}), giữ lại để nội suy, không đặt outside.`); return; }
     const list = frames.length > 12 ? `${frames.slice(0, 12).join(', ')}… (+${frames.length - 12})` : frames.join(', ');
-    const warn = fl.pending && kind === 'sparse' ? '\nLưu ý: object còn frame chưa tải / chưa tính, danh sách có thể chưa đủ.' : '';
+    const warn = (fl.pending && kind === 'sparse' ? '\nLưu ý: object còn frame chưa tải / chưa tính, danh sách có thể chưa đủ.' : '')
+      + (middle.length ? `\nBỏ qua ${middle.length} frame ở giữa track (${middle.slice(0, 8).join(', ')}${middle.length > 8 ? '…' : ''}): giữ lại để nội suy.` : '');
     if (!await askConfirm({
       title: `Outside frame ${what} · object #${num}`,
       message: `Đặt outside cho ${frames.length} frame: ${list}.\nSau mỗi đoạn, frame kế tiếp giữ nguyên trạng thái. Chỉ nằm trong nháp tới khi bạn upload, hoàn tác được.${warn}`,
