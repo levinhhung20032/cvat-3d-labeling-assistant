@@ -74,24 +74,16 @@ export function findLateStart(track: CvatTrack, start: number, stop: number): La
 }
 
 /**
- * ID xuất hiện giữa chừng (từ frame `first` > start): track cũ A được outside TOÀN BỘ (keyframe outside ở mọi frame start..stop),
- * object mới B có outside (keyframe mọi frame) từ start tới first-1, từ `first` trở đi sao chép nguyên keyframe của A
- * (vị trí, kích thước, hướng, thuộc tính, outside). Không xóa ID nào: A chỉ `update`, B được `create` ở cuối danh sách.
+ * ID xuất hiện giữa chừng (từ frame `first` > start): GIỮ NGUYÊN ID, chỉ thêm keyframe outside ở mọi frame start..first-1
+ * (copy box đầu tiên làm giá trị nền). Không tạo object mới, không xóa gì; frame từ `first` trở đi không đổi.
  */
-export function relocateLateStart(track: CvatTrack, start: number, stop: number): SplitResult | null {
+export function outsideBeforeAppear(track: CvatTrack, start: number, stop: number): { track: CvatTrack; frames: number[]; first: number } | null {
   const late = findLateStart(track, start, stop);
   if (!late) return null;
   const ref = stateAt(track, late.first).cuboid;
   if (!ref) return null;
-  const shapes = sortedShapes(track);
-  let oldTrack: CvatTrack = track;
+  let cur = track;
   const frames: number[] = [];
-  for (let f = start; f <= stop; f++) { oldTrack = upsertKeyframe(oldTrack, f, ref, true); frames.push(f); }
-  let newTrack: CvatTrack = {
-    ...(({ id: _id, ...rest }) => rest)(track),
-    frame: late.first,
-    shapes: shapes.filter((s) => s.frame >= late.first).map(({ id: _sid, ...s }) => structuredClone(s)),
-  };
-  for (let f = start; f < late.first; f++) newTrack = upsertKeyframe(newTrack, f, ref, true);
-  return { oldTrack, newTrack, frames };
+  for (let f = start; f < late.first; f++) { cur = upsertKeyframe(cur, f, ref, true); frames.push(f); }
+  return { track: cur, frames, first: late.first };
 }

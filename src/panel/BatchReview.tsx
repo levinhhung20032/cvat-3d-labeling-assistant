@@ -122,12 +122,12 @@ const GROUND_OPT: Record<GroundKind, string> = { measured: 'local', ego: 'ego', 
 /** Chọn ĐÚNG 1 nguồn mặt đường (Ground snap / lock dùng nguồn này). */
 function GroundPick({ kind, onChange, label, title }: { kind: GroundKind; onChange: (k: GroundKind) => void; label?: string; title?: string }) {
   return (
-    <span onClick={(e) => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+    <span onClick={(e) => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, minWidth: 0, flex: '0 1 auto' }}>
       {label && <span>{label}:</span>}
       <select
         value={kind} onChange={(e) => onChange(e.target.value as GroundKind)}
         title={title ?? `Mặt đường dùng cho Ground snap / lock: ${GROUND_LABEL[kind].full}.`}
-        style={{ fontSize: 11, padding: 0, height: 16, maxWidth: 110, fontWeight: 600 }}
+        style={{ fontSize: 11, padding: 0, height: 16, maxWidth: 110, minWidth: 0, width: '100%', fontWeight: 600 }}
       >
         {GROUND_KINDS.map((k) => <option key={k} value={k} title={GROUND_LABEL[k].tip}>{GROUND_OPT[k]}</option>)}
       </select>
@@ -542,7 +542,7 @@ function Column({ kind, onKind, showAll, advise, onAdvice, pwShow = false, groun
         style={{ height: 16, lineHeight: '16px', fontSize: 11, padding: '0 4px', background: '#eef2f7', color: '#222', whiteSpace: 'nowrap', overflow: 'hidden', display: 'flex', alignItems: 'center', gap: 4, fontVariantNumeric: 'tabular-nums' }}
         title={box ? `Dài × rộng × cao của box ở frame ${f} (m)` : undefined}
       >
-        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{box ? <>L×W×H <b>{box.sx.toFixed(2)} × {box.sy.toFixed(2)} × {box.sz.toFixed(2)}</b> m</> : ''}</span>
+        <span style={{ flex: '1 0 auto', whiteSpace: 'nowrap' }}>{box ? <>L×W×H <b>{box.sx.toFixed(2)} × {box.sy.toFixed(2)} × {box.sz.toFixed(2)}</b> m</> : ''}</span>
         {!horizontal && <GroundPick kind={kind} onChange={(k) => onKind(f, k)} title={`Mặt đường của RIÊNG frame ${f} (đổi ở frame khác không ảnh hưởng frame này). Ground snap / lock dùng mặt đường này.`} />}
       </div>
       {/* Lỗi & gợi ý ở ĐẦU cột, dạng chip một dòng, vùng cao cố định nên các cột không bao giờ lệch hàng; chi tiết ở dưới các view. */}
@@ -1263,12 +1263,11 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   const relocateLate = async () => {
     if (!track || !lateStart) return;
     const msg = `• Object #${num} xuất hiện từ frame ${lateStart.first} (không phải frame ${start}).\n`
-      + `• #${num} sẽ outside TOÀN BỘ (keyframe outside ở mọi frame ${start}–${stop}).\n`
-      + `• Object MỚI (cuối danh sách): outside từ frame ${start} tới ${lateStart.first - 1}, từ frame ${lateStart.first} sao chép vị trí, kích thước, hướng, thuộc tính của #${num}.\n\n`
+      + `• Giữ nguyên ID #${num}, KHÔNG tạo ID mới: chỉ thêm keyframe outside ở mọi frame ${start}–${lateStart.first - 1}.\n\n`
       + 'Không xóa ID nào. Chỉ nằm trong nháp tới khi bạn upload.';
-    if (!await askConfirm({ title: `Chuyển object #${num} sang ID mới`, message: msg, confirmLabel: 'Chuyển' })) return;
+    if (!await askConfirm({ title: `Outside phía trước · object #${num}`, message: msg, confirmLabel: 'Thêm outside' })) return;
     const n = onSplit(num - 1, -1);
-    setNote(n === null ? 'Không chuyển được: object này không xuất hiện muộn.' : `Đã chuyển: object mới #${n} (từ frame ${lateStart.first}); #${num} outside toàn bộ. Nằm trong nháp, chưa upload.`);
+    setNote(n === null ? 'Không thêm được: object này không xuất hiện muộn.' : `Đã thêm keyframe outside frame ${start}–${lateStart.first - 1} cho #${num}, giữ ID. Nằm trong nháp, chưa upload.`);
   };
   const misfitFrames = prefs.suggest ? frames.filter((f) => fits.get(f)?.level === 'misfit') : [];
   const sparseFrames = frames.filter((f) => fits.get(f)?.level === 'sparse');
@@ -1614,7 +1613,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
           {lateStart && (
             <span style={{ color: '#7a1f1f', fontWeight: 600 }} title={`Object bắt đầu từ frame ${lateStart.first}, không phải frame đầu job.`}>
               ⚠ xuất hiện từ frame {lateStart.first}{' '}
-              <button onClick={relocateLate} style={{ padding: '0 4px', fontWeight: 600 }} title="Outside toàn bộ ID này, tạo ID mới: outside tới frame xuất hiện, sau đó sao chép nguyên box. Có hộp xác nhận.">⇢ chuyển sang ID mới</button>
+              <button onClick={relocateLate} style={{ padding: '0 4px', fontWeight: 600 }} title="Giữ ID, thêm keyframe outside ở mọi frame trước lúc xuất hiện. Có hộp xác nhận.">⇢ outside phía trước</button>
             </span>
           )}
           {outGaps.map((g) => (

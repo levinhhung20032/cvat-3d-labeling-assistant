@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findLateStart, findLongOutsideGaps, relocateLateStart, splitTrack } from '../src/shared/splitId';
+import { findLateStart, findLongOutsideGaps, outsideBeforeAppear, splitTrack } from '../src/shared/splitId';
 import { stateAt } from '../src/shared/interp';
 import { missingOutsideKeyframes } from '../src/shared/rules';
 import { serializeCuboid } from '../src/shared/cuboid';
@@ -54,20 +54,17 @@ describe('tách ID khi outside dài', () => {
 });
 
 describe('ID xuất hiện giữa chừng', () => {
-  it('A outside toàn bộ · B outside tới frame xuất hiện rồi sao chép A', () => {
+  it('giữ ID · chỉ thêm keyframe outside trước frame xuất hiện', () => {
     const t = track(5, [box(3), box(6), box(8, true)]);
-    const r = relocateLateStart(t, 0, STOP)!;
-    expect(r.oldTrack.id).toBe(5);
-    expect(r.oldTrack.shapes.length).toBe(STOP + 1);
-    expect(r.oldTrack.shapes.every((s) => s.outside)).toBe(true);
-    expect(missingOutsideKeyframes(r.oldTrack, STOP)).toEqual([]);
-    expect(r.newTrack.id).toBeUndefined();
-    expect(r.newTrack.shapes.map((s) => [s.frame, s.outside])).toEqual([[0, true], [1, true], [2, true], [3, false], [6, false], [8, true]]);
-    expect(stateAt(r.newTrack, 6).cuboid?.x).toBe(6);
+    const r = outsideBeforeAppear(t, 0, STOP)!;
+    expect(r.track.id).toBe(5);
+    expect(r.frames).toEqual([0, 1, 2]);
+    expect(r.track.shapes.map((s) => [s.frame, s.outside])).toEqual([[0, true], [1, true], [2, true], [3, false], [6, false], [8, true]]);
+    expect(stateAt(r.track, 6).cuboid?.x).toBe(6);
     expect(findLateStart(t, 0, STOP)).toEqual({ first: 3 });
-    expect(relocateLateStart(track(5, [box(0), box(4)]), 0, STOP)).toBeNull();
+    expect(outsideBeforeAppear(track(5, [box(0), box(4)]), 0, STOP)).toBeNull();
     // đã có keyframe outside từ frame đầu job (dạng sau khi chuyển ID) → không báo xuất hiện muộn
     expect(findLateStart(track(5, [box(0, true), box(1, true), box(2, true), box(3)]), 0, STOP)).toBeNull();
-    expect(relocateLateStart(track(5, [box(0, true), box(3)]), 0, STOP)).toBeNull();
+    expect(outsideBeforeAppear(track(5, [box(0, true), box(3)]), 0, STOP)).toBeNull();
   });
 });

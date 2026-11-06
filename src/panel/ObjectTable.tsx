@@ -42,7 +42,7 @@ export interface ObjFlags { far: number[]; motion: number[]; sparse: number[]; f
 export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flagsOf, onOutside, onAcceptHints, onIgnoreMotion, onOpenAt, rows, hints, overlapFrames, overlapPairs, onOpen, onSelect, selectedNum, onDelete, incomplete, tracks, labels: jobLabels, start, stop, cvatFrame }: {
   jobId: number;
   locked: readonly number[] | null; onLock: () => void; onUnlock: () => void; // khóa danh sách ID gốc (không xóa được)
-  onRelocate: (num: number) => void; // chuyển object xuất hiện muộn sang ID mới
+  onRelocate: (num: number) => void; // thêm outside phía trước cho object xuất hiện muộn (giữ ID)
   flagsOf: (num: number) => ObjFlags; // menu chuột phải: cờ cảnh báo của object
   onOutside: (num: number, kind: 'far' | 'sparse') => void; // outside toàn bộ frame đi xa (lỗi D) / ít điểm của object
   onAcceptHints: (num: number) => void; // chấp nhận mọi gợi ý attribute của object
@@ -122,7 +122,7 @@ export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flags
   // Mở bảng (vd. từ Batch Review): cuộn để object đang chọn nằm ở đầu trang, dòng đã được tô sáng như vừa bấm 1 lần.
   const selRow = useRef<HTMLTableRowElement>(null);
   useLayoutEffect(() => { scrollToTopOfPanel(selRow.current, tableRef.current?.tHead?.getBoundingClientRect().height ?? 0); }, []); // trừ cả dòng tên cột dính dưới thanh đầu, nếu không dòng đang chọn bị nó che
-  // Object xuất hiện giữa chừng (chưa có keyframe nào từ frame đầu job): tô cam ô "Khoảng frame" để nhắc chuyển sang ID mới.
+  // Object xuất hiện giữa chừng (chưa có keyframe nào từ frame đầu job): tô cam ô "Khoảng frame" để nhắc thêm outside phía trước.
   const lateOf = useMemo(() => {
     const m = new Map<number, number>();
     tracks.forEach((t, i) => { const l = findLateStart(t, start, stop); if (l) m.set(i + 1, l.first); });
@@ -270,7 +270,7 @@ export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flags
                 const d = dist.get(r.num);
                 return <td style={{ color: d && d.d > far ? '#999' : undefined }} title={d ? `${d.d.toFixed(2)} m tại frame ${d.frame}${d.d > far ? ` — ngoài ${far} m: không đo mặt đường` : ''}` : distMode === 'frame' ? `Không có box ở frame ${distFrame}` : 'Không có box'}>{d ? d.d.toFixed(1) : '—'}</td>;
               })()}
-              <td style={lateOf.has(r.num) ? { ...FLAG_CELL, color: '#7a1f1f', fontWeight: 700 } : undefined} title={lateOf.has(r.num) ? `Xuất hiện muộn từ frame ${lateOf.get(r.num)} (frame đầu job ${start} chưa có keyframe): nên chuyển sang ID mới (mở Batch Review → "chuyển sang ID mới")` : undefined}>{r.first === null ? '—' : `${r.first}–${r.last}`}{lateOf.has(r.num) && <span style={{ marginLeft: 4 }}>⚠</span>}</td><td>{r.keyframes}</td>
+              <td style={lateOf.has(r.num) ? { ...FLAG_CELL, color: '#7a1f1f', fontWeight: 700 } : undefined} title={lateOf.has(r.num) ? `Xuất hiện muộn từ frame ${lateOf.get(r.num)} (frame đầu job ${start} chưa có keyframe): nên thêm keyframe outside phía trước (chuột phải → Outside phía trước, giữ ID)` : undefined}>{r.first === null ? '—' : `${r.first}–${r.last}`}{lateOf.has(r.num) && <span style={{ marginLeft: 4 }}>⚠</span>}</td><td>{r.keyframes}</td>
               <td>{r.made !== null && <button onDoubleClick={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onDelete(r); }} title={r.made === 'draft' ? 'Xóa object này khỏi nháp (chưa lên CVAT nên không ảnh hưởng server)' : 'Xóa object do tool tạo khỏi CVAT (xác nhận ở màn hình upload)'}>🗑</button>}</td>
             </tr>
           ))}
@@ -294,7 +294,7 @@ export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flags
               <button role="menuitem" disabled={!fl.motion.length} onClick={run(() => onIgnoreMotion(row.num))} title="Bỏ qua cảnh báo đi xa bất thường (Y: vật nhảy vị trí so với các frame trước) ở mọi frame đang báo của object này. Các object khác không bị ảnh hưởng; hoàn lại từng frame ở Batch Review.">🚫 Bỏ qua lỗi đi xa bất thường ({fl.motion.length})</button>
               <button role="menuitem" disabled={!first} onClick={run(() => first && onOpenAt(row.num, first.frame))} title="Mở Batch Review của object, cửa sổ bắt đầu ở frame có cờ cảnh báo sớm nhất (lỗi luật gồm D, đi xa bất thường, ít điểm, trôi box, chồng lấn)">⚑ Nhảy tới cờ cảnh báo đầu tiên{first ? ` (frame ${first.frame}: ${kindText})` : ' (không có)'}</button>
               <button role="menuitem" disabled={!nHints} onClick={run(() => onAcceptHints(row.num))} title="Chấp nhận mọi gợi ý attribute còn hiệu lực của object này, một lần hoàn tác">✔ Chấp nhận attribute gợi ý ({nHints})</button>
-              <button role="menuitem" disabled={!lateOf.has(row.num)} onClick={run(() => onRelocate(row.num))} title={lateOf.has(row.num) ? `Object xuất hiện từ frame ${lateOf.get(row.num)}: outside toàn bộ ID này, tạo ID mới (outside tới lúc xuất hiện rồi sao chép box). Có hộp xác nhận, chỉ nằm trong nháp.` : 'Chỉ dùng được cho object xuất hiện muộn (chưa có keyframe nào từ frame đầu job)'}>⇢ Chuyển sang ID mới (xuất hiện muộn)</button>
+              <button role="menuitem" disabled={!lateOf.has(row.num)} onClick={run(() => onRelocate(row.num))} title={lateOf.has(row.num) ? `Object xuất hiện từ frame ${lateOf.get(row.num)}: giữ ID, thêm keyframe outside ở mọi frame trước đó. Có hộp xác nhận, chỉ nằm trong nháp.` : 'Chỉ dùng được cho object xuất hiện muộn (chưa có keyframe nào từ frame đầu job)'}>⇢ Outside phía trước (xuất hiện muộn, giữ ID)</button>
               <hr />
               <button role="menuitem" onClick={run(() => onOpen(row.num, row.first))}>▶ Mở Batch Review (từ frame đầu)</button>
               <button role="menuitem" onClick={run(() => onSelect(row.num))} title="Chọn object này (CVAT chọn theo nếu đang bật đồng bộ)">◎ Chọn object trong tool và CVAT</button>

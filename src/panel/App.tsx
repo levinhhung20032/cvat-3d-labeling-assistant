@@ -36,7 +36,7 @@ import { dropSupported, findDrift } from '../shared/drift';
 import { fitReportAt } from '../shared/fit';
 import { loadPass, savePass, sigOf, type PassEntry } from './passStore';
 import { DEFAULT_GROUND } from '../shared/ground';
-import { findLateStart, relocateLateStart, splitTrack } from '../shared/splitId';
+import { findLateStart, outsideBeforeAppear, splitTrack } from '../shared/splitId';
 import { DeleteDialog } from './DeleteDialog';
 import { madeStore, useMadeIds } from './madeStore';
 import { deletableIds, lockStore, useLockedIds } from './lockStore';
@@ -872,22 +872,21 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
   };
 
   /** Xóa object do tool tạo: trong nháp thì bỏ khỏi nháp; đã upload thì mở hộp thoại xóa trên CVAT (chỉ ID trong sổ của tool). */
-  /** Menu chuột phải bảng object: chuyển object xuất hiện muộn sang ID mới (cùng logic nút trong Batch Review). */
+  /** Menu chuột phải bảng object: thêm outside phía trước cho object xuất hiện muộn, giữ ID (cùng logic nút trong Batch Review). */
   const relocateLate = async (num: number) => {
     if (!data || !work) return;
     const t = work.tracks[num - 1];
     const { start_frame: a, stop_frame: b } = data.job;
     const late = t ? findLateStart(t, a, b) : null;
-    const r = late && t ? relocateLateStart(t, a, b) : null;
+    const r = late && t ? outsideBeforeAppear(t, a, b) : null;
     if (!late || !r) { setToast(`Object #${num} không xuất hiện muộn.`); return; }
     const msg = `• Object #${num} xuất hiện từ frame ${late.first} (không phải frame ${a}).\n`
-      + `• #${num} sẽ outside TOÀN BỘ (keyframe outside ở mọi frame ${a}–${b}).\n`
-      + `• Object MỚI (cuối danh sách): outside từ frame ${a} tới ${late.first - 1}, từ frame ${late.first} sao chép vị trí, kích thước, hướng, thuộc tính của #${num}.\n\n`
+      + `• Giữ nguyên ID #${num}, KHÔNG tạo ID mới: chỉ thêm keyframe outside ở mọi frame ${a}–${late.first - 1}.\n\n`
       + 'Không xóa ID nào. Chỉ nằm trong nháp tới khi bạn upload.';
-    if (!await askConfirm({ title: `Chuyển object #${num} sang ID mới`, message: msg, confirmLabel: 'Chuyển' })) return;
-    dispatch({ t: 'split', idx: num - 1, oldTrack: r.oldTrack, newTrack: r.newTrack, frames: r.frames });
+    if (!await askConfirm({ title: `Outside phía trước · object #${num}`, message: msg, confirmLabel: 'Thêm outside' })) return;
+    dispatch({ t: 'track', idx: num - 1, track: r.track, frames: r.frames });
     shiftStore.edit(data.job.id, num);
-    setToast(`Đã chuyển: object mới #${work.tracks.length + 1} (từ frame ${late.first}); #${num} outside toàn bộ. Nằm trong nháp, chưa upload.`);
+    setToast(`Object #${num}: đã thêm ${r.frames.length} keyframe outside (frame ${a}–${late.first - 1}), giữ ID. Nằm trong nháp, chưa upload.`);
   };
   const lockBaseline = async () => {
     if (!data) return;
@@ -1192,7 +1191,14 @@ Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', dange
           onTrack={(idx, track, frames) => { dispatch({ t: 'track', idx, track, frames }); shiftStore.edit(data.job.id, idx + 1); }}
           onSplit={(idx, resume) => {
             const t = work.tracks[idx];
-            const r = !t ? null : resume < 0 ? relocateLateStart(t, data.job.start_frame, data.job.stop_frame) : splitTrack(t, resume, data.job.stop_frame);
+            if (resume < 0) {
+              const o = t ? outsideBeforeAppear(t, data.job.start_frame, data.job.stop_frame) : null;
+              if (!o) return null;
+              dispatch({ t: 'track', idx, track: o.track, frames: o.frames });
+              shiftStore.edit(data.job.id, idx + 1);
+              return idx + 1;
+            }
+            const r = !t ? null : splitTrack(t, resume, data.job.stop_frame);
             if (!r) return null;
             dispatch({ t: 'split', idx, oldTrack: r.oldTrack, newTrack: r.newTrack, frames: r.frames });
             shiftStore.edit(data.job.id, idx + 1);
