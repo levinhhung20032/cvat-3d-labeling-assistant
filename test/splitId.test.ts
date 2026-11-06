@@ -68,3 +68,17 @@ describe('ID xuất hiện giữa chừng', () => {
     expect(outsideBeforeAppear(track(5, [box(0, true), box(3)]), 0, STOP)).toBeNull();
   });
 });
+
+describe('xoay tất cả keyframe', () => {
+  it('cộng cùng độ xoay yaw cho mọi keyframe có box · outside không đổi · giữ ID', async () => {
+    const { rotateAllKeyframes } = await import('../src/shared/edit');
+    const { parseCuboid } = await import('../src/shared/cuboid');
+    const t = track(7, [box(0), box(3), box(5, true)]);
+    const r = rotateAllKeyframes(t, 0.5);
+    expect(r.track.id).toBe(7);
+    expect(r.frames).toEqual([0, 3]);
+    expect(parseCuboid(r.track.shapes[0]!.points).yaw).toBeCloseTo(0.5);
+    expect(parseCuboid(r.track.shapes[1]!.points).yaw).toBeCloseTo(0.5);
+    expect(r.track.shapes[2]!.outside).toBe(true);
+  });
+});

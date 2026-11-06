@@ -8,7 +8,7 @@ import {
   applyLocalBox, viewFrame, dragCorner, dragEdge, dragMove, dragRotateRel, dragTilt, dragYawByX, hitTest, identityBox, localBoxOf, screenRect, type Hit, type LocalBox,
 } from '../shared/edit';
 import { referenceCuboid, stateAt, type FrameState } from '../shared/interp';
-import { upsertKeyframe as upsertKf } from '../shared/edit';
+import { rotateAllKeyframes, upsertKeyframe as upsertKf } from '../shared/edit';
 import {
   removeInnerKeyframes, restoreFrom, setOutsideFrom, setOutsideRange, toggleKeyframe,
   type TrackChange,
@@ -163,7 +163,7 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
   ground: number | null; autoSnap: boolean;
   groundMarks: GroundSector[]; contactW: number | null; // mặt đường đo được ở từng cung quanh box + lớp tiếp xúc dưới gầm (để vẽ)
   ghost: LocalBox | null; misfit: boolean; view: View; size: number; loc: Local | null; st: FrameState; half: number; box: LocalBox | null;
-  onPreview: (b: LocalBox | null) => void; onCommit: (c: Cuboid) => void; onZoom: (factor: number) => void;
+  onPreview: (b: LocalBox | null) => void; onCommit: (c: Cuboid, rotAll?: boolean) => void; onZoom: (factor: number) => void;
   pan: Pan; onPan: (p: Pan) => void; // dời khung nhìn (giữ chuột phải kéo), dùng chung mọi view / frame
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -274,7 +274,7 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
     onPreview(nb);
   };
 
-  const up = () => {
+  const up = (e: React.PointerEvent) => {
     if (panDrag.current) {
       panDrag.current = null;
       if (ref.current) ref.current.style.cursor = 'default';
@@ -300,7 +300,8 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
         if (g && g.confident && (lockKind !== 'measured' || confirmSnap(loc, b.sx, b.sy, b.sz, at, g))) b = { ...b, cw: b.cw + g.dz }; // đo riêng: đo lại tại chỗ mới phải ra cùng mặt đường
       }
       if (frame) { const [cu, cv, cw] = apply(transpose(frame), [b.cu, b.cv, b.cw]); b = { ...b, cu, cv, cw }; } // về hệ yaw
-      onCommit(applyLocalBox(st.cuboid, b));
+      const rotated = d.hit.mode === 'rotate' || (d.hit.mode === 'move' && e.altKey);
+      onCommit(applyLocalBox(st.cuboid, b), rotated && e.ctrlKey && e.altKey); // Ctrl+Alt+kéo: xoay mọi frame
     }
     onPreview(null);
   };
@@ -369,7 +370,7 @@ function Column({ kind, onKind, showAll, advise, onAdvice, pwShow = false, groun
   warn: boolean; onFit: (f: number, r: FitReport | null) => void;
   onToggleKf: (f: number) => void;
   f: number; size: number; st: FrameState; refCub: Cuboid | null; half: number; locHalf: number; selected: boolean; edited: boolean;
-  onSelect: () => void; onLoaded: (f: number) => void; onCommit: (f: number, c: Cuboid) => void; onZoom: (factor: number) => void;
+  onSelect: () => void; onLoaded: (f: number) => void; onCommit: (f: number, c: Cuboid, rotAll?: boolean) => void; onZoom: (factor: number) => void;
 }) {
   useSymbols(); // ký hiệu lỗi đổi thì vẽ lại
   useColors(); // màu viền frame đổi (tab Màu sắc) thì vẽ lại
@@ -571,7 +572,7 @@ function Column({ kind, onKind, showAll, advise, onAdvice, pwShow = false, groun
       </div>
       <div style={{ position: 'relative', ...(horizontal ? { display: 'flex', gap: VIEW_GAP } : null) }}>
       {VIEWS.map((v) => (
-        <Cell key={v} reflect={reflect} pwPlane={pwPlane} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap && lockKind !== null} lockKind={lockKind} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c) => onCommit(f, c)} onZoom={onZoom} pan={pan} onPan={onPan} ovCount={overlayCubs.length} onPreviewOther={(i, b) => setOvPrev(b ? { i, box: b } : null)} onCommitOther={commitOther} />
+        <Cell key={v} reflect={reflect} pwPlane={pwPlane} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap && lockKind !== null} lockKind={lockKind} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c, all) => onCommit(f, c, all)} onZoom={onZoom} pan={pan} onPan={onPan} ovCount={overlayCubs.length} onPreviewOther={(i, b) => setOvPrev(b ? { i, box: b } : null)} onCommitOther={commitOther} />
       ))}
       </div>
       {reflect && plane && (
@@ -845,8 +846,14 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   const clearOwnDyn = () => { try { kv.remove(dynKey); } catch { /* bỏ qua */ } bumpDyn((x) => x + 1); thresholdStore.changed(); };
   const dynWhy = own !== null ? 'công tắc riêng của object này' : auto.by === 'attr' ? `theo attribute ${auto.attr} = ${auto.value}` : 'theo class';
   /** Ghi cuboid mới vào frame f. Dynamic size tắt mà kích thước đổi → áp kích thước mới cho mọi keyframe. */
-  const commit = (f: number, cub: Cuboid) => {
+  const commit = (f: number, cub: Cuboid, rotAll?: boolean) => {
     const cur = track ? stateAt(track, f).cuboid : null;
+    if (rotAll && track && cur) {
+      // Ctrl+Alt+kéo: độ xoay vừa kéo được cộng vào MỌI keyframe có box của object (quanh tâm từng box)
+      const wrap = (a: number) => { let d = a; while (d > Math.PI) d -= 2 * Math.PI; while (d <= -Math.PI) d += 2 * Math.PI; return d; };
+      const r = rotateAllKeyframes(track, wrap(cub.yaw - cur.yaw), cub.rx - cur.rx, cub.ry - cur.ry);
+      if (r.frames.length) { onTrack(num - 1, r.track, r.frames); return; }
+    }
     onEdit(num - 1, f, cub, !dyn && !!cur && !sameSize(cur, cub));
   };
   const [refF, setRefF] = useState(initialFrame); // tab Ref: frame đang xem
@@ -1748,7 +1755,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
         })()}
       </details>
       <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>
-        Mẹo thao tác <Help text={`phím tắt khoá KF / outside / ground snap / chấp nhận / bỏ qua gợi ý (${['kf.toggle', 'outside.from', 'ground.snap', 'suggest.accept', 'suggest.ignore'].map((id) => keyOf(id) ?? 'chưa gán').join(' / ')}) tác dụng lên cột frame đang trỏ chuột (viền xanh) · rê chuột lên nút để xem phím tắt, đổi phím ở tab "Phím tắt" · cuộn chuột trên ô để zoom mọi frame · giữ chuột phải rồi kéo để dời khung nhìn (mọi frame cùng dời), nút ⌖ Về giữa để đưa về giữa ·` + " kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo để xoay (view Trên: yaw · view Bên: pitch · view Trước: roll, nếu bật \"nghiêng theo mặt đường\") · sửa frame nào thì frame đó thành keyframe"} />
+        Mẹo thao tác <Help text={`phím tắt khoá KF / outside / ground snap / chấp nhận / bỏ qua gợi ý (${['kf.toggle', 'outside.from', 'ground.snap', 'suggest.accept', 'suggest.ignore'].map((id) => keyOf(id) ?? 'chưa gán').join(' / ')}) tác dụng lên cột frame đang trỏ chuột (viền xanh) · rê chuột lên nút để xem phím tắt, đổi phím ở tab "Phím tắt" · cuộn chuột trên ô để zoom mọi frame · giữ chuột phải rồi kéo để dời khung nhìn (mọi frame cùng dời), nút ⌖ Về giữa để đưa về giữa ·` + " kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo để xoay (giữ thêm CTRL = xoay TẤT CẢ keyframe của object) (view Trên: yaw · view Bên: pitch · view Trước: roll, nếu bật \"nghiêng theo mặt đường\") · sửa frame nào thì frame đó thành keyframe"} />
       </div>
       <div style={{ display: 'flex', gap: prefs.gap, overflowX: 'auto', justifyContent: 'safe center', padding: '2px 4px 6px' }}>
         {cols.map((c) => colEl(c, String(c.f), size, { onBelow: !refS.on && !refS.dismissed ? reportBelow : undefined }))}

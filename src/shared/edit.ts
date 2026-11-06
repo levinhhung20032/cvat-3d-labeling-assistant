@@ -1,4 +1,4 @@
-import { clampTilt, serializeCuboid, type Cuboid } from './cuboid';
+import { clampTilt, parseCuboid, serializeCuboid, type Cuboid } from './cuboid';
 import { apply, fromEuler, mul, rotX, rotY, rotZ, toEuler, transpose, type Mat3, type Vec3 } from './rot';
 import { sortedShapes } from './interp';
 import type { CvatShape, CvatTrack } from './types';
@@ -208,4 +208,18 @@ export function upsertKeyframe(track: CvatTrack, frame: number, cub: Cuboid, out
   }
   const next = shapes.filter((s) => s.frame !== frame).concat(shape).sort((a, b) => a.frame - b.frame);
   return { ...track, frame: Math.min(track.frame, frame), shapes: next };
+}
+
+const wrapPi = (a: number): number => { let d = a; while (d > Math.PI) d -= 2 * Math.PI; while (d <= -Math.PI) d += 2 * Math.PI; return d; };
+
+/** Cộng cùng một độ xoay (yaw / roll / pitch, rad) vào MỌI keyframe có box của track (quanh tâm từng box); keyframe outside không đổi. Không đổi ID. */
+export function rotateAllKeyframes(track: CvatTrack, dyaw: number, drx = 0, dry = 0): { track: CvatTrack; frames: number[] } {
+  const frames: number[] = [];
+  const shapes = track.shapes.map((sh) => {
+    if (sh.outside || sh.type !== 'cuboid') return sh;
+    const c = parseCuboid(sh.points);
+    frames.push(sh.frame);
+    return { ...sh, points: serializeCuboid({ ...c, yaw: wrapPi(c.yaw + dyaw), rx: c.rx + drx, ry: c.ry + dry }, sh.points) };
+  });
+  return { track: { ...track, shapes }, frames };
 }
