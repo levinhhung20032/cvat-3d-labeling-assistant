@@ -80,5 +80,8 @@ describe('xoay tất cả keyframe', () => {
     expect(parseCuboid(r.track.shapes[0]!.points).yaw).toBeCloseTo(0.5);
     expect(parseCuboid(r.track.shapes[1]!.points).yaw).toBeCloseTo(0.5);
     expect(r.track.shapes[2]!.outside).toBe(true);
+    const later = rotateAllKeyframes(t, 0.5, 0, 0, 3); // chỉ từ frame 3 trở đi
+    expect(later.frames).toEqual([3]);
+    expect(parseCuboid(later.track.shapes[0]!.points).yaw).toBeCloseTo(0);
   });
 });

@@ -301,7 +301,7 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
       }
       if (frame) { const [cu, cv, cw] = apply(transpose(frame), [b.cu, b.cv, b.cw]); b = { ...b, cu, cv, cw }; } // về hệ yaw
       const rotated = d.hit.mode === 'rotate' || (d.hit.mode === 'move' && e.altKey);
-      onCommit(applyLocalBox(st.cuboid, b), rotated && e.ctrlKey && e.altKey); // Ctrl+Alt+kéo: xoay mọi frame
+      onCommit(applyLocalBox(st.cuboid, b), rotated && e.ctrlKey && e.altKey); // Ctrl+Alt+kéo: xoay frame này và mọi frame phía sau
     }
     onPreview(null);
   };
@@ -858,10 +858,11 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
   const commit = (f: number, cub: Cuboid, rotAll?: boolean) => {
     const cur = track ? stateAt(track, f).cuboid : null;
     if (rotAll && track && cur) {
-      // Ctrl+Alt+kéo: độ xoay vừa kéo được cộng vào MỌI keyframe có box của object (quanh tâm từng box)
+      // Ctrl+Alt+kéo: độ xoay vừa kéo được cộng vào frame này và MỌI keyframe có box phía sau nó (quanh tâm từng box)
       const wrap = (a: number) => { let d = a; while (d > Math.PI) d -= 2 * Math.PI; while (d <= -Math.PI) d += 2 * Math.PI; return d; };
-      const r = rotateAllKeyframes(track, wrap(cub.yaw - cur.yaw), cub.rx - cur.rx, cub.ry - cur.ry);
-      if (r.frames.length) { onTrack(num - 1, r.track, r.frames); return; }
+      const r = rotateAllKeyframes(upsertKf(track, f, cub), wrap(cub.yaw - cur.yaw), cub.rx - cur.rx, cub.ry - cur.ry, f + 1); // frame này đặt đúng box vừa kéo (thành keyframe nếu chưa), các keyframe sau cộng độ xoay
+      onTrack(num - 1, r.track, [f, ...r.frames]);
+      return;
     }
     onEdit(num - 1, f, cub, !dyn && !!cur && !sameSize(cur, cub));
   };
@@ -1769,7 +1770,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
         })()}
       </details>
       <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>
-        Mẹo thao tác <Help text={`phím tắt khoá KF / outside / ground snap / chấp nhận / bỏ qua gợi ý (${['kf.toggle', 'outside.from', 'ground.snap', 'suggest.accept', 'suggest.ignore'].map((id) => keyOf(id) ?? 'chưa gán').join(' / ')}) tác dụng lên cột frame đang trỏ chuột (viền xanh) · rê chuột lên nút để xem phím tắt, đổi phím ở tab "Phím tắt" · cuộn chuột trên ô để zoom mọi frame · giữ chuột phải rồi kéo để dời khung nhìn (mọi frame cùng dời), nút ⌖ Về giữa để đưa về giữa ·` + " kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo để xoay (giữ thêm CTRL = xoay TẤT CẢ keyframe của object) (view Trên: yaw · view Bên: pitch · view Trước: roll, nếu bật \"nghiêng theo mặt đường\") · sửa frame nào thì frame đó thành keyframe"} />
+        Mẹo thao tác <Help text={`phím tắt khoá KF / outside / ground snap / chấp nhận / bỏ qua gợi ý (${['kf.toggle', 'outside.from', 'ground.snap', 'suggest.accept', 'suggest.ignore'].map((id) => keyOf(id) ?? 'chưa gán').join(' / ')}) tác dụng lên cột frame đang trỏ chuột (viền xanh) · rê chuột lên nút để xem phím tắt, đổi phím ở tab "Phím tắt" · cuộn chuột trên ô để zoom mọi frame · giữ chuột phải rồi kéo để dời khung nhìn (mọi frame cùng dời), nút ⌖ Về giữa để đưa về giữa ·` + " kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo để xoay (giữ thêm CTRL = xoay frame này và TẤT CẢ keyframe phía sau) (view Trên: yaw · view Bên: pitch · view Trước: roll, nếu bật \"nghiêng theo mặt đường\") · sửa frame nào thì frame đó thành keyframe"} />
       </div>
       <div style={{ display: 'flex', gap: prefs.gap, overflowX: 'auto', justifyContent: 'safe center', padding: '2px 4px 6px' }}>
         {cols.map((c) => colEl(c, String(c.f), size, { onBelow: !refS.on && !refS.dismissed ? reportBelow : undefined }))}

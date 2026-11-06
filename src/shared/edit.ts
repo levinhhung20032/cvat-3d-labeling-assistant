@@ -212,11 +212,11 @@ export function upsertKeyframe(track: CvatTrack, frame: number, cub: Cuboid, out
 
 const wrapPi = (a: number): number => { let d = a; while (d > Math.PI) d -= 2 * Math.PI; while (d <= -Math.PI) d += 2 * Math.PI; return d; };
 
-/** Cộng cùng một độ xoay (yaw / roll / pitch, rad) vào MỌI keyframe có box của track (quanh tâm từng box); keyframe outside không đổi. Không đổi ID. */
-export function rotateAllKeyframes(track: CvatTrack, dyaw: number, drx = 0, dry = 0): { track: CvatTrack; frames: number[] } {
+/** Cộng cùng một độ xoay (yaw / roll / pitch, rad) vào các keyframe có box từ frame `fromFrame` trở đi (mặc định mọi keyframe), quanh tâm từng box; keyframe outside không đổi. Không đổi ID. */
+export function rotateAllKeyframes(track: CvatTrack, dyaw: number, drx = 0, dry = 0, fromFrame = -Infinity): { track: CvatTrack; frames: number[] } {
   const frames: number[] = [];
   const shapes = track.shapes.map((sh) => {
-    if (sh.outside || sh.type !== 'cuboid') return sh;
+    if (sh.outside || sh.type !== 'cuboid' || sh.frame < fromFrame) return sh;
     const c = parseCuboid(sh.points);
     frames.push(sh.frame);
     return { ...sh, points: serializeCuboid({ ...c, yaw: wrapPi(c.yaw + dyaw), rx: c.rx + drx, ry: c.ry + dry }, sh.points) };

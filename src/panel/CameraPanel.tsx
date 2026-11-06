@@ -6,7 +6,7 @@ import { activeSetup, loadPopGeo, savePopGeo, useCameraBank, useCameraPop, useCa
 import { cameraImages } from './stores';
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
-const LENS = 190; // px, đường kính kính lúp
+const LENS = 240; // px, đường kính kính lúp
 /** Chiều cao vùng ảnh lần hiện gần nhất (px): khung giữ chỗ giữ đúng chiều cao này khi chưa chọn frame / đang tải, để trang không giật. */
 let lastAreaH = 360;
 
@@ -15,6 +15,32 @@ let lastAreaH = 360;
  * - Kính lúp (scope): rê chuột trên ảnh, một vòng tròn phóng to vùng dưới con trỏ; cuộn chuột đổi độ phóng đại.
  * - Zoom & kéo: cuộn chuột để zoom quanh con trỏ (1–10×), kéo để dịch ảnh, bấm đúp để về vừa khung.
  */
+/** Kính lúp vẽ bằng canvas từ ảnh gốc: độ phân giải theo devicePixelRatio, làm mượt chất lượng cao (nét hơn background-image phóng to). */
+function LensCanvas({ img, cx, cy, zoom, shown }: { img: HTMLImageElement | null; cx: number; cy: number; zoom: number; shown: [number, number] }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+  useEffect(() => {
+    const cv = ref.current;
+    if (!cv || !img || !img.naturalWidth || !shown[0]) return;
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+    const k = img.naturalWidth / shown[0]; // điểm ảnh gốc trên mỗi px đang hiển thị
+    const sw = (LENS / zoom) * k;
+    const sx = cx * k - sw / 2, sy = cy * k - sw / 2;
+    const px = Math.round(LENS * dpr);
+    ctx.clearRect(0, 0, px, px);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    // chỉ vẽ phần giao với ảnh (phần ngoài ảnh để trống)
+    const x0 = Math.max(0, sx), y0 = Math.max(0, sy);
+    const x1 = Math.min(img.naturalWidth, sx + sw), y1 = Math.min(img.naturalHeight, sy + sw);
+    if (x1 <= x0 || y1 <= y0) return;
+    const f = px / sw;
+    ctx.drawImage(img, x0, y0, x1 - x0, y1 - y0, (x0 - sx) * f, (y0 - sy) * f, (x1 - x0) * f, (y1 - y0) * f);
+  }, [img, cx, cy, zoom, shown[0], shown[1], dpr]);
+  return <canvas ref={ref} className="cvla-lens" width={Math.round(LENS * dpr)} height={Math.round(LENS * dpr)} style={{ position: 'absolute', inset: 0, width: LENS, height: LENS, borderRadius: '50%' }} />;
+}
+
 function ZoomImage({ url }: { url: string }) {
   const [mode, setMode] = useState<'lens' | 'pan'>('lens');
   const [lensZoom, setLensZoom] = useState(4);
@@ -52,7 +78,7 @@ function ZoomImage({ url }: { url: string }) {
     const on = (e: WheelEvent) => {
       e.preventDefault();
       const f = e.deltaY < 0 ? 1.2 : 1 / 1.2;
-      if (modeRef.current === 'lens') { setLensZoom((z) => clamp(z * f, 2, 12)); return; }
+      if (modeRef.current === 'lens') { setLensZoom((z) => clamp(z * f, 2, 16)); return; }
       const r = el.getBoundingClientRect();
       const cx = e.clientX - r.left, cy = e.clientY - r.top;
       const v = viewRef.current;
@@ -80,7 +106,7 @@ function ZoomImage({ url }: { url: string }) {
         <label><input type="radio" checked={mode === 'lens'} onChange={() => setMode('lens')} /> Kính lúp (scope)</label>
         <label><input type="radio" checked={mode === 'pan'} onChange={() => setMode('pan')} /> Zoom &amp; kéo</label>
         {mode === 'lens' ? (
-          <span>độ phóng đại <b>{lensZoom.toFixed(1)}×</b> (cuộn chuột trên ảnh) <input type="range" min={2} max={12} step={0.5} value={lensZoom} onChange={(e) => setLensZoom(Number(e.target.value))} /></span>
+          <span>độ phóng đại <b>{lensZoom.toFixed(1)}×</b> (cuộn chuột trên ảnh) <input type="range" min={2} max={16} step={0.5} value={lensZoom} onChange={(e) => setLensZoom(Number(e.target.value))} /></span>
         ) : (
           <span>zoom <b>{view.s.toFixed(1)}×</b> (cuộn chuột quanh con trỏ · kéo để dịch · bấm đúp để về vừa khung) <button onClick={() => setView({ s: 1, x: 0, y: 0 })}>Về vừa khung</button></span>
         )}
@@ -115,15 +141,12 @@ function ZoomImage({ url }: { url: string }) {
         />
         {lens && cur && (
           <div
-            className="cvla-lens" // ảnh nền của kính lúp cũng phải được đảo ngược lại ở giao diện tối / xám, như thẻ img
             style={{
               position: 'absolute', left: lx, top: ly, width: LENS, height: LENS, borderRadius: '50%',
               border: '3px solid #fff', boxShadow: '0 0 0 1px #000, 0 2px 8px rgba(0,0,0,.6)', pointerEvents: 'none',
-              backgroundImage: `url(${url})`, backgroundRepeat: 'no-repeat',
-              backgroundSize: `${size[0] * lensZoom}px ${size[1] * lensZoom}px`,
-              backgroundPosition: `${-(cur.x * lensZoom - LENS / 2)}px ${-(cur.y * lensZoom - LENS / 2)}px`,
             }}
           >
+            <LensCanvas img={img.current} cx={cur.x} cy={cur.y} zoom={lensZoom} shown={size} />
             <span style={{ position: 'absolute', left: LENS / 2 - 6, top: LENS / 2 - 1, width: 12, height: 2, background: 'rgba(255,255,255,.9)' }} />
             <span style={{ position: 'absolute', left: LENS / 2 - 1, top: LENS / 2 - 6, width: 2, height: 12, background: 'rgba(255,255,255,.9)' }} />
           </div>
