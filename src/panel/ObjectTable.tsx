@@ -6,7 +6,7 @@ import { sortedShapes, stateAt } from '../shared/interp';
 import { getAttr, parseLabelSpecs } from '../shared/attributes';
 import { DEFAULT_GROUND } from '../shared/ground';
 import { ISSUE_NAMES } from '../shared/qcrules';
-import { sym, useSymbols } from './symbolStore';
+import { sym, symLabel, useSymbols } from './symbolStore';
 import { fmtIou, type OverlapPair } from '../shared/overlap';
 import { PENDING_STYLE } from './ui';
 import { seenStore, useSeen } from './seenStore';
@@ -29,23 +29,24 @@ const HEAD_CELL: React.CSSProperties = { position: 'sticky', top: 0, zIndex: 5, 
 /** Khoảng cách tâm box tới ego (gốc toạ độ, trên mặt phẳng ngang) và frame đo. */
 interface Dist { d: number; frame: number }
 
-const KIND_NAMES: Record<string, string> = { ...ISSUE_NAMES, P: 'Ít điểm trong box (theo ngưỡng ở tab Threshold, chỉ các frame đã tải point cloud)', T: 'Trôi box', M: 'Đi xa bất thường' };
+const KIND_NAMES: Record<string, string> = { ...ISSUE_NAMES, W: 'Ít điểm ở giữa (frame ít điểm nằm giữa hai frame ổn, box nội suy; không tính là P)', P: 'Ít điểm trong box (theo ngưỡng ở tab Threshold, chỉ các frame đã tải point cloud)', T: 'Trôi box', M: 'Đi xa bất thường' };
 /** Tooltip cột luật QC: số frame lỗi theo từng mã. */
 const issueTip = (by: Record<string, number>) => {
-  const lines = Object.entries(by).filter(([, n]) => n > 0).map(([k, n]) => `${sym(k)} — ${KIND_NAMES[k] ?? k}: ${n} frame`);
+  const lines = Object.entries(by).filter(([, n]) => n > 0).map(([k, n]) => `${symLabel(k)} — ${KIND_NAMES[k] ?? k}: ${n} frame`);
   return lines.length ? lines.join(String.fromCharCode(10)) : 'Không có lỗi luật QC';
 };
 
 /** Cờ cảnh báo của một object (tính khi mở menu chuột phải): frame đi xa (lỗi D), frame ít điểm, và cờ sớm nhất (kind: motion / sparse / drift / overlap hoặc mã lỗi luật). */
-export interface ObjFlags { far: number[]; motion: number[]; sparse: number[]; first: { frame: number; kind: string } | null; pending: boolean }
+export interface ObjFlags { far: number[]; motion: number[]; sparse: number[]; mid: number[]; first: { frame: number; kind: string } | null; pending: boolean }
 
-export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flagsOf, onOutside, onAcceptHints, onIgnoreMotion, onOpenAt, rows, hints, overlapFrames, overlapPairs, onOpen, onSelect, selectedNum, onDelete, incomplete, tracks, labels: jobLabels, start, stop, cvatFrame }: {
+export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flagsOf, onOutside, onAcceptHints, onIgnoreMotion, onIgnoreMid, onOpenAt, rows, hints, overlapFrames, overlapPairs, onOpen, onSelect, selectedNum, onDelete, incomplete, tracks, labels: jobLabels, start, stop, cvatFrame }: {
   jobId: number;
   locked: readonly number[] | null; onLock: () => void; onUnlock: () => void; // khóa danh sách ID gốc (không xóa được)
   onRelocate: (num: number) => void; // thêm outside phía trước cho object xuất hiện muộn (giữ ID)
   flagsOf: (num: number) => ObjFlags; // menu chuột phải: cờ cảnh báo của object
   onOutside: (num: number, kind: 'far' | 'sparse') => void; // outside toàn bộ frame đi xa (lỗi D) / ít điểm của object
   onAcceptHints: (num: number) => void; // chấp nhận mọi gợi ý attribute của object
+  onIgnoreMid: (num: number) => void; // bỏ qua cảnh báo ít điểm (P) ở các frame nằm giữa hai frame ổn của object
   onIgnoreMotion: (num: number) => void; // bỏ qua lỗi đi xa bất thường (Y) ở mọi frame của object
   onOpenAt: (num: number, frame: number) => void; // mở Batch Review của object ở frame cho trước
   labels: CvatLabel[];
@@ -281,7 +282,7 @@ export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flags
         const close = () => setCtx(null);
         const run = (f: () => void) => () => { close(); f(); };
         const first = fl.first;
-        const kindText = first ? (first.kind === 'motion' ? 'đi xa bất thường' : first.kind === 'sparse' ? 'ít điểm' : first.kind === 'drift' ? 'trôi box' : first.kind === 'overlap' ? 'chồng lấn' : `lỗi ${sym(first.kind)}`) : '';
+        const kindText = first ? (first.kind === 'motion' ? 'đi xa bất thường' : first.kind === 'sparse' ? 'ít điểm' : first.kind === 'drift' ? 'trôi box' : first.kind === 'overlap' ? 'chồng lấn' : `lỗi ${symLabel(first.kind)}`) : '';
         const nHints = h(row);
         const wrapW = wrapRef.current?.getBoundingClientRect().width ?? 600;
         return (
@@ -291,6 +292,7 @@ export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flags
               <h4>Object #{row.num} · {row.label}</h4>
               <button role="menuitem" disabled={!fl.far.length} onClick={run(() => onOutside(row.num, 'far'))} title="Đặt outside cho mọi frame của object này bị lỗi D (quá xa: khoảng cách tới ego vượt rule distance ở Cài đặt → Threshold; không tính frame đã bỏ qua). Có hộp xác nhận, hoàn tác được.">⛔ Outside toàn bộ frame đi xa — lỗi D ({fl.far.length})</button>
               <button role="menuitem" disabled={!fl.sparse.length} onClick={run(() => onOutside(row.num, 'sparse'))} title="Đặt outside cho mọi frame của object này có quá ít điểm trong box (theo ngưỡng ở Cài đặt → Threshold, chỉ frame đã tải point cloud). Có hộp xác nhận, hoàn tác được.">⛔ Outside toàn bộ frame ít điểm ({fl.sparse.length}){fl.pending ? ' ⏳' : ''}</button>
+              <button role="menuitem" disabled={!fl.mid.length} onClick={run(() => onIgnoreMid(row.num))} title="Bỏ qua cảnh báo ít điểm (P) ở các frame nằm giữa hai frame không ít điểm của object này (box nội suy, không đặt outside ở giữa). Hoàn lại từng frame ở Batch Review (chuột phải chip ít điểm).">🚫 Bỏ qua ít điểm ở giữa ({fl.mid.length})</button>
               <button role="menuitem" disabled={!fl.motion.length} onClick={run(() => onIgnoreMotion(row.num))} title="Bỏ qua cảnh báo đi xa bất thường (Y: vật nhảy vị trí so với các frame trước) ở mọi frame đang báo của object này. Các object khác không bị ảnh hưởng; hoàn lại từng frame ở Batch Review.">🚫 Bỏ qua lỗi đi xa bất thường ({fl.motion.length})</button>
               <button role="menuitem" disabled={!first} onClick={run(() => first && onOpenAt(row.num, first.frame))} title="Mở Batch Review của object, cửa sổ bắt đầu ở frame có cờ cảnh báo sớm nhất (lỗi luật gồm D, đi xa bất thường, ít điểm, trôi box, chồng lấn)">⚑ Nhảy tới cờ cảnh báo đầu tiên{first ? ` (frame ${first.frame}: ${kindText})` : ' (không có)'}</button>
               <button role="menuitem" disabled={!nHints} onClick={run(() => onAcceptHints(row.num))} title="Chấp nhận mọi gợi ý attribute còn hiệu lực của object này, một lần hoàn tác">✔ Chấp nhận attribute gợi ý ({nHints})</button>

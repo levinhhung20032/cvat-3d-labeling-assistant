@@ -33,6 +33,7 @@ import { Help, PENDING_STYLE } from './ui';
 import { pointClouds, type ChunkSource } from './stores';
 import { ShiftBadge, ShiftBanner } from './ShiftBar';
 import { dropSupported, findDrift } from '../shared/drift';
+import { middleSparse } from '../shared/midOutside';
 import { fitReportAt } from '../shared/fit';
 import { loadPass, savePass, sigOf, type PassEntry } from './passStore';
 import { DEFAULT_GROUND } from '../shared/ground';
@@ -616,8 +617,8 @@ export function App() {
   }, [passKey, passTick]);
   // Tổng hợp: số frame ít điểm theo object (chỉ kết quả khớp box hiện tại), object còn frame chờ (số liệu chưa đáng tin), tiến độ.
   const passView = useMemo(() => {
-    const sparse = new Map<number, number>(), incomplete = new Set<number>();
-    if (!data || !work) return { sparse, incomplete, pending: 0, failed: 0, total: 0, loading: 0 };
+    const sparse = new Map<number, number>(), incomplete = new Set<number>(), midOut = new Map<number, number[]>();
+    if (!data || !work) return { sparse, midOut, incomplete, pending: 0, failed: 0, total: 0, loading: 0 };
     const { start_frame: a, stop_frame: b } = data.job;
     let failed = 0, waitingFrames = 0, loading = 0;
     for (let f = a; f <= b; f++) {
@@ -630,11 +631,20 @@ export function App() {
         if (!c) return;
         const e = r?.get(i + 1);
         if (waiting && (!e || e.sig !== sigOf(c))) incomplete.add(i + 1);
-        else if (e?.sparse) sparse.set(i + 1, (sparse.get(i + 1) ?? 0) + 1);
+        else if (e?.sparse && !ignAll.has(issueKey(data.job.id, i + 1, f, 'P'))) sparse.set(i + 1, (sparse.get(i + 1) ?? 0) + 1);
       });
     }
-    return { sparse, incomplete, pending: waitingFrames, failed, total: b - a + 1, loading };
-  }, [data, work, pending, cloudTick]);
+    // Outside ở giữa: frame ít điểm nằm giữa hai frame không ít điểm (chỉ khi object đã tính đủ dữ liệu)
+    work.tracks.forEach((t, i) => {
+      const num = i + 1;
+      if (incomplete.has(num) || !sparse.has(num)) return;
+      const present: number[] = [];
+      for (let f = a; f <= b; f++) if (stateAt(t, f).cuboid) present.push(f);
+      const mid = middleSparse(present, (f) => { const c = stateAt(t, f).cuboid; const e = passRes.current.get(f)?.get(num); return !!(c && e?.sparse); });
+      if (mid.length) midOut.set(num, mid);
+    });
+    return { sparse, midOut, incomplete, pending: waitingFrames, failed, total: b - a + 1, loading };
+  }, [data, work, pending, cloudTick, ignAll]);
   const sparseAll = passView.sparse;
   // Frame tải lỗi (vd máy chủ báo bận) không bị bỏ mặc: khi không còn frame nào đang tải thì tự thử lại sau 20 giây, tối đa 3 lần; có nút thử lại tay.
   const autoRetry = useRef(0);
@@ -737,17 +747,17 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
   const rows = useMemo(
     () => (data && work
       ? buildRows(work, data.labels, data.job.start_frame, data.job.stop_frame, (num, f) => ignAll.has(motionKey(data.job.id, num, f)), (num, f, k) => ignAll.has(issueKey(data.job.id, num, f, k)), new Set(madeIds), deletable.external).map((r) => {
-        const dr = drift.get(r.num) ?? [], sn = sparseAll.get(r.num) ?? 0;
-        return { ...r, drift: dr.length, driftFrames: dr.map((x) => x.f), issues: r.issues + sn, issuesByKind: { ...r.issuesByKind, ...(sn ? { P: sn } : {}) } };
+        const dr = drift.get(r.num) ?? [], sn = sparseAll.get(r.num) ?? 0, mo = passView.midOut.get(r.num)?.length ?? 0;
+        return { ...r, drift: dr.length, driftFrames: dr.map((x) => x.f), issues: r.issues + sn, issuesByKind: { ...r.issuesByKind, ...(sn ? { P: sn } : {}), ...(mo ? { W: mo } : {}) } };
       })
       : []),
-    [data, work, ignAll, madeIds, deletable, drift, sparseAll, thrVer],
+    [data, work, ignAll, madeIds, deletable, drift, sparseAll, passView, thrVer],
   );
 
   // ---- Menu chuột phải ở bảng object: tác động lên đúng object của dòng được bấm ----
   /** Các frame cảnh báo của một object: đi xa (lỗi D), đi xa bất thường (Y), ít điểm, lỗi luật QC, trôi box, chồng lấn (không tính cái đã bỏ qua). */
   const objectFlags = (num: number): ObjFlags => {
-    const none: ObjFlags = { far: [], motion: [], sparse: [], first: null, pending: false };
+    const none: ObjFlags = { far: [], motion: [], sparse: [], mid: [], first: null, pending: false };
     if (!data || !work) return none;
     const t = work.tracks[num - 1];
     if (!t) return none;
@@ -756,6 +766,7 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
     const frames: number[] = [];
     for (let f = data.job.start_frame; f <= data.job.stop_frame; f++) frames.push(f);
     const far: number[] = [], sparse: number[] = [], motion: number[] = [];
+    const midFrames = new Set(passView.midOut.get(num) ?? []);
     for (const f of frames) {
       const c = stateAt(t, f).cuboid;
       if (!c) continue;
@@ -777,9 +788,17 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
       }
     }
     cand.sort((x, y) => x.frame - y.frame);
-    return { far: far.sort((x, y) => x - y), motion, sparse, first: cand[0] ?? null, pending: passView.incomplete.has(num) };
+    return { far: far.sort((x, y) => x - y), motion, sparse, mid: sparse.filter((f) => midFrames.has(f)), first: cand[0] ?? null, pending: passView.incomplete.has(num) };
   };
   /** Outside toàn bộ frame đã gắn cờ (đi xa = lỗi D / ít điểm) của một object: gom thành các đoạn liên tiếp, hoàn tác được. */
+  /** Bỏ qua cảnh báo ít điểm (P) ở các frame nằm giữa hai frame ổn của một object (menu chuột phải bảng object). */
+  const ignoreMid = (num: number) => {
+    if (!data) return;
+    const fr = objectFlags(num).mid;
+    if (!fr.length) { setToast(`Object #${num}: không có frame ít điểm nằm giữa.`); return; }
+    ignoreStore.set(fr.map((f) => issueKey(data.job.id, num, f, 'P')), true);
+    setToast(`Object #${num}: đã bỏ qua ít điểm ở ${fr.length} frame nằm giữa. Hoàn lại từng frame ở Batch Review.`);
+  };
   const outsideFlagged = async (num: number, kind: 'far' | 'sparse') => {
     if (!data || !work) return;
     const t = work.tracks[num - 1];
@@ -1156,7 +1175,7 @@ Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', dange
       )}
       {data && work && tab === 'objects' && (
         <ObjectTable
-          jobId={data.job.id} locked={lockedIds} onLock={lockBaseline} onUnlock={unlockBaseline} onRelocate={(n) => { void relocateLate(n); }} onDelete={deleteMade} flagsOf={objectFlags} onOutside={(n, k) => { void outsideFlagged(n, k); }} onAcceptHints={acceptHints} onIgnoreMotion={ignoreMotionAll} onOpenAt={openAtFrame} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs} incomplete={passView.incomplete}
+          jobId={data.job.id} locked={lockedIds} onLock={lockBaseline} onUnlock={unlockBaseline} onRelocate={(n) => { void relocateLate(n); }} onDelete={deleteMade} flagsOf={objectFlags} onOutside={(n, k) => { void outsideFlagged(n, k); }} onAcceptHints={acceptHints} onIgnoreMotion={ignoreMotionAll} onIgnoreMid={ignoreMid} onOpenAt={openAtFrame} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs} incomplete={passView.incomplete}
           tracks={work.tracks} labels={data.labels} start={data.job.start_frame} stop={data.job.stop_frame} cvatFrame={focus?.frame ?? null}
           selectedNum={selectedNum} onSelect={selectFromTool}
           onOpen={(num) => {
@@ -1178,7 +1197,7 @@ Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', dange
       {data && work && (tab === 'review' || tab === 'ref') && (
         <BatchReview
           key={tab} refView={tab === 'ref'} onOpenRef={openRef} onCloseRef={() => setTab('review')} openAt={openAtRef.current}
-          overlaps={overlaps} ignoredOverlaps={overlapsIgnored} drift={driftAll}
+          overlaps={overlaps} ignoredOverlaps={overlapsIgnored} drift={driftAll} midOut={passView.midOut}
           labels={data.labels} job={data.job} ann={work} rows={rows} selectedNum={selectedNum} setSelectedNum={selectFromTool}
           onSel={(f) => { selFrameRef.current = f; }}
           onHoverFrame={(f) => { hoverFrameRef.current = f; }}

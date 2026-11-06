@@ -37,7 +37,7 @@ import { actionOfTitle, onAction, useKeyHint, useKeyOf } from './actions';
 import { KeyBindMenu } from './KeyBindMenu';
 import { DEFAULT_FIT, fitGroundOf, fitReport, type FitReport } from '../shared/fit';
 import { thresholdStore, useThresholdVersion } from './thresholdStore';
-import { sym, useSymbols } from './symbolStore';
+import { sym, symLabel, useSymbols } from './symbolStore';
 import { findLateStart, findLongOutsideGaps, SPLIT_OUTSIDE_FRAMES, type OutsideGap } from '../shared/splitId';
 import { useColors } from './colorStore';
 import { adviseGround, type GroundAdvice } from '../shared/groundSuggest';
@@ -344,7 +344,7 @@ const CHIP_BTN: React.CSSProperties = { padding: '0 3px', lineHeight: 1, height:
 interface FileFlag { kind: IssueKind; state: FlagState; msg?: string; det: boolean }
 const NO_FLAGS: FileFlag[] = [];
 
-function Column({ kind, onKind, showAll, advise, onAdvice, pwShow = false, groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, overlayNums, onCommitOther, ignoredOverlap, onRestoreOverlap, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan, refl = null, onBelow, onRefPlane, horizontal = false }: {
+function Column({ midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, advise, onAdvice, pwShow = false, groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, overlayNums, onCommitOther, ignoredOverlap, onRestoreOverlap, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan, refl = null, onBelow, onRefPlane, horizontal = false }: {
   horizontal?: boolean; // tab Ref: 3 view Trên | Bên | Trước xếp ngang
   pwShow?: boolean; // hiện mặt đường Patchwork++ gợi ý (vạch tím) ở view Bên / Trước
   kind: GroundKind; onKind: (f: number, k: GroundKind) => void; // nguồn mặt đường của RIÊNG frame này (đổi ở frame khác không đụng tới)
@@ -357,6 +357,8 @@ function Column({ kind, onKind, showAll, advise, onAdvice, pwShow = false, groun
   pan: Pan; onPan: (p: Pan) => void;
   fileFlags: FileFlag[]; onMarkFlag: (f: number, kind: IssueKind, mark: FlagMark | null) => void;
   tiltOn: boolean;
+  midSparse: boolean; // frame ít điểm nằm giữa hai frame ổn (box nội suy): vẫn báo P nhưng ghi chú và cho bỏ qua
+  pIgnored: boolean; onIgnoreP: (f: number, on: boolean) => void; // bỏ qua / hoàn lại cảnh báo ít điểm (P) của frame này
   issues: FrameIssue[]; issueIgnored: (kind: string) => boolean; onIgnoreIssue: (f: number, kind: string, on: boolean) => void;
   qcOn: boolean; qcNote: string; onQcNote: (f: number, text: string) => void;
   overlap: { other: number; ratio: number }[]; overlayCubs: Cuboid[]; overlayNums: number[]; onCommitOther: (num: number, f: number, c: Cuboid) => void; ignoredOverlap: number[]; onRestoreOverlap: (other: number) => void; onIgnoreOverlap: (other: number) => void; onOpenObject: (other: number) => void;
@@ -437,7 +439,7 @@ function Column({ kind, onKind, showAll, advise, onAdvice, pwShow = false, groun
   );
   useEffect(() => { onSuggest(f, sug); }, [f, sug]);
   // Gợi ý đã bỏ qua: không vẽ nét đứt, không tô điểm lọt ngoài, không tính vào cảnh báo.
-  const bad = fit && fit.level !== 'ok' && !(ignored && fit.level === 'misfit') ? fit : null;
+  const bad = fit && fit.level !== 'ok' && !(ignored && fit.level === 'misfit') && !(pIgnored && fit.level === 'sparse') ? fit : null;
   useEffect(() => { onFit(f, bad); }, [f, bad]);
   // Ground snap: ước lượng mặt đường dưới chân box.
   const snap = groundOn ? groundOv : null;
@@ -555,9 +557,9 @@ function Column({ kind, onKind, showAll, advise, onAdvice, pwShow = false, groun
             <button onClick={(e) => { e.stopPropagation(); onIgnore(f, true); }} style={CHIP_BTN} title={hint('suggest.ignore', 'Bỏ qua gợi ý')}>✖</button>
           </span>
         )}
-        {bad && !sug && <span style={{ ...CHIP, background: '#ffe0f7', color: '#5a0040' }} title={bad.message}>⚠ {bad.level === 'misfit' ? 'lệch' : 'ít điểm'}</span>}
+        {bad && !sug && <span style={{ ...CHIP, background: '#ffe0f7', color: '#5a0040' }} title={bad.level === 'sparse' ? `${bad.message}${midSparse ? ' · nằm giữa hai frame ổn (box nội suy)' : ''} · chuột phải để bỏ qua` : bad.message} onContextMenu={bad.level === 'sparse' ? (e) => { e.preventDefault(); e.stopPropagation(); onIgnoreP(f, true); } : undefined}>⚠ {bad.level === 'misfit' ? 'lệch' : 'ít điểm'}</span>}
         {bad && sug && <span style={{ ...CHIP, background: '#ffe0f7', color: '#5a0040' }} title={bad.message}>⚠ lệch</span>}
-        {issues.filter((i) => !issueIgnored(i.kind)).map((i) => <span key={i.kind} style={{ ...CHIP, background: '#f9d4ee', color: '#5a0040' }} title={i.message}>⚠ {sym(i.kind)}</span>)}
+        {issues.filter((i) => !issueIgnored(i.kind)).map((i) => <span key={i.kind} style={{ ...CHIP, background: '#f9d4ee', color: '#5a0040' }} title={i.message}>⚠ {symLabel(i.kind)}</span>)}
         {ignoredOverlap.map((o) => <span key={`ig${o}`} style={{ ...CHIP, background: '#e5e7eb', color: '#4b5563' }} title={`Cặp chồng lấn với #${o} ở frame này đã được bỏ qua (không báo lỗi). Hoàn lại ở dòng ghi chú bên dưới cột.`}>⊘ O #{o} bỏ qua</span>)}
         {overlap.map((o) => <span key={o.other} style={{ ...CHIP, background: '#ffd9a8', color: '#5a2d00' }} title={`Chồng với #${o.other} (IoU ${fmtIou(o.ratio)}). Kéo box cam nét đứt trong view để dời object #${o.other} ở frame này (giữ Shift để kéo ở vùng chồng lên box đang xét).`}>⚠ O #{o.other}</span>)}
         {fileFlags.filter((ff) => ff.state === 'open').map((ff) => <span key={ff.kind} style={{ ...CHIP, background: '#ffd6d6', color: '#600' }} title="Flag từ file QC mà tool không tự phát hiện">QC {ff.kind}</span>)}
@@ -596,6 +598,12 @@ function Column({ kind, onKind, showAll, advise, onAdvice, pwShow = false, groun
               <button onClick={(e) => { e.stopPropagation(); onIgnore(f, true); }} style={{ padding: '0 4px' }} title={hint('suggest.ignore', 'Bỏ qua gợi ý ở frame này')}>✖ bỏ qua</button>
             </div>
           )}
+        </div>
+      )}
+      {pIgnored && fit?.level === 'sparse' && (
+        <div style={{ background: '#eee', color: '#555', fontSize: 11, padding: '1px 4px' }}>
+          đã bỏ qua ít điểm{' '}
+          <button onClick={(e) => { e.stopPropagation(); onIgnoreP(f, false); }} style={{ padding: '0 4px' }}>hoàn lại</button>
         </div>
       )}
       {ignored && fit?.level === 'misfit' && (
@@ -639,11 +647,11 @@ function Column({ kind, onKind, showAll, advise, onAdvice, pwShow = false, groun
       {issues.map((i) => (issueIgnored(i.kind)
         ? (
           <div key={i.kind} style={{ background: '#eee', color: '#555', fontSize: 11, padding: '1px 4px' }}>
-            đã bỏ qua {sym(i.kind)}{' '}<button onClick={(e) => { e.stopPropagation(); onIgnoreIssue(f, i.kind, false); }} style={{ padding: '0 4px' }}>hoàn lại</button>
+            đã bỏ qua {symLabel(i.kind)}{' '}<button onClick={(e) => { e.stopPropagation(); onIgnoreIssue(f, i.kind, false); }} style={{ padding: '0 4px' }}>hoàn lại</button>
           </div>
         ) : (
           <div key={i.kind} style={{ background: '#f9d4ee', color: '#5a0040', fontSize: 11, padding: '1px 4px' }} title={i.message}>
-            ⚠ <b>{sym(i.kind)}</b> {i.message}{' '}
+            ⚠ <b>{symLabel(i.kind)}</b> {i.message}{' '}
             <button onClick={(e) => { e.stopPropagation(); onIgnoreIssue(f, i.kind, true); }} style={{ padding: '0 4px' }}>✖ bỏ qua</button>
           </div>
         )))}
@@ -749,7 +757,7 @@ function Group({ id, title, bg, children }: { id: string; title: ReactNode; bg?:
   );
 }
 
-export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, selectedNum, setSelectedNum, initialFrame, edited, onEdit, onTrack, focus, onView, onSel, onHoverFrame, labels, overlaps, ignoredOverlaps, refView = false, onOpenRef, onCloseRef, openAt = null }: {
+export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, rows, selectedNum, setSelectedNum, initialFrame, edited, onEdit, onTrack, focus, onView, onSel, onHoverFrame, labels, overlaps, ignoredOverlaps, refView = false, onOpenRef, onCloseRef, openAt = null }: {
   openAt?: number | null; // mở từ bảng object: cửa sổ bắt đầu đúng ở frame này (frame đầu của object), không nhảy theo frame CVAT lúc vừa mở
   refView?: boolean; // tab Ref: một frame (initialFrame), hai cột Gốc / Gộp đối xứng
   onOpenRef?: (frame?: number) => void; onCloseRef?: () => void;
@@ -759,6 +767,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   onHoverFrame: (f: number | null) => void;
   onFocusFrame: (f: number) => void; // bấm đúp vào cột frame
   drift: Map<number, { f: number; dist: number }[]>; // trôi box theo số thứ tự object
+  midOut: Map<number, number[]>; // outside ở giữa (frame ít điểm nằm giữa hai frame không ít điểm) theo số thứ tự object
   labels: CvatLabel[];
   onSel: (frame: number | null) => void;
   onView: (frames: number[]) => void;
@@ -998,8 +1007,12 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     for (const d of drift.get(num) ?? []) {
       m.set(d.f, [...(m.get(d.f) ?? []), { kind: 'T', message: `trôi box: toạ độ theo ego không đổi trong khi xe đã đi ${d.dist.toFixed(1)} m (box đi theo xe thay vì ở lại chỗ vật đứng yên); bỏ qua nếu vật thật sự chạy cùng vận tốc với xe` }]);
     }
+    // Outside ở giữa (mã T): frame ít điểm nằm giữa hai frame không ít điểm → nên đặt outside
+    for (const f of midOut.get(num) ?? []) {
+      m.set(f, [...(m.get(f) ?? []), { kind: 'W', message: 'ít điểm ở giữa: frame này ít điểm nhưng các frame ổn nằm cả hai phía (box nội suy). Chuột phải vào chip ít điểm (P) để bỏ qua' }]);
+    }
     return m;
-  }, [track, row?.label, start, stop, drift, num, thrVer]);
+  }, [track, row?.label, start, stop, drift, midOut, num, thrVer]);
   // Flag từ file QC đã nạp cho object này, theo frame; "đã hết" = tool không còn thấy lỗi (ở dữ liệu hiện tại, kể cả nháp).
   const qcImports = useQcImports();
   const flagMarks = useFlagMarks();
@@ -1276,8 +1289,9 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     const n = onSplit(num - 1, -1);
     setNote(n === null ? 'Không thêm được: object này không xuất hiện muộn.' : `Đã thêm keyframe outside frame ${start}–${lateStart.first - 1} cho #${num}, giữ ID. Nằm trong nháp, chưa upload.`);
   };
+  const midSet = useMemo(() => new Set(midOut.get(num) ?? []), [midOut, num]); // ít điểm ở giữa hai frame ổn: không báo P (box nội suy)
   const misfitFrames = prefs.suggest ? frames.filter((f) => fits.get(f)?.level === 'misfit') : [];
-  const sparseFrames = frames.filter((f) => fits.get(f)?.level === 'sparse');
+  const sparseFrames = frames.filter((f) => fits.get(f)?.level === 'sparse' && !ign.has(issueKey(job.id, num, f, 'P')));
 
   // Đếm sự kiện của kho point cloud (không đếm số frame trong bộ nhớ: job dài thì số đó đứng ở mức tối đa, frame mới tải không làm
   // tính lại) và số frame đã từng tải của job (để hiển thị).
@@ -1321,7 +1335,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
     const misfit: number[] = [], sparse: number[] = [], ground: number[] = [], overl: number[] = [];
     for (const [f, r] of fitSeries.fits) {
       if (r.level === 'misfit') { if (prefs.suggest && !ign.has(ignoreKey(job.id, num, f))) misfit.push(f); }
-      else if (r.level === 'sparse') sparse.push(f);
+      else if (r.level === 'sparse' && !ign.has(issueKey(job.id, num, f, 'P'))) sparse.push(f);
     }
     for (const [f, g] of series) if (g?.warn) ground.push(f);
     for (const f of ovAt.keys()) overl.push(f);
@@ -1389,7 +1403,7 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
   /** Một cột frame (lưới Batch Review và hai cột của tab Ref dùng chung). */
   const colEl = (c: (typeof cols)[number], key: string, sz: number, extra: { refl?: RefState | null; onBelow?: (f: number, n: number) => void; onRefPlane?: (f: number, d: number | null) => void; half?: number; locHalf?: number; horizontal?: boolean } = {}) => (
     <Column
-      key={key} f={c.f} size={sz} st={c.st} refCub={c.ref} half={extra.half ?? half} locHalf={extra.locHalf ?? locHalf} horizontal={extra.horizontal} selected={selFrame === c.f} pan={panEff} onPan={setPanClamped}
+      key={key} midSparse={midSet.has(c.f)} pIgnored={ign.has(issueKey(job.id, num, c.f, 'P'))} onIgnoreP={(f, on) => ignoreStore.set([issueKey(job.id, num, f, 'P')], on)} f={c.f} size={sz} st={c.st} refCub={c.ref} half={extra.half ?? half} locHalf={extra.locHalf ?? locHalf} horizontal={extra.horizontal} selected={selFrame === c.f} pan={panEff} onPan={setPanClamped}
       edited={edited.has(`${num}:${c.f}`)} warn={warn} fixed={!dyn} ignored={ign.has(ignoreKey(job.id, num, c.f))}
       onIgnore={(f, on) => ignoreFrames([f], on)}
       motion={c.mot} motionIgnored={ign.has(motionKey(job.id, num, c.f))}
@@ -1607,12 +1621,12 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
           )}
           {trackSummary.byKind.map(([kind, fr]) => (
             <span key={kind} style={{ color: '#a0006e', fontWeight: 600 }} title="Cả track (ký hiệu lỗi đặt ở tab Threshold). Bấm một đoạn để nhảy tới frame đầu của đoạn.">
-              ⚠ {sym(kind)} ({fr.length}):{' '}
+              ⚠ {symLabel(kind)} ({fr.length}):{' '}
               {toRanges(fr).map(([x, y]) => (
                 <button key={x} onClick={() => goFrame(x)} style={{ padding: '0 3px', marginRight: 2, fontWeight: 600, color: '#a0006e' }}>{x === y ? x : `${x}–${y}`}</button>
               ))}
               <button
-                onClick={() => { ignoreStore.set(fr.map((f) => issueKey(job.id, num, f, kind)), true); setNote(`Đã bỏ qua ${fr.length} cảnh báo ${sym(kind)} của object #${num}.`); }}
+                onClick={() => { ignoreStore.set(fr.map((f) => issueKey(job.id, num, f, kind)), true); setNote(`Đã bỏ qua ${fr.length} cảnh báo ${symLabel(kind)} của object #${num}.`); }}
                 style={{ padding: '0 3px', fontSize: 10 }} title={`Bỏ qua cả ${fr.length} frame ${kind} của object này (theo lô)`}
               >✖ bỏ qua tất cả</button>
             </span>
@@ -1769,16 +1783,16 @@ export function BatchReview({ drift, onSplit, onFocusFrame, job, ann, rows, sele
         <div role="dialog" aria-modal="true" onClick={() => setBulk(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', color: '#111', border: '1px solid #888', borderRadius: 6, padding: 14, maxWidth: 420, boxShadow: '0 4px 18px rgba(0,0,0,.4)' }}>
             <p style={{ margin: '0 0 6px' }}>
-              Bạn vừa chọn <b>{bulk.verb}</b> lỗi <b>{sym(bulk.kind)}</b> của object #{num} ở frame {bulk.f}.
+              Bạn vừa chọn <b>{bulk.verb}</b> lỗi <b>{symLabel(bulk.kind)}</b> của object #{num} ở frame {bulk.f}.
             </p>
             <p style={{ margin: '0 0 10px' }}>
-              Object này còn <b>{bulk.others.length}</b> frame khác cùng lỗi {sym(bulk.kind)}: {bulk.others.slice(0, 14).join(', ')}{bulk.others.length > 14 ? ', …' : ''}.
+              Object này còn <b>{bulk.others.length}</b> frame khác cùng lỗi {symLabel(bulk.kind)}: {bulk.others.slice(0, 14).join(', ')}{bulk.others.length > 14 ? ', …' : ''}.
               Có muốn {bulk.verb} luôn cho các frame còn lại không?
             </p>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
               <button onClick={() => setBulk(null)}>Hủy</button>
               <button onClick={() => { bulk.run([bulk.f]); setBulk(null); }}>Chỉ frame {bulk.f}</button>
-              <button className="cvla-primary" autoFocus onClick={() => { bulk.run([bulk.f, ...bulk.others]); setNote(`Đã ${bulk.verb} lỗi ${sym(bulk.kind)} của object #${num} ở ${bulk.others.length + 1} frame.`); setBulk(null); }}>Tất cả {bulk.others.length + 1} frame</button>
+              <button className="cvla-primary" autoFocus onClick={() => { bulk.run([bulk.f, ...bulk.others]); setNote(`Đã ${bulk.verb} lỗi ${symLabel(bulk.kind)} của object #${num} ở ${bulk.others.length + 1} frame.`); setBulk(null); }}>Tất cả {bulk.others.length + 1} frame</button>
             </div>
           </div>
         </div>

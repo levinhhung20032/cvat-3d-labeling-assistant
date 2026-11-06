@@ -69,8 +69,8 @@ export function classKey(label: string): ClassKey | null {
   return null;
 }
 
-/** 'T' = trôi box (vật đứng yên mà box nhích; tính chéo giữa các frame ở drift.ts, không nằm trong file QC). */
-export type ExtraKind = 'T';
+/** 'T' = trôi box (vật đứng yên mà box nhích; tính chéo giữa các frame ở drift.ts, không nằm trong file QC; không có ký hiệu hiển thị). 'W' = outside ở giữa (hiện chữ T): frame ít điểm nằm giữa hai frame không ít điểm. */
+export type ExtraKind = 'T' | 'W';
 export interface FrameIssue { kind: IssueKind | ExtraKind; message: string }
 
 const wrapDeg = (r: number) => {

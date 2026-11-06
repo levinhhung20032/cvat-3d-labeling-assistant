@@ -23,7 +23,7 @@ export const SECTIONS: { id: SectionId; title: string; about: string; code?: Sym
   { id: 'H', code: 'H', title: 'Đổi hướng đột ngột', about: 'Yaw đổi giữa hai frame liền nhau.' },
   { id: 'D', code: 'D', title: 'Quá xa', about: 'Khoảng cách 3D từ tâm box tới gốc toạ độ.' },
   { id: 'O', code: 'O', title: 'Chồng lấn', about: 'Hai box có phần giao nhìn từ trên: báo khi IoU vượt ngưỡng của class (0 = báo mọi cặp có phần giao). Tham số: phần giao nhỏ hơn mức tối thiểu thì bỏ qua.' },
-  { id: 'T', code: 'T', title: 'Trôi box', about: 'Box giữ nguyên toạ độ ego trong khi xe chạy (box đi theo xe). Rule: giữ nguyên từ ngần này frame thì báo.' },
+  { id: 'T', title: 'Trôi box (chỉ cảnh báo, không có mã)', about: 'Box giữ nguyên toạ độ ego trong khi xe chạy (box đi theo xe). Rule: giữ nguyên từ ngần này frame thì báo.' },
   { id: 'M', code: 'M', title: 'Đi xa bất thường', about: 'Vị trí lệch so với dự đoán từ chuyển động các frame trước. Rule theo class hoặc tất cả.' },
   { id: 'F', code: 'P', title: 'Lệch / ít điểm', about: 'Box lệch khỏi cụm điểm (nhiều điểm sát ngoài box) hoặc có ít điểm bên trong. Đổi mục này làm tính lại số liệu nền của mọi frame.' },
   { id: 'G', title: 'Đáy lơ lửng / chìm', about: 'Đáy box so với mặt đường đo riêng cho từng object. Đổi mục này làm tính lại số liệu nền của mọi frame.' },
