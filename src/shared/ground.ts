@@ -256,17 +256,38 @@ function pwResult(
 }
 
 /** Ba nguồn mặt đường chọn được cho từng frame: đo riêng quanh object, mặt đường ego (z = 0), mặt đường Patchwork++. */
-export type GroundKind = 'measured' | 'ego' | 'pw';
-export const GROUND_KINDS: readonly GroundKind[] = ['measured', 'ego', 'pw'];
+export type GroundKind = 'measured' | 'ego' | 'pw' | 'nbr';
+export const GROUND_KINDS: readonly GroundKind[] = ['measured', 'ego', 'pw', 'nbr'];
 
-/** Mặt đường ego: mặt phẳng Oxy (z = 0 thế giới), ngang trong hệ box (hệ box chỉ xoay theo yaw). `z`: z tâm box ở frame này. Luôn chắc chắn, không bao giờ cảnh báo. */
-export function egoGround(z: number, sz: number, at: { cu: number; cv: number; cw: number } = { cu: 0, cv: 0, cw: 0 }): GroundResult {
-  const c = -z - at.cw;
+/** Mặt đường nằm ngang ở độ cao thế giới `z0`, trong hệ box (chỉ xoay theo yaw). `z`: z tâm box ở frame này. Chắc chắn, không bao giờ cảnh báo. */
+export function levelGround(z0: number, z: number, sz: number, at: { cu: number; cv: number; cw: number } = { cu: 0, cv: 0, cw: 0 }): GroundResult {
+  const c = z0 - z - at.cw;
   const dz = c + sz / 2;
   return {
-    groundW: -z, dz, sigma: 0, rms: 0, warn: false, confident: true, ambiguous: false, pw: 'off', nSectors: 0, contactW: null, marks: [], n: 0, flat: true, method: 'plane',
+    groundW: z0 - z, dz, sigma: 0, rms: 0, warn: false, confident: true, ambiguous: false, pw: 'off', nSectors: 0, contactW: null, marks: [], n: 0, flat: true, method: 'plane',
     slopeDeg: 0, steep: false, plane: { a: 0, b: 0, c }, dzTilt: c + sz / 2,
   };
+}
+
+/** Mặt đường ego: mặt phẳng Oxy (z = 0 thế giới), ngang trong hệ box. Luôn chắc chắn, không bao giờ cảnh báo. */
+export const egoGround = (z: number, sz: number, at: { cu: number; cv: number; cw: number } = { cu: 0, cv: 0, cw: 0 }): GroundResult => levelGround(0, z, sz, at);
+
+/** Bán kính (m) quanh tâm box để lấy các box láng giềng đã kiểm duyệt (ID nhỏ hơn) làm mặt đường. */
+export const NEIGHBOR_RADIUS = 5;
+/**
+ * Độ cao mặt đường (thế giới) từ các box láng giềng: đáy của box nào có ID nhỏ hơn (đã được người dùng kiểm duyệt) và tâm cách tâm box đang xét
+ * không quá NEIGHBOR_RADIUS (m, mặt phẳng ngang). Trung bình có trọng số theo khoảng cách (gần nặng hơn); mặt đường coi là nằm ngang.
+ * null nếu không có box nào.
+ */
+export function neighborGroundZ(self: { x: number; y: number }, others: { x: number; y: number; z: number; sz: number }[], radius = NEIGHBOR_RADIUS): number | null {
+  let sw = 0, sz = 0;
+  for (const o of others) {
+    const d = Math.hypot(o.x - self.x, o.y - self.y);
+    if (d > radius) continue;
+    const w = 1 / (d + 1);
+    sw += w; sz += w * (o.z - o.sz / 2);
+  }
+  return sw > 0 ? sz / sw : null;
 }
 
 /**
@@ -274,9 +295,10 @@ export function egoGround(z: number, sz: number, at: { cu: number; cv: number; c
  * 'pw' = chỉ mặt phẳng từ điểm Patchwork++ (cần nhãn mặt đất trong `p`); 'ego' = z = 0. `z`: z tâm box (cần cho 'ego').
  */
 export function groundSnapBy(
-  kind: GroundKind, p: LocalPoints, sx: number, sy: number, sz: number, at: { cu: number; cv: number; cw: number; range?: number }, z: number, cfg: GroundConfig = DEFAULT_GROUND,
+  kind: GroundKind, p: LocalPoints, sx: number, sy: number, sz: number, at: { cu: number; cv: number; cw: number; range?: number }, z: number, cfg: GroundConfig = DEFAULT_GROUND, nbrZ: number | null = null,
 ): GroundResult | null {
   if (kind === 'ego') return egoGround(z, sz, at);
+  if (kind === 'nbr') return nbrZ === null ? null : levelGround(nbrZ, z, sz, at);
   if (at.range !== undefined && at.range > cfg.maxRange) return null;
   if (kind === 'pw') return pwResult(p, sx, sy, sz, at, cfg, null);
   return groundSnapCore(p, sx, sy, sz, at, { ...cfg, pw: 0 });

@@ -3,12 +3,12 @@ import { askConfirm } from './confirmStore';
 import { kv } from './storage';
 import { onViewport, viewport } from './bridge';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { azimuthDeg, type Cuboid } from '../shared/cuboid';
+import { azimuthDeg, parseCuboid, serializeCuboid, type Cuboid } from '../shared/cuboid';
 import {
   applyLocalBox, viewFrame, dragCorner, dragEdge, dragMove, dragRotateRel, dragTilt, dragYawByX, hitTest, identityBox, localBoxOf, screenRect, type Hit, type LocalBox,
 } from '../shared/edit';
 import { referenceCuboid, stateAt, type FrameState } from '../shared/interp';
-import { rotateAllKeyframes, upsertKeyframe as upsertKf } from '../shared/edit';
+import { resizeKeyframes, rotateAllKeyframes, translateKeyframes, upsertKeyframe as upsertKf } from '../shared/edit';
 import {
   removeInnerKeyframes, restoreFrom, setOutsideFrom, setOutsideRange, toggleKeyframe,
   type TrackChange,
@@ -40,8 +40,9 @@ import { thresholdStore, useThresholdVersion } from './thresholdStore';
 import { sym, symLabel, useSymbols } from './symbolStore';
 import { findLateStart, findLongOutsideGaps, SPLIT_OUTSIDE_FRAMES, type OutsideGap } from '../shared/splitId';
 import { useColors } from './colorStore';
+import { clientIdOf } from './cvatIds';
 import { adviseGround, type GroundAdvice } from '../shared/groundSuggest';
-import { confirmSnap, DEFAULT_GROUND, egoGround, enforceConsistency, GROUND_KINDS, groundSnap, groundSnapBy, pwGroundPlane, type ConsistencyItem, tiltFromPlane, type GroundKind, type GroundResult, type GroundSector } from '../shared/ground';
+import { confirmSnap, DEFAULT_GROUND, egoGround, levelGround, neighborGroundZ, enforceConsistency, GROUND_KINDS, groundSnap, groundSnapBy, pwGroundPlane, type ConsistencyItem, tiltFromPlane, type GroundKind, type GroundResult, type GroundSector } from '../shared/ground';
 import { DEFAULT_REFLECT, mirrorBox, mirroredPoints, pointsBelow, reflectionPlane, refPlane, type PlaneSource, type RefMode, type RefState } from '../shared/reflect';
 import { refStore, useRefState } from './refStore';
 import { motionJump, type MotionWarning } from '../shared/motion';
@@ -117,8 +118,9 @@ const GROUND_LABEL: Record<GroundKind, { short: string; full: string; tip: strin
   measured: { short: 'local', full: 'local (đo riêng)', tip: `Đo mặt đường riêng cho object ở đúng frame này (lớp thấp nhất có mật độ ở 8 cung quanh box + lớp tiếp xúc dưới gầm), không dự đoán từ frame khác. Báo ⏬ khi đáy cao hơn mặt đường quá ${cm(DEFAULT_GROUND.floatTol)} cm hoặc thấp hơn quá ${cm(DEFAULT_GROUND.sinkTol)} cm và vượt độ bất định của phép đo.` },
   ego: { short: 'ego', full: 'ego (z = 0)', tip: 'Mặt phẳng Oxy của ego (z = 0, mặt đường dưới xe): vạch vàng chấm ở view Bên / Trước, theo z của box ở frame này. Snap / lock (nếu chọn nguồn này) đặt đáy box lên z = 0.' },
   pw: { short: 'patchwork++', full: 'patchwork++', tip: 'Mặt đường fit từ các điểm Patchwork++ gán là mặt đất quanh box (vạch tím nét đứt ở view Bên / Trước). Snap / lock đặt đáy box lên mặt này; frame thiếu điểm mặt đất quanh box thì không có vạch.' },
+  nbr: { short: 'box ID nhỏ', full: 'box ID nhỏ (≤ 5 m)', tip: 'Mặt đường lấy từ ĐÁY các box có ID nhỏ hơn (đã được kiểm duyệt) có tâm cách box này không quá 5 m ở frame này: trung bình có trọng số theo khoảng cách, coi là mặt ngang (vạch cam chấm gạch ở view Bên / Trước). Không có box nào trong 5 m thì không có nguồn này.' },
 };
-const GROUND_OPT: Record<GroundKind, string> = { measured: 'local', ego: 'ego', pw: 'patchwork++' };
+const GROUND_OPT: Record<GroundKind, string> = { measured: 'local', ego: 'ego', pw: 'patchwork++', nbr: 'box ID nhỏ' };
 /** Chọn ĐÚNG 1 nguồn mặt đường (Ground snap / lock dùng nguồn này). */
 function GroundPick({ kind, onChange, label, title }: { kind: GroundKind; onChange: (k: GroundKind) => void; label?: string; title?: string }) {
   return (
@@ -151,7 +153,8 @@ const loadFrameSel = (key: string): Record<number, GroundKind> => {
 
 interface DragState { hit: NonNullable<Hit>; x0: number; y0: number; base: LocalBox; moved: boolean }
 
-function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, tiltOn, autoSnap, lockKind, onPreview, onCommit, onZoom, pan, onPan, reflect, pwPlane, ovCount, onPreviewOther, onCommitOther }: {
+function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, tiltOn, autoSnap, lockKind, onPreview, onCommit, onZoom, pan, onPan, reflect, pwPlane, ovCount, onPreviewOther, onCommitOther }: {
+  nbrPlane: EgoPlane | null; nbrZ: number | null; // mặt đường theo đáy box ID nhỏ (vẽ) và độ cao thế giới của nó (snap)
   ovCount: number; // overlays[0 … ovCount − 1] là box của object khác đang chồng lấn (kéo được); phần còn lại (box gương ref) không kéo
   onPreviewOther: (i: number, b: LocalBox | null) => void; onCommitOther: (i: number, delta: [number, number, number]) => void; // dời box chồng lấn: xem trước / ghi (độ dời tâm theo hệ của khung nhìn)
   pwPlane: EgoPlane | null; // mặt đường Patchwork++ gợi ý (tím) trong hệ của khung nhìn
@@ -163,7 +166,7 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
   ground: number | null; autoSnap: boolean;
   groundMarks: GroundSector[]; contactW: number | null; // mặt đường đo được ở từng cung quanh box + lớp tiếp xúc dưới gầm (để vẽ)
   ghost: LocalBox | null; misfit: boolean; view: View; size: number; loc: Local | null; st: FrameState; half: number; box: LocalBox | null;
-  onPreview: (b: LocalBox | null) => void; onCommit: (c: Cuboid, rotAll?: boolean) => void; onZoom: (factor: number) => void;
+  onPreview: (b: LocalBox | null) => void; onCommit: (c: Cuboid, all?: 'rot' | 'move' | 'size', lb?: LocalBox) => void; onZoom: (factor: number) => void;
   pan: Pan; onPan: (p: Pan) => void; // dời khung nhìn (giữ chuột phải kéo), dùng chung mọi view / frame
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -178,8 +181,8 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
     const ctx = ref.current?.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawView(ctx, size, view, loc, box, half, st.status, !!drag.current, misfit, ghost, ground, mark, scene, overlays, st.cuboid, groundMarks, contactW, pan, egoPlane, reflect, pwPlane);
-  }, [view, size, dpr, loc, st.status, st.cuboid, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, pan, reflect, pwPlane, colorsNow]);
+    drawView(ctx, size, view, loc, box, half, st.status, !!drag.current, misfit, ghost, ground, mark, scene, overlays, st.cuboid, groundMarks, contactW, pan, egoPlane, reflect, pwPlane, nbrPlane);
+  }, [nbrPlane, view, size, dpr, loc, st.status, st.cuboid, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, pan, reflect, pwPlane, colorsNow]);
 
   // Cuộn chuột trên ô = phóng to/thu nhỏ mọi frame (listener gốc để chặn cuộn trang).
   const zoomRef = useRef(onZoom);
@@ -296,12 +299,15 @@ function Cell({ frame, view, size, loc, st, half, box, misfit, ghost, ground, gr
       const geometryChanged = b.cu !== 0 || b.cv !== 0 || b.cw !== 0 || b.sx !== st.cuboid.sx || b.sy !== st.cuboid.sy || b.sz !== st.cuboid.sz;
       if (autoSnap && lockKind && loc && geometryChanged && !frame) {
         const at = { cu: b.cu, cv: b.cv, cw: b.cw, range: Math.hypot(st.cuboid.x, st.cuboid.y) };
-        const g = groundSnapBy(lockKind, loc, b.sx, b.sy, b.sz, at, st.cuboid.z);
+        const g = groundSnapBy(lockKind, loc, b.sx, b.sy, b.sz, at, st.cuboid.z, DEFAULT_GROUND, nbrZ);
         if (g && g.confident && (lockKind !== 'measured' || confirmSnap(loc, b.sx, b.sy, b.sz, at, g))) b = { ...b, cw: b.cw + g.dz }; // đo riêng: đo lại tại chỗ mới phải ra cùng mặt đường
       }
       if (frame) { const [cu, cv, cw] = apply(transpose(frame), [b.cu, b.cv, b.cw]); b = { ...b, cu, cv, cw }; } // về hệ yaw
       const rotated = d.hit.mode === 'rotate' || (d.hit.mode === 'move' && e.altKey);
-      onCommit(applyLocalBox(st.cuboid, b), rotated && e.ctrlKey && e.altKey); // Ctrl+Alt+kéo: xoay frame này và mọi frame phía sau
+      const moved = d.hit.mode === 'move' && !e.altKey && e.ctrlKey;
+      const resized = (d.hit.mode === 'edge' || d.hit.mode === 'corner') && e.ctrlKey;
+      // Giữ Ctrl khi kéo = áp cho frame này và mọi frame phía sau: Ctrl+Alt+kéo xoay · Ctrl+kéo (dời) dời cùng độ lệch · Ctrl+kéo cạnh / góc đổi kích thước
+      onCommit(applyLocalBox(st.cuboid, b), rotated && e.ctrlKey && e.altKey ? 'rot' : moved ? 'move' : resized ? 'size' : undefined, resized ? b : undefined);
     }
     onPreview(null);
   };
@@ -344,7 +350,7 @@ const CHIP_BTN: React.CSSProperties = { padding: '0 3px', lineHeight: 1, height:
 interface FileFlag { kind: IssueKind; state: FlagState; msg?: string; det: boolean }
 const NO_FLAGS: FileFlag[] = [];
 
-function Column({ midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, advise, onAdvice, pwShow = false, groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, overlayNums, onCommitOther, ignoredOverlap, onRestoreOverlap, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan, refl = null, onBelow, onRefPlane, horizontal = false }: {
+function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, advise, onAdvice, pwShow = false, groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, overlayNums, onCommitOther, ignoredOverlap, onRestoreOverlap, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan, refl = null, onBelow, onRefPlane, horizontal = false }: {
   horizontal?: boolean; // tab Ref: 3 view Trên | Bên | Trước xếp ngang
   pwShow?: boolean; // hiện mặt đường Patchwork++ gợi ý (vạch tím) ở view Bên / Trước
   kind: GroundKind; onKind: (f: number, k: GroundKind) => void; // nguồn mặt đường của RIÊNG frame này (đổi ở frame khác không đụng tới)
@@ -371,8 +377,9 @@ function Column({ midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, advise,
   fixed: boolean; onSuggest: (f: number, s: Suggestion | null) => void; onAccept: (f: number, s: Suggestion) => void;
   warn: boolean; onFit: (f: number, r: FitReport | null) => void;
   onToggleKf: (f: number) => void;
+  nbrZ: number | null; // độ cao thế giới của mặt đường theo đáy box ID nhỏ trong 5 m ở frame này (null: không có box nào)
   f: number; size: number; st: FrameState; refCub: Cuboid | null; half: number; locHalf: number; selected: boolean; edited: boolean;
-  onSelect: () => void; onLoaded: (f: number) => void; onCommit: (f: number, c: Cuboid, rotAll?: boolean) => void; onZoom: (factor: number) => void;
+  onSelect: () => void; onLoaded: (f: number) => void; onCommit: (f: number, c: Cuboid, all?: 'rot' | 'move' | 'size', lb?: LocalBox) => void; onZoom: (factor: number) => void;
 }) {
   useSymbols(); // ký hiệu lỗi đổi thì vẽ lại
   useColors(); // màu viền frame đổi (tab Màu sắc) thì vẽ lại
@@ -415,6 +422,10 @@ function Column({ midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, advise,
     const n = M ? apply(M, [-pl.a, -pl.b, 1]) : [-pl.a, -pl.b, 1];
     return [n[0]!, n[1]!, n[2]!, pl.c + DEFAULT_GROUND.pwLift];
   }, [pwShow, loc, st.cuboid, M]);
+  const nbrPlane = useMemo<EgoPlane | null>(() => {
+    if (nbrZ === null || !st.cuboid || !(kind === 'nbr' || showAll)) return null;
+    return M ? [M[2], M[5], M[8], nbrZ - st.cuboid.z] : [0, 0, 1, nbrZ - st.cuboid.z];
+  }, [nbrZ, kind, showAll, st.cuboid, M]);
   const boxV = <T extends LocalBox | null>(b: T): T => {
     if (!b || !M) return b;
     const [cu, cv, cw] = apply(M, [b.cu, b.cv, b.cw]);
@@ -450,16 +461,19 @@ function Column({ midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, advise,
     if (!lockKind || !c) return null;
     if (lockKind === 'measured') return groundOv;
     if (lockKind === 'ego') return egoGround(c.z, c.sz);
+    if (lockKind === 'nbr') return nbrZ === null ? null : levelGround(nbrZ, c.z, c.sz);
     return loc ? groundSnapBy('pw', loc, c.sx, c.sy, c.sz, { cu: 0, cv: 0, cw: 0, range: Math.hypot(c.x, c.y) }, c.z) : null;
-  }, [lockKind, groundOv, loc, st.cuboid]);
+  }, [lockKind, groundOv, loc, st.cuboid, nbrZ]);
   useEffect(() => { onSnap(f, snapSel); }, [f, snapSel]);
   // Gợi ý nguồn mặt đường: tính cả 3 nguồn cho frame này rồi chọn theo thứ tự đo riêng → Patchwork++ → ego z=0 (groundSuggest.ts).
   const advice = useMemo<GroundAdvice | null>(() => {
     const c = st.cuboid;
-    if (!advise || !loc || !c) return null;
+    if (!advise || !c || (!loc && nbrZ === null)) return null;
     const at = { cu: 0, cv: 0, cw: 0, range: Math.hypot(c.x, c.y) };
-    return adviseGround({ measured: groundSnapBy('measured', loc, c.sx, c.sy, c.sz, at, c.z), pw: groundSnapBy('pw', loc, c.sx, c.sy, c.sz, at, c.z), ego: egoGround(c.z, c.sz) }, DEFAULT_GROUND.pwAgree);
-  }, [advise, loc, st.cuboid]);
+    const nb = nbrZ === null ? null : levelGround(nbrZ, c.z, c.sz);
+    if (!loc) return adviseGround({ nbr: nb, ego: egoGround(c.z, c.sz) }, DEFAULT_GROUND.pwAgree);
+    return adviseGround({ nbr: nb, measured: groundSnapBy('measured', loc, c.sx, c.sy, c.sz, at, c.z), pw: groundSnapBy('pw', loc, c.sx, c.sy, c.sz, at, c.z), ego: egoGround(c.z, c.sz) }, DEFAULT_GROUND.pwAgree);
+  }, [advise, loc, st.cuboid, nbrZ]);
   useEffect(() => { onAdvice(f, advice); }, [f, advice]);
   // Cảnh báo vật đi xa bất thường: dấu × cam ở vị trí dự đoán từ chuyển động các frame trước.
   const shownMotion = motion && !motionIgnored ? motion : null;
@@ -574,7 +588,7 @@ function Column({ midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, advise,
       </div>
       <div style={{ position: 'relative', ...(horizontal ? { display: 'flex', gap: VIEW_GAP } : null) }}>
       {VIEWS.map((v) => (
-        <Cell key={v} reflect={reflect} pwPlane={pwPlane} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap && lockKind !== null} lockKind={lockKind} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c, all) => onCommit(f, c, all)} onZoom={onZoom} pan={pan} onPan={onPan} ovCount={overlayCubs.length} onPreviewOther={(i, b) => setOvPrev(b ? { i, box: b } : null)} onCommitOther={commitOther} />
+        <Cell key={v} nbrPlane={nbrPlane} nbrZ={nbrZ} reflect={reflect} pwPlane={pwPlane} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap && lockKind !== null} lockKind={lockKind} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c, all, lb) => onCommit(f, c, all, lb)} onZoom={onZoom} pan={pan} onPan={onPan} ovCount={overlayCubs.length} onPreviewOther={(i, b) => setOvPrev(b ? { i, box: b } : null)} onCommitOther={commitOther} />
       ))}
       </div>
       {reflect && plane && (
@@ -855,9 +869,23 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
   const clearOwnDyn = () => { try { kv.remove(dynKey); } catch { /* bỏ qua */ } bumpDyn((x) => x + 1); thresholdStore.changed(); };
   const dynWhy = own !== null ? 'công tắc riêng của object này' : auto.by === 'attr' ? `theo attribute ${auto.attr} = ${auto.value}` : 'theo class';
   /** Ghi cuboid mới vào frame f. Dynamic size tắt mà kích thước đổi → áp kích thước mới cho mọi keyframe. */
-  const commit = (f: number, cub: Cuboid, rotAll?: boolean) => {
+  const commit = (f: number, cub: Cuboid, all?: 'rot' | 'move' | 'size', lb?: LocalBox) => {
     const cur = track ? stateAt(track, f).cuboid : null;
-    if (rotAll && track && cur) {
+    if (all === 'size' && track && lb && cur) {
+      // Ctrl+kéo cạnh / góc: frame này đặt đúng box vừa kéo; mọi keyframe có box phía sau đổi cùng kích thước (tâm dời theo trục riêng của từng box)
+      let r = resizeKeyframes(upsertKf(track, f, cub), lb, f + 1);
+      if (!dyn) { // Dynamic size tắt: mọi keyframe phải cùng kích thước, kể cả các keyframe phía trước
+        r = { ...r, track: { ...r.track, shapes: r.track.shapes.map((sh) => (sh.outside || sh.type !== 'cuboid' || sh.frame > f ? sh : { ...sh, points: serializeCuboid({ ...parseCuboid(sh.points), sx: cub.sx, sy: cub.sy, sz: cub.sz }, sh.points) })) } };
+      }
+      onTrack(num - 1, r.track, [f, ...r.frames]);
+      return;
+    }
+    if (all === 'move' && track && cur) {
+      const r = translateKeyframes(upsertKf(track, f, cub), cub.x - cur.x, cub.y - cur.y, cub.z - cur.z, f + 1);
+      onTrack(num - 1, r.track, [f, ...r.frames]);
+      return;
+    }
+    if (all === 'rot' && track && cur) {
       // Ctrl+Alt+kéo: độ xoay vừa kéo được cộng vào frame này và MỌI keyframe có box phía sau nó (quanh tâm từng box)
       const wrap = (a: number) => { let d = a; while (d > Math.PI) d -= 2 * Math.PI; while (d <= -Math.PI) d += 2 * Math.PI; return d; };
       const r = rotateAllKeyframes(upsertKf(track, f, cub), wrap(cub.yaw - cur.yaw), cub.rx - cur.rx, cub.ry - cur.ry, f + 1); // frame này đặt đúng box vừa kéo (thành keyframe nếu chưa), các keyframe sau cộng độ xoay
@@ -1096,6 +1124,23 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
     [track, framesKey, stop, row?.label, thrVer],
   );
 
+  // Mặt đường theo box láng giềng: ở mỗi frame đang xem, các object có ID (hiển thị trong CVAT) NHỎ hơn object đang chọn (coi là đã kiểm duyệt),
+  // còn box ở frame đó và tâm cách tâm box đang xét ≤ NEIGHBOR_RADIUS → độ cao thế giới của đáy chúng (neighborGroundZ).
+  const nbrZs = useMemo(() => {
+    const m = new Map<number, number | null>();
+    if (!track) return m;
+    const myId = clientIdOf(ann.tracks, num);
+    const lower = ann.tracks.filter((_, i) => i !== num - 1 && clientIdOf(ann.tracks, i + 1) < myId);
+    for (const f of frames) {
+      const me = stateAt(track, f).cuboid;
+      if (!me) { m.set(f, null); continue; }
+      const others: { x: number; y: number; z: number; sz: number }[] = [];
+      for (const t of lower) { const c = stateAt(t, f).cuboid; if (c) others.push(c); }
+      m.set(f, neighborGroundZ(me, others));
+    }
+    return m;
+  }, [ann, track, num, framesKey]);
+
   // Kế hoạch tải: cửa sổ đang xem trước, rồi các frame phía sau (gần trước), rồi phía trước; tối đa 60 frame.
   // Chạy nền trong lúc người dùng chỉnh sửa; đổi cửa sổ thì kế hoạch được sắp lại quanh vị trí mới.
   useEffect(() => {
@@ -1235,9 +1280,9 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
     if (!g.confident) { snapWhy.current = 'mặt đường đo được chưa đủ chắc chắn (cần ≥ 2 cung cùng tầng hoặc lớp tiếp xúc xác nhận, không mơ hồ)'; return false; } // chỉ dời khi đủ căn cứ
     // Đo lại tại vị trí sau khi dời: phép đo phụ thuộc đáy box, hai lần phải ra cùng mặt đường, không thì không dời.
     const pc = pointClouds.peek(f);
-    if (!pc) { snapWhy.current = 'point cloud của frame này chưa có trong bộ nhớ'; return false; }
+    if (!pc && sf[0] !== 'nbr' && sf[0] !== 'ego') { snapWhy.current = 'point cloud của frame này chưa có trong bộ nhớ'; return false; }
     const c0 = st.cuboid;
-    if (sf[0] === 'measured' && !confirmSnap(localize(pc, c0, 16, f), c0.sx, c0.sy, c0.sz, { cu: 0, cv: 0, cw: 0, range: Math.hypot(c0.x, c0.y) }, g)) { snapWhy.current = 'đo lại tại chỗ cho ra mặt đường khác (hai lần đo không khớp)'; return false; }
+    if (sf[0] === 'measured' && !confirmSnap(localize(pc!, c0, 16, f), c0.sx, c0.sy, c0.sz, { cu: 0, cv: 0, cw: 0, range: Math.hypot(c0.x, c0.y) }, g)) { snapWhy.current = 'đo lại tại chỗ cho ra mặt đường khác (hai lần đo không khớp)'; return false; }
     // Mặt dốc: nghiêng box song song mặt đường (roll / pitch) nếu bật và dốc đủ rõ; không thì chỉ dời z.
     if (prefs.tilt && g.method === 'plane' && g.plane && g.dzTilt !== undefined && (g.slopeDeg ?? 0) >= 1) {
       const t = tiltFromPlane(g.plane.a, g.plane.b, st.cuboid.yaw);
@@ -1404,7 +1449,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
   /** Một cột frame (lưới Batch Review và hai cột của tab Ref dùng chung). */
   const colEl = (c: (typeof cols)[number], key: string, sz: number, extra: { refl?: RefState | null; onBelow?: (f: number, n: number) => void; onRefPlane?: (f: number, d: number | null) => void; half?: number; locHalf?: number; horizontal?: boolean } = {}) => (
     <Column
-      key={key} midSparse={midSet.has(c.f)} pIgnored={ign.has(issueKey(job.id, num, c.f, 'P'))} onIgnoreP={(f, on) => ignoreStore.set([issueKey(job.id, num, f, 'P')], on)} f={c.f} size={sz} st={c.st} refCub={c.ref} half={extra.half ?? half} locHalf={extra.locHalf ?? locHalf} horizontal={extra.horizontal} selected={selFrame === c.f} pan={panEff} onPan={setPanClamped}
+      key={key} nbrZ={nbrZs.get(c.f) ?? null} midSparse={midSet.has(c.f)} pIgnored={ign.has(issueKey(job.id, num, c.f, 'P'))} onIgnoreP={(f, on) => ignoreStore.set([issueKey(job.id, num, f, 'P')], on)} f={c.f} size={sz} st={c.st} refCub={c.ref} half={extra.half ?? half} locHalf={extra.locHalf ?? locHalf} horizontal={extra.horizontal} selected={selFrame === c.f} pan={panEff} onPan={setPanClamped}
       edited={edited.has(`${num}:${c.f}`)} warn={warn} fixed={!dyn} ignored={ign.has(ignoreKey(job.id, num, c.f))}
       onIgnore={(f, on) => ignoreFrames([f], on)}
       motion={c.mot} motionIgnored={ign.has(motionKey(job.id, num, c.f))}
@@ -1770,7 +1815,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
         })()}
       </details>
       <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>
-        Mẹo thao tác <Help text={`phím tắt khoá KF / outside / ground snap / chấp nhận / bỏ qua gợi ý (${['kf.toggle', 'outside.from', 'ground.snap', 'suggest.accept', 'suggest.ignore'].map((id) => keyOf(id) ?? 'chưa gán').join(' / ')}) tác dụng lên cột frame đang trỏ chuột (viền xanh) · rê chuột lên nút để xem phím tắt, đổi phím ở tab "Phím tắt" · cuộn chuột trên ô để zoom mọi frame · giữ chuột phải rồi kéo để dời khung nhìn (mọi frame cùng dời), nút ⌖ Về giữa để đưa về giữa ·` + " kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo để xoay (giữ thêm CTRL = xoay frame này và TẤT CẢ keyframe phía sau) (view Trên: yaw · view Bên: pitch · view Trước: roll, nếu bật \"nghiêng theo mặt đường\") · sửa frame nào thì frame đó thành keyframe"} />
+        Mẹo thao tác <Help text={`phím tắt khoá KF / outside / ground snap / chấp nhận / bỏ qua gợi ý (${['kf.toggle', 'outside.from', 'ground.snap', 'suggest.accept', 'suggest.ignore'].map((id) => keyOf(id) ?? 'chưa gán').join(' / ')}) tác dụng lên cột frame đang trỏ chuột (viền xanh) · rê chuột lên nút để xem phím tắt, đổi phím ở tab "Phím tắt" · cuộn chuột trên ô để zoom mọi frame · giữ chuột phải rồi kéo để dời khung nhìn (mọi frame cùng dời), nút ⌖ Về giữa để đưa về giữa ·` + " kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo để xoay (giữ thêm CTRL = xoay frame này và TẤT CẢ keyframe phía sau) · CTRL+kéo trong box = dời frame này và TẤT CẢ keyframe phía sau cùng độ lệch · CTRL+kéo cạnh / góc = đổi kích thước frame này và TẤT CẢ keyframe phía sau (nguồn mặt đường \"box ID nhỏ\" lấy đáy các box có ID nhỏ hơn trong 5 m) (view Trên: yaw · view Bên: pitch · view Trước: roll, nếu bật \"nghiêng theo mặt đường\") · sửa frame nào thì frame đó thành keyframe"} />
       </div>
       <div style={{ display: 'flex', gap: prefs.gap, overflowX: 'auto', justifyContent: 'safe center', padding: '2px 4px 6px' }}>
         {cols.map((c) => colEl(c, String(c.f), size, { onBelow: !refS.on && !refS.dismissed ? reportBelow : undefined }))}

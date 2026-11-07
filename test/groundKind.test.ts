@@ -4,8 +4,8 @@ import { DEFAULT_GROUND, egoGround, GROUND_KINDS, groundSnapBy } from '../src/sh
 const empty = { u: new Float32Array(0), v: new Float32Array(0), w: new Float32Array(0), n: 0 };
 
 describe('nguồn mặt đường theo từng frame', () => {
-  it('có đúng 3 nguồn: đo, ego z=0, Patchwork++', () => {
-    expect([...GROUND_KINDS]).toEqual(['measured', 'ego', 'pw']);
+  it('có đúng 4 nguồn: đo, ego z=0, Patchwork++, box ID nhỏ', () => {
+    expect([...GROUND_KINDS]).toEqual(['measured', 'ego', 'pw', 'nbr']);
   });
 
   it('ego z=0: đáy box (z tâm 1,0, cao 1,6 → đáy 0,2) hạ 0,2 m xuống z = 0', () => {

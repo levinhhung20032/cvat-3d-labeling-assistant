@@ -9,7 +9,7 @@ export interface GroundAdvice {
   detail: string; // văn bản cho tooltip
 }
 
-const LABEL: Record<GroundKind, string> = { measured: 'local', ego: 'ego', pw: 'patchwork++' };
+const LABEL: Record<GroundKind, string> = { measured: 'local', ego: 'ego', pw: 'patchwork++', nbr: 'box ID nhỏ' };
 const usable = (g: GroundResult | null | undefined): g is GroundResult => !!g && g.confident && !g.ambiguous && !g.inconsistent;
 const fmtCm = (m: number) => `${m >= 0 ? '+' : '−'}${Math.round(Math.abs(m) * 100)} cm`;
 
@@ -20,14 +20,20 @@ const fmtCm = (m: number) => `${m >= 0 ? '+' : '−'}${Math.round(Math.abs(m) * 
  */
 export function adviseGround(c: Partial<Record<GroundKind, GroundResult | null>>, agree: number): GroundAdvice {
   const dzCm: Partial<Record<GroundKind, number>> = {};
-  for (const k of ['measured', 'pw', 'ego'] as const) { const g = c[k]; if (g) dzCm[k] = Math.round(g.dz * 100); }
+  for (const k of ['nbr', 'measured', 'pw', 'ego'] as const) { const g = c[k]; if (g) dzCm[k] = Math.round(g.dz * 100); }
   const m = usable(c.measured) ? c.measured : null;
   const p = usable(c.pw) ? c.pw : null;
-  const conflict = !!m && !!p && Math.abs(m.groundW - p.groundW) > agree;
+  const conflict0 = !!m && !!p && Math.abs(m.groundW - p.groundW) > agree;
+  const n = c.nbr ?? null; // đáy các box ID nhỏ hơn (đã kiểm duyệt) trong 5 m: bằng chứng do người dùng xác nhận nên ưu tiên cao nhất
+  const other = m ?? p;
+  const nConflict = !!n && !!other && Math.abs(n.groundW - other.groundW) > agree;
   let kind: GroundKind, reason: string;
-  if (m) {
+  if (n) {
+    kind = 'nbr';
+    reason = nConflict ? `theo đáy box ID nhỏ hơn trong 5 m, nhưng lệch ${LABEL[m ? 'measured' : 'pw']} ${fmtCm(n.groundW - other!.groundW)}: nên so bằng mắt` : 'theo đáy box ID nhỏ hơn (đã kiểm duyệt) trong 5 m';
+  } else if (m) {
     kind = 'measured';
-    reason = conflict ? `đo riêng đủ tin nhưng lệch Patchwork++ ${fmtCm(m.groundW - p!.groundW)}: nên so bằng mắt (bật "hiện cả 3")` : 'đo riêng đủ tin';
+    reason = conflict0 ? `đo riêng đủ tin nhưng lệch Patchwork++ ${fmtCm(m.groundW - p!.groundW)}: nên so bằng mắt (bật "hiện cả 3")` : 'đo riêng đủ tin';
   } else if (p) {
     kind = 'pw';
     reason = 'không đo riêng được (thưa / xa / bị che / mơ hồ), Patchwork++ đủ tin';
@@ -35,10 +41,10 @@ export function adviseGround(c: Partial<Record<GroundKind, GroundResult | null>>
     kind = 'ego';
     reason = 'không có nguồn đo nào đủ tin ở frame này, chỉ còn mốc ego z=0';
   }
-  const parts = (['measured', 'pw', 'ego'] as const).map((k) => {
+  const parts = (['nbr', 'measured', 'pw', 'ego'] as const).filter((k) => k !== 'nbr' || c.nbr).map((k) => {
     const g = c[k];
     if (!g) return `${LABEL[k]}: không đo được`;
-    return `${LABEL[k]}: ${fmtCm(g.dz)}${k === 'ego' || usable(g) ? '' : ' (chưa đủ tin)'}`;
+    return `${LABEL[k]}: ${fmtCm(g.dz)}${k === 'ego' || k === 'nbr' || usable(g) ? '' : ' (chưa đủ tin)'}`;
   });
-  return { kind, reason, conflict, dzCm, detail: `Gợi ý ${LABEL[kind]}: ${reason}.\nĐáy box so với mặt đường: ${parts.join(' · ')}` };
+  return { kind, reason, conflict: kind === 'nbr' ? nConflict : conflict0, dzCm, detail: `Gợi ý ${LABEL[kind]}: ${reason}.\nĐáy box so với mặt đường: ${parts.join(' · ')}` };
 }

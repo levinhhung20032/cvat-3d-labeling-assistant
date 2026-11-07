@@ -35,3 +35,36 @@ describe('gợi ý nguồn mặt đường', () => {
     expect(a.dzCm.ego).toBe(0);
   });
 });
+
+import { levelGround, neighborGroundZ } from '../src/shared/ground';
+import { resizeKeyframes } from '../src/shared/edit';
+import { serializeCuboid } from '../src/shared/cuboid';
+
+describe('mặt đường theo box ID nhỏ', () => {
+  it('chỉ lấy box trong 5 m, trung bình theo khoảng cách', () => {
+    const self = { x: 0, y: 0 };
+    expect(neighborGroundZ(self, [{ x: 20, y: 0, z: 1, sz: 1 }])).toBeNull();
+    expect(neighborGroundZ(self, [{ x: 3, y: 0, z: 0.9, sz: 1.5 }])).toBeCloseTo(0.15, 6);
+    const z = neighborGroundZ(self, [{ x: 1, y: 0, z: 1, sz: 2 }, { x: 4, y: 0, z: 1.2, sz: 2 }, { x: 9, y: 0, z: 5, sz: 2 }])!;
+    expect(z).toBeGreaterThan(0); expect(z).toBeLessThan(0.2);
+  });
+  it('levelGround: dz đưa đáy chạm mặt đường', () => {
+    const g = levelGround(0.1, 0.85, 1.5); // đáy hiện ở 0.1 → dz = 0
+    expect(g.dz).toBeCloseTo(0, 9);
+    expect(levelGround(0.3, 0.85, 1.5).dz).toBeCloseTo(0.2, 9);
+  });
+  it('gợi ý ưu tiên box ID nhỏ, vẫn không đụng hành vi cũ khi không có', () => {
+    const nb = levelGround(0.1, 0.85, 1.5);
+    expect(adviseGround({ nbr: nb, measured: res(-0.75), pw: null, ego: egoGround(0.75, 1.5) }, agree).kind).toBe('nbr');
+    expect(adviseGround({ nbr: null, measured: res(-0.75), pw: null, ego: egoGround(0.75, 1.5) }, agree).kind).toBe('measured');
+  });
+});
+
+describe('Ctrl+đổi kích thước', () => {
+  it('chỉ keyframe từ fromFrame trở đi, theo trục riêng', () => {
+    const mk = (frame: number, x: number, yaw: number) => ({ type: 'cuboid', frame, outside: false, points: serializeCuboid({ x, y: 0, z: 0, rx: 0, ry: 0, yaw, sx: 4, sy: 2, sz: 1.5 }, new Array(16).fill(0)) });
+    const t = { shapes: [mk(0, 0, 0), mk(5, 10, Math.PI / 2), mk(9, 20, 0)] } as never;
+    const r = resizeKeyframes(t, { cu: 0.5, cv: 0, cw: 0, dyaw: 0, sx: 5, sy: 2, sz: 1.5 }, 5);
+    expect(r.frames).toEqual([5, 9]);
+  });
+});

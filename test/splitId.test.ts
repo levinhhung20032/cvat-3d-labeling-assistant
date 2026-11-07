@@ -85,3 +85,18 @@ describe('xoay tất cả keyframe', () => {
     expect(parseCuboid(later.track.shapes[0]!.points).yaw).toBeCloseTo(0);
   });
 });
+
+describe('dời tất cả keyframe phía sau', () => {
+  it('cộng độ lệch từ frame fromFrame · outside và frame trước không đổi', async () => {
+    const { translateKeyframes } = await import('../src/shared/edit');
+    const { parseCuboid } = await import('../src/shared/cuboid');
+    const t = track(7, [box(0), box(3), box(5, true), box(6)]);
+    const r = translateKeyframes(t, 1, 2, 0.5, 3);
+    expect(r.frames).toEqual([3, 6]);
+    expect(parseCuboid(r.track.shapes[0]!.points).x).toBeCloseTo(0);
+    expect(parseCuboid(r.track.shapes[1]!.points).x).toBeCloseTo(4);
+    expect(parseCuboid(r.track.shapes[1]!.points).y).toBeCloseTo(2);
+    expect(parseCuboid(r.track.shapes[3]!.points).z).toBeCloseTo(1.3);
+    expect(r.track.shapes[2]!.outside).toBe(true);
+  });
+});

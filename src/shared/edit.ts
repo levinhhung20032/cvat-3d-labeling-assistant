@@ -223,3 +223,30 @@ export function rotateAllKeyframes(track: CvatTrack, dyaw: number, drx = 0, dry 
   });
   return { track: { ...track, shapes }, frames };
 }
+
+/** Dời cùng một độ lệch (dx, dy, dz, mét, toạ độ ego) mọi keyframe có box từ frame `fromFrame` trở đi; keyframe outside không đổi. Không đổi ID. */
+export function translateKeyframes(track: CvatTrack, dx: number, dy: number, dz: number, fromFrame: number): { track: CvatTrack; frames: number[] } {
+  const frames: number[] = [];
+  const shapes = track.shapes.map((sh) => {
+    if (sh.outside || sh.type !== 'cuboid' || sh.frame < fromFrame) return sh;
+    const c = parseCuboid(sh.points);
+    frames.push(sh.frame);
+    return { ...sh, points: serializeCuboid({ ...c, x: c.x + dx, y: c.y + dy, z: c.z + dz }, sh.points) };
+  });
+  return { track: { ...track, shapes }, frames };
+}
+
+/**
+ * Ctrl+kéo cạnh / góc: áp cùng một phép đổi kích thước (tâm dời theo trục riêng của từng box + kích thước mới `b.sx/sy/sz`) cho mọi keyframe có box từ frame
+ * `fromFrame` trở đi; keyframe outside không đổi. `b` là hộp vừa kéo trong hệ yaw của frame đang kéo (dyaw = 0). Không đổi ID.
+ */
+export function resizeKeyframes(track: CvatTrack, b: LocalBox, fromFrame: number): { track: CvatTrack; frames: number[] } {
+  const frames: number[] = [];
+  const shapes = track.shapes.map((sh) => {
+    if (sh.outside || sh.type !== 'cuboid' || sh.frame < fromFrame) return sh;
+    const c = parseCuboid(sh.points);
+    frames.push(sh.frame);
+    return { ...sh, points: serializeCuboid(applyLocalBox(c, { ...b, dyaw: 0, droll: 0, dpitch: 0 }), sh.points) };
+  });
+  return { track: { ...track, shapes }, frames };
+}

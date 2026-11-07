@@ -155,6 +155,7 @@ export function drawView(
   groundMarks: { u: number; v: number; w: number; used: boolean }[] = [], contactW: number | null = null, pan: Pan = NO_PAN, egoPlane: EgoPlane | null = null,
   reflect: { pts: Local | null; plane: number } | null = null, // ref mode: điểm lật từ box ảo về box chính + độ cao w của mặt phản chiếu
   pwPlane: EgoPlane | null = null, // mặt đường Patchwork++ gợi ý (tím), cùng dạng với egoPlane
+  nbrPlane: EgoPlane | null = null, // mặt đường theo đáy các box ID nhỏ hơn trong 5 m (cam), cùng dạng với egoPlane
 ) {
   const colors = getColors();
   ctx.fillStyle = colors.viewBg;
@@ -257,6 +258,18 @@ export function drawView(
       ctx.setLineDash([]);
       ctx.restore();
       surfaceTag(ctx, 'patchwork++', x0 + 4, yAt(x0) + 2, 'below', colors.groundPw);
+    }
+    if (nbrPlane && view !== 'top') {
+      const x0 = -ox, x1 = size - ox;
+      const yAt = (x: number) => c - egoPlaneW(nbrPlane, view, (x - c) / k) * k;
+      ctx.save();
+      ctx.strokeStyle = '#e67e22';
+      ctx.lineWidth = 1.8;
+      ctx.setLineDash([10, 3, 2, 3]);
+      ctx.beginPath(); ctx.moveTo(x0, yAt(x0)); ctx.lineTo(x1, yAt(x1)); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+      surfaceTag(ctx, 'box ID nhỏ', x0 + 4, yAt(x0) - 2, 'above', '#e67e22');
     }
     if (ground !== null && view !== 'top') {
       // mặt đường ước lượng (xanh lá nét đứt) để so với đáy box
