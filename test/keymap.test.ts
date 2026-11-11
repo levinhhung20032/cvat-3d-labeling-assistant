@@ -25,7 +25,7 @@ describe('keymap', () => {
     expect(actionFor(m, 'k')).toBe('kf.toggle');
     expect(actionFor(m, '=')).toBe('zoom.in');
     expect(actionFor(m, 'ctrl+z')).toBe('undo');
-    expect(actionFor(m, 'q')).toBeNull();
+    expect(actionFor(m, 'j')).toBeNull();
   }
     {
     const r = assign(defaultKeymap(), 'kf.toggle', 'ctrl+z');
@@ -36,9 +36,9 @@ describe('keymap', () => {
   });
   it("gán thêm phím cho cùng action không tính là lấy phím · bỏ phím và đọc dữ liệu lưu hỏng", () => {
     {
-    const r = assign(defaultKeymap(), 'kf.toggle', 'q');
+    const r = assign(defaultKeymap(), 'kf.toggle', 'j');
     expect(r.stolenFrom).toBeNull();
-    expect(r.map['kf.toggle']).toEqual(['k', 'q']);
+    expect(r.map['kf.toggle']).toEqual(['k', 'j']);
   }
     {
     expect(unassign(defaultKeymap(), 'zoom.in', '=')['zoom.in']).toEqual(['+']);

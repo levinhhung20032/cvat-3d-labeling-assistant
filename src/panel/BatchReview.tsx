@@ -41,6 +41,7 @@ import { sym, symLabel, useSymbols } from './symbolStore';
 import { findLateStart, findLongOutsideGaps, SPLIT_OUTSIDE_FRAMES, type OutsideGap } from '../shared/splitId';
 import { useColors } from './colorStore';
 import { useFrameLayout } from './layoutStore';
+import { View3D, type View3dOther } from './View3D';
 import { clientIdOf } from './cvatIds';
 import { adviseGround, type GroundAdvice } from '../shared/groundSuggest';
 import { confirmSnap, DEFAULT_GROUND, egoGround, levelGround, neighborGroundZ, enforceConsistency, GROUND_KINDS, groundSnap, groundSnapBy, pwGroundPlane, type ConsistencyItem, tiltFromPlane, type GroundKind, type GroundResult, type GroundSector } from '../shared/ground';
@@ -1408,6 +1409,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
     () => onAction((id) => {
       const cs = cols.map((c) => c.f);
       switch (id) {
+        case 'view3d.toggle': if (!refView) toggle3dRef.current(); break;
         case 'win.next': setK((x) => Math.min(nWin - 1, x + 1)); break;
         case 'win.prev': setK((x) => Math.max(0, x - 1)); break;
         case 'win.first': setK(0); break;
@@ -1449,6 +1451,29 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
 
   if (!track) return <p>Job chưa có object.</p>;
   const selCol = cols.find((c) => c.f === selFrame) ?? null;
+  // View 3D (cửa sổ phụ): object + frame đang chọn (chưa chọn frame thì frame đầu có box của cửa sổ); theo frame chọn khi đang mở.
+  const [view3d, setView3d] = useState(false);
+  const v3Frame = selFrame ?? cols.find((c) => c.st.cuboid)?.f ?? null;
+  const v3Cub = track && v3Frame !== null ? stateAt(track, v3Frame).cuboid : null;
+  const v3Status = track && v3Frame !== null ? stateAt(track, v3Frame).status : 'none';
+  const v3Others = useMemo<View3dOther[]>(() => {
+    if (!view3d || v3Frame === null) return [];
+    const out: View3dOther[] = [];
+    ann.tracks.forEach((t, i) => {
+      if (i === num - 1) return;
+      const c = stateAt(t, v3Frame).cuboid;
+      if (c) out.push({ num: i + 1, id: clientIdOf(ann.tracks, i + 1), label: '', cub: c });
+    });
+    return out;
+  }, [view3d, v3Frame, ann, num]);
+  const toggle3d = () => {
+    if (view3d) { setView3d(false); return; }
+    if (!v3Cub) { setNote('View 3D: object này không có box ở frame đang chọn (hãy chọn một frame có box).'); return; }
+    setView3d(true);
+  };
+  const toggle3dRef = useRef(toggle3d);
+  toggle3dRef.current = toggle3d;
+  useEffect(() => { if (view3d && !v3Cub) setView3d(false); }, [view3d, v3Cub]); // frame đang chọn không còn box: đóng
   const az = selCol?.ref ? azimuthDeg(selCol.ref) : null;
   /** Một cột frame (lưới Batch Review và hai cột của tab Ref dùng chung). */
   const colEl = (c: (typeof cols)[number], key: string, sz: number, extra: { refl?: RefState | null; onBelow?: (f: number, n: number) => void; onRefPlane?: (f: number, d: number | null) => void; half?: number; locHalf?: number; horizontal?: boolean; hideGroundPick?: boolean } = {}) => (
@@ -1562,6 +1587,12 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
         setBindMenu({ id, x: e.clientX - (b?.left ?? 0), y: e.clientY - (b?.top ?? 0) });
       }}
     >
+      {view3d && v3Cub && v3Frame !== null && (
+        <View3D
+          num={num} id={clientIdOf(ann.tracks, num)} label={row?.label ?? ''} frame={v3Frame} cub={v3Cub} status={v3Status} others={v3Others}
+          onClose={() => setView3d(false)}
+        />
+      )}
       {/* Nhóm điều khiển: người dùng tự sắp (kéo ⠿ ở tiêu đề để chuyển nhóm, kéo vạch để đổi rộng / cao), xem ControlLayout.
           Mặc định 3 hàng (chủ dự án 2026-10-30): Keyframe & kích thước + Outside · Gợi ý & mặt đất + QC · Object & cửa sổ + Hiển thị. */}
       <ControlLayout groups={{
@@ -1716,6 +1747,9 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
           <span>
             <IdBox value={num} max={max} onCommit={pickId} />{' '}
             <button disabled={!canBack} onClick={goBack} title={hint('obj.back', canBack ? `Về object #${back!.num} vừa xem (cửa sổ từ frame ${back!.at})` : 'Về object xem trước đó (chưa có)')}>↶</button>
+          </span>
+          <span>
+            <button onClick={toggle3d} aria-pressed={view3d} title={hint('view3d.toggle', 'Mở / đóng cửa sổ 3D (70% màn hình, nền mờ) xoay được quanh box của object ở frame đang chọn (chỉ point trong bán kính đặt ở Cài đặt › Hiển thị, kèm box các object khác)')}>🧊 3D</button>
           </span>
           <span>
             <label title={`Reflection mode cho riêng object #${num}: dựng box ảo đối xứng với box qua mặt phản chiếu (mặc định mặt dưới box) và gộp điểm phản chiếu vào box chính để hình vật nét hơn. Bật thì có tab Ref cạnh tab Batch Review.`} style={{ fontWeight: 600 }}>

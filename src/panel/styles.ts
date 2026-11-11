@@ -111,6 +111,8 @@ body { margin: 0; }
 /* Hộp xác nhận */
 .cvla-modal-back { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; padding: 16px; }
 .cvla-modal { background: #fff; color: #111; border-radius: 10px; padding: 14px 16px; max-width: 520px; width: 100%; box-shadow: 0 10px 40px rgba(0,0,0,.4); display: flex; flex-direction: column; gap: 10px; }
+.cvla-v3-back { background: rgba(0,0,0,.35); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); z-index: 120; }
+.cvla-v3 { width: 70vw; height: 70vh; box-sizing: border-box; background: #fff; color: #111; border-radius: 10px; padding: 8px 10px; box-shadow: 0 10px 40px rgba(0,0,0,.5); display: flex; flex-direction: column; }
 .cvla-modal-title { font-size: 15px; }
 .cvla-modal-msg { white-space: pre-wrap; max-height: 50vh; overflow: auto; }
 .cvla-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }

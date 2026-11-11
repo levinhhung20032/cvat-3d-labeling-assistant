@@ -27,6 +27,7 @@ export const ACTIONS: ActionDef[] = [
   { id: 'zoom.out', label: 'Thu nhỏ', defaults: ['-'] },
   { id: 'zoom.reset', label: 'Zoom về vừa object', defaults: ['0'] },
   { id: 'view.center', label: '⌖ Về giữa: đưa khung nhìn (đã dời bằng chuột phải) về giữa box', defaults: [] },
+  { id: 'view3d.toggle', label: 'View 3D: mở / đóng cửa sổ 3D quanh box của object ở frame đang chọn', defaults: ['q'] },
   { id: 'ref.toggle', label: 'Reflection mode: chuyển qua lại giữa Batch Review và trang Ref (chưa bật ref cho object đang chọn thì bật luôn)', defaults: ['r'] },
   { id: 'table.nextFlag', label: 'Bảng object: nhảy tới object có flag tiếp theo (chọn và cuộn tới dòng đó)', defaults: ['n'] },
   { id: 'ids.remap', label: 'Lấy ID từ CVAT: đọc ID hiển thị hiện tại của từng object trong CVAT (sau khi tạo / xóa object ở CVAT) và cập nhật bảng object', defaults: ['shift+r'] },

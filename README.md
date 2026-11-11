@@ -56,6 +56,10 @@ Tab **Màu sắc** chỉnh: màu point (cố định hoặc theo độ cao), mà
 
 Cài đặt → **Hiển thị** chọn cách Batch Review xếp các frame: **Ngang** (mặc định: mỗi frame một cột, 3 view Trên / Bên / Trước xếp dọc) hoặc **Dọc** (mỗi frame một hàng, 3 view nằm ngang, cỡ ô tự khớp chiều rộng và trang cuộn dọc). Đổi là áp ngay, chỉ là cách hiển thị.
 
+## View 3D (cửa sổ phụ)
+
+Ở Batch Review, nút **🧊 3D** (nhóm *Object & cửa sổ*) hoặc phím `Q` mở một **cửa sổ phụ** nổi trong trang (không phải tab; chiếm 70% màn hình, căn giữa, nền phía sau làm mờ) hiện không gian 3D quanh box của object ở **frame đang chọn**: chỉ point trong bán kính quanh tâm box, kèm box và ID các object khác. Kéo chuột để xoay, lăn để zoom, bấm đúp để về góc mặc định; bấm ra vùng mờ, Esc hoặc `Q` để đóng. Bán kính (mặc định 15 m) và cỡ điểm chỉnh ở Cài đặt › **Hiển thị**. Mặc định không mở; chỉ để xem, không đổi nhãn. Cửa sổ nằm trong trang nên không bị chặn popup.
+
 ## Threshold (ngưỡng cảnh báo)
 
 Tool **không kèm sẵn con số ngưỡng nào**. Mỗi loại lỗi là một danh sách **rule** do bạn đặt; chưa có rule thì lỗi đó không được báo. Mỗi rule chọn bằng 4 ô:
@@ -121,6 +125,7 @@ Ví dụ một tab `Matrix` hợp lệ (số liệu minh hoạ tự tạo):
 | `O` | Đánh dấu outside / đưa object trở lại |
 | `G` | Đáy box chạm mặt đường |
 | `A` / `I` | Chấp nhận / bỏ qua gợi ý sửa box |
+| `Q` | Mở / đóng cửa sổ View 3D quanh box đang chọn |
 | `R` | Reflection mode: chuyển qua lại giữa Batch Review và trang Ref (chưa bật ref cho object đang chọn thì bật luôn) |
 | `F` | Thu nhỏ tool, zoom cận cảnh object trong CVAT |
 | `Ctrl+Z` `Ctrl+Y` | Hoàn tác / làm lại |
