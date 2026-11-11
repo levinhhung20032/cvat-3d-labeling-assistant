@@ -14,9 +14,10 @@ interface LastInfo { time: string; tracks: number; reverted: boolean; verified: 
  * Màn hình xem lại trước khi upload. Mặc định là CHẠY THỬ (kiểm tra xung đột và luật, không gửi gì).
  * Ghi thật chỉ khi bạn tick xác nhận rồi bấm "Gửi lên CVAT". Chỉ gửi lệnh update, không bao giờ delete.
  */
-export function UploadDialog({ baseline, working, job, labels, onClose, onReload, onUploaded, onBeforeReload }: {
+export function UploadDialog({ baseline, working, job, labels, onClose, onReload, onUploaded, onBeforeReload, onIgnoreFlags }: {
   baseline: CvatAnnotations; working: CvatAnnotations; job: CvatJob; labels: CvatLabel[];
   onClose: () => void; onReload: () => void; onUploaded: (tracks: ShiftTrackRec[]) => void;
+  onIgnoreFlags: (nums: number[]) => void; // tick "bỏ qua toàn bộ flag": sau upload thành công, bỏ qua mọi flag của các object vừa upload
   onBeforeReload: () => void; // ngay trước khi tải lại tab CVAT: ghi lại chỗ đang làm để tool mở lại đúng chỗ
 }) {
   const root = useRef<HTMLDivElement>(null);
@@ -26,6 +27,7 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
   const [bake, setBake] = useState(true);
   const [includeOthers, setIncludeOthers] = useState(false);
   const [okTilt, setOkTilt] = useState(false);
+  const [ignoreFlags, setIgnoreFlags] = useState(false); // chỉ áp cho lần upload này, mặc định tắt
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<UploadResult | null>(null);
   const [last, setLast] = useState<LastInfo | null>(null);
@@ -69,6 +71,7 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
     setResult(r);
     if (r.sent && r.createdIds?.length) madeStore.add(job.id, r.createdIds); // ghi vào sổ object do tool tạo (chỉ những ID này xóa được bằng tool)
     if (real && r.ok && r.sent && r.stage === 'done') {
+      if (ignoreFlags) onIgnoreFlags(plan.diffs.map((d) => d.index + 1));
       // ghi nhận vào KPI của ca (nếu đang trong ca)
       onUploaded(plan.diffs.map((d, i) => ({
         num: d.index + 1, id: d.id, label: names.get(working.tracks[d.index]!.label_id) ?? '?',
@@ -166,6 +169,14 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
         </p>
       )}
 
+      {plan.changed.length > 0 && (
+        <p style={{ margin: '6px 0' }}>
+          <label>
+            <input type="checkbox" checked={ignoreFlags} onChange={(e) => setIgnoreFlags(e.target.checked)} />{' '}
+            Sau khi upload thành công, <b>bỏ qua toàn bộ flag</b> của {plan.changed.length} object vừa upload (D, ít điểm, đi xa bất thường, lỗi luật, trôi box, chồng lấn). Chỉ ẩn cảnh báo trong tool, không đổi dữ liệu nhãn; hoàn lại từng mục ở Batch Review.
+          </label>
+        </p>
+      )}
       <div style={{ margin: '8px 0', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         <button
           disabled={!canSend} onClick={() => run(true)}

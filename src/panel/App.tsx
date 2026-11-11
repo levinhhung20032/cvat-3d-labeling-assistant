@@ -770,7 +770,7 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
   // ---- Menu chuột phải ở bảng object: tác động lên đúng object của dòng được bấm ----
   /** Các frame cảnh báo của một object: đi xa (lỗi D), đi xa bất thường (Y), ít điểm, lỗi luật QC, trôi box, chồng lấn (không tính cái đã bỏ qua). */
   const objectFlags = (num: number): ObjFlags => {
-    const none: ObjFlags = { far: [], motion: [], sparse: [], mid: [], rules: [], first: null, pending: false };
+    const none: ObjFlags = { far: [], motion: [], sparse: [], mid: [], rules: [], drift: [], overlapWith: [], first: null, pending: false };
     if (!data || !work) return none;
     const t = work.tracks[num - 1];
     if (!t) return none;
@@ -803,7 +803,7 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
       }
     }
     cand.sort((x, y) => x.frame - y.frame);
-    return { far: far.sort((x, y) => x - y), motion, sparse, mid: sparse.filter((f) => midFrames.has(f)), rules: [...rules].map(([k, fr]) => [k, fr.sort((x, y) => x - y)] as [string, number[]]), first: cand[0] ?? null, pending: passView.incomplete.has(num) };
+    return { far: far.sort((x, y) => x - y), motion, sparse, mid: sparse.filter((f) => midFrames.has(f)), rules: [...rules].map(([k, fr]) => [k, fr.sort((x, y) => x - y)] as [string, number[]]), drift: (drift.get(num) ?? []).map((x) => x.f), overlapWith: [...new Set(overlaps.filter((o) => o.a === num || o.b === num).map((o) => (o.a === num ? o.b : o.a)))], first: cand[0] ?? null, pending: passView.incomplete.has(num) };
   };
   /** Outside toàn bộ frame đã gắn cờ (đi xa = lỗi D / ít điểm) của một object: gom thành các đoạn liên tiếp, hoàn tác được. */
   /** Bỏ qua cảnh báo ít điểm (P) ở các frame nằm giữa hai frame ổn của một object (menu chuột phải bảng object). */
@@ -861,6 +861,22 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
     dispatch({ t: 'track', idx: num - 1, track: cur, frames: [...changed] });
     shiftStore.edit(data.job.id, num);
     setToast(`Object #${num}: đã đặt outside ${frames.length} frame ${what} (${runs.length} đoạn). Hoàn tác ở ô Nháp.`);
+  };
+  /** Bỏ qua TOÀN BỘ flag đang báo của một object: D, ít điểm, Y, lỗi luật, trôi box, chồng lấn (cặp với object khác). Không gồm "lệch" (cần point cloud, bỏ qua ở Batch Review). Trả số mục đã bỏ qua. */
+  const ignoreAllFlags = (num: number, quiet = false): number => {
+    if (!data) return 0;
+    const jid = data.job.id;
+    const fl = objectFlags(num);
+    const keys = new Set<string>();
+    for (const f of fl.far) keys.add(issueKey(jid, num, f, 'D'));
+    for (const f of fl.sparse) keys.add(issueKey(jid, num, f, 'P'));
+    for (const f of fl.motion) keys.add(motionKey(jid, num, f));
+    for (const [k, frs] of fl.rules) for (const f of frs) keys.add(issueKey(jid, num, f, k));
+    for (const f of fl.drift) keys.add(issueKey(jid, num, f, 'T'));
+    for (const o of fl.overlapWith) keys.add(overlapKey(jid, num, o));
+    if (keys.size) ignoreStore.set([...keys], true);
+    if (!quiet) setToast(keys.size ? `Object #${num}: đã bỏ qua toàn bộ flag (${keys.size} mục). Hoàn lại từng mục ở Batch Review.` : `Object #${num}: không có flag nào để bỏ qua.`);
+    return keys.size;
   };
   /** Bỏ qua một loại lỗi ở mọi frame đang báo của MỘT object (menu lỗi ở bảng object): 'far' = D, 'sparse' = P, hoặc mã lỗi luật. Hoàn lại từng frame ở Batch Review. */
   const ignoreKind = (num: number, kind: string) => {
@@ -1117,6 +1133,7 @@ Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', dange
         <UploadDialog
           baseline={data.ann} working={work} job={data.job} labels={data.labels}
           onClose={() => setUploading(false)} onBeforeReload={saveResume}
+          onIgnoreFlags={(nums) => { const n = nums.reduce((s, num) => s + ignoreAllFlags(num, true), 0); if (n) setToast(`Đã bỏ qua toàn bộ flag của ${nums.length} object vừa upload (${n} mục).`); }}
           onUploaded={(tracks) => {
             // đã lên CVAT thì không còn là nháp: xóa ngay để lần nạp lại / F5 không hiện lại "bản nháp chưa upload"
             kv.remove(draftKey(data.job.id)); restorableRef.current = null; setRestorable(null);
@@ -1200,7 +1217,7 @@ Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', dange
       )}
       {data && work && tab === 'objects' && (
         <ObjectTable
-          jobId={data.job.id} locked={lockedIds} onLock={lockBaseline} onUnlock={unlockBaseline} onRelocate={(n) => { void relocateLate(n); }} onDelete={deleteMade} flagsOf={objectFlags} onOutside={(n, k) => { void outsideFlagged(n, k); }} onAcceptHints={acceptHints} onIgnoreMotion={ignoreMotionAll} onIgnoreKind={ignoreKind} onIgnoreMid={ignoreMid} onOpenAt={openAtFrame} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs} incomplete={passView.incomplete}
+          jobId={data.job.id} locked={lockedIds} onLock={lockBaseline} onUnlock={unlockBaseline} onRelocate={(n) => { void relocateLate(n); }} onDelete={deleteMade} flagsOf={objectFlags} onOutside={(n, k) => { void outsideFlagged(n, k); }} onAcceptHints={acceptHints} onIgnoreMotion={ignoreMotionAll} onIgnoreKind={ignoreKind} onIgnoreAll={(n) => { ignoreAllFlags(n); }} onIgnoreMid={ignoreMid} onOpenAt={openAtFrame} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs} incomplete={passView.incomplete}
           tracks={work.tracks} labels={data.labels} start={data.job.start_frame} stop={data.job.stop_frame} cvatFrame={focus?.frame ?? null}
           selectedNum={selectedNum} onSelect={selectFromTool}
           onOpen={(num) => {

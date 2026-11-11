@@ -37,15 +37,16 @@ const issueTip = (by: Record<string, number>) => {
 };
 
 /** Cờ cảnh báo của một object (tính khi mở menu chuột phải): frame đi xa (lỗi D), frame ít điểm, và cờ sớm nhất (kind: motion / sparse / drift / overlap hoặc mã lỗi luật). */
-export interface ObjFlags { far: number[]; motion: number[]; sparse: number[]; mid: number[]; rules: [string, number[]][]; first: { frame: number; kind: string } | null; pending: boolean }
+export interface ObjFlags { far: number[]; motion: number[]; sparse: number[]; mid: number[]; rules: [string, number[]][]; drift: number[]; overlapWith: number[]; first: { frame: number; kind: string } | null; pending: boolean }
 
-export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flagsOf, onIgnoreKind, onOutside, onAcceptHints, onIgnoreMotion, onIgnoreMid, onOpenAt, rows, hints, overlapFrames, overlapPairs, onOpen, onSelect, selectedNum, onDelete, incomplete, tracks, labels: jobLabels, start, stop, cvatFrame }: {
+export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flagsOf, onIgnoreKind, onIgnoreAll, onOutside, onAcceptHints, onIgnoreMotion, onIgnoreMid, onOpenAt, rows, hints, overlapFrames, overlapPairs, onOpen, onSelect, selectedNum, onDelete, incomplete, tracks, labels: jobLabels, start, stop, cvatFrame }: {
   jobId: number;
   locked: readonly number[] | null; onLock: () => void; onUnlock: () => void; // khóa danh sách ID gốc (không xóa được)
   onRelocate: (num: number) => void; // thêm outside phía trước cho object xuất hiện muộn (giữ ID)
   flagsOf: (num: number) => ObjFlags; // menu chuột phải: cờ cảnh báo của object
   onOutside: (num: number, kind: 'far' | 'sparse') => void; // outside toàn bộ frame đi xa (lỗi D) / ít điểm của object
   onAcceptHints: (num: number) => void; // chấp nhận mọi gợi ý attribute của object
+  onIgnoreAll: (num: number) => void; // bỏ qua toàn bộ flag của object
   onIgnoreKind: (num: number, kind: string) => void; // bỏ qua một loại lỗi ở mọi frame của object: 'far' (D), 'sparse' (ít điểm P) hoặc mã lỗi luật
   onIgnoreMid: (num: number) => void; // bỏ qua cảnh báo ít điểm (P) ở các frame nằm giữa hai frame ổn của object
   onIgnoreMotion: (num: number) => void; // bỏ qua lỗi đi xa bất thường (Y) ở mọi frame của object
@@ -287,6 +288,7 @@ export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flags
         const first = fl.first;
         const kindText = first ? (first.kind === 'motion' ? 'đi xa bất thường' : first.kind === 'sparse' ? 'ít điểm' : first.kind === 'drift' ? 'trôi box' : first.kind === 'overlap' ? 'chồng lấn' : `lỗi ${symLabel(first.kind)}`) : '';
         const nHints = h(row);
+        const nFlags = fl.far.length + fl.sparse.length + fl.motion.length + fl.rules.reduce((s, [, fr]) => s + fr.length, 0) + fl.drift.length + fl.overlapWith.length;
         const wrapW = wrapRef.current?.getBoundingClientRect().width ?? 600;
         const flip = Math.min(ctx.x, wrapW - 280) + 280 + 230 > wrapW; // không đủ chỗ bên phải: menu con mở sang trái
         type Act = { label: string; title: string; run: () => void };
@@ -315,6 +317,7 @@ export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flags
             <div className="cvla-menu cvla-ctxmenu" role="menu" aria-label={`Menu object ${row.num}`} style={{ left: Math.max(0, Math.min(ctx.x, wrapW - 280)), top: ctx.y, right: 'auto' }}>
               <h4>Object #{row.num} · {row.label}</h4>
               <h4>Lỗi (rê chuột vào lỗi để chọn xử lý)</h4>
+              <button role="menuitem" disabled={nFlags === 0} onClick={run(() => onIgnoreAll(row.num))} title="Bỏ qua mọi flag đang báo của object này: lỗi D, ít điểm, đi xa bất thường, lỗi luật, trôi box, chồng lấn (không gồm cảnh báo lệch; hoàn lại từng mục ở Batch Review)">🚫 Bỏ qua toàn bộ flag ({nFlags})</button>
               {errs.length === 0 && <div style={{ fontSize: 12, color: '#777', padding: '2px 4px' }}>Không có lỗi nào đang báo</div>}
               {errs.map((er) => (
                 <div key={er.key} style={{ position: 'relative' }} onMouseEnter={() => setSub(er.key)}>
