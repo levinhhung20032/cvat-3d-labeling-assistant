@@ -22,3 +22,20 @@ describe('ký hiệu lỗi', () => {
     expect(SYMBOL_DEFAULTS.M).toBe('Y');
   });
 });
+
+describe('ký hiệu lỗi NULL (trôi box, đáy lơ lửng / chìm, outside liên tục)', () => {
+  it('mặc định rỗng, điền được 1–3 ký tự, để trống là NULL', () => {
+    for (const k of ['T', 'G', 'X'] as const) {
+      expect(symbolOf({}, k)).toBe('');
+      expect(validSymbol({}, k, '')).toBe(true);
+      expect(validSymbol({}, k, 'T1')).toBe(true);
+      expect(validSymbol({ [k]: 'Q' }, k, '')).toBe(true);
+    }
+    expect(validSymbol({}, 'K', '')).toBe(false); // mã có sẵn không được để trống
+    expect(validSymbol({}, 'G', 'K')).toBe(false); // trùng mã khác
+    expect(symbolOf({ G: 'LL' }, 'G')).toBe('LL');
+  });
+  it('đọc dữ liệu lưu: nhận mã mới, bỏ giá trị rỗng', () => {
+    expect(parseSymbols({ T: 'TB', G: '', X: 'X1' })).toEqual({ T: 'TB', X: 'X1' });
+  });
+});

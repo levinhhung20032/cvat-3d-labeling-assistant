@@ -40,6 +40,7 @@ import { thresholdStore, useThresholdVersion } from './thresholdStore';
 import { sym, symLabel, useSymbols } from './symbolStore';
 import { findLateStart, findLongOutsideGaps, SPLIT_OUTSIDE_FRAMES, type OutsideGap } from '../shared/splitId';
 import { useColors } from './colorStore';
+import { useFrameLayout } from './layoutStore';
 import { clientIdOf } from './cvatIds';
 import { adviseGround, type GroundAdvice } from '../shared/groundSuggest';
 import { confirmSnap, DEFAULT_GROUND, egoGround, levelGround, neighborGroundZ, enforceConsistency, GROUND_KINDS, groundSnap, groundSnapBy, pwGroundPlane, type ConsistencyItem, tiltFromPlane, type GroundKind, type GroundResult, type GroundSector } from '../shared/ground';
@@ -350,8 +351,9 @@ const CHIP_BTN: React.CSSProperties = { padding: '0 3px', lineHeight: 1, height:
 interface FileFlag { kind: IssueKind; state: FlagState; msg?: string; det: boolean }
 const NO_FLAGS: FileFlag[] = [];
 
-function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, advise, onAdvice, pwShow = false, groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, overlayNums, onCommitOther, ignoredOverlap, onRestoreOverlap, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan, refl = null, onBelow, onRefPlane, horizontal = false }: {
-  horizontal?: boolean; // tab Ref: 3 view Trên | Bên | Trước xếp ngang
+function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, advise, onAdvice, pwShow = false, groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, overlayNums, onCommitOther, ignoredOverlap, onRestoreOverlap, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan, refl = null, onBelow, onRefPlane, horizontal = false, hideGroundPick = false }: {
+  hideGroundPick?: boolean; // tab Ref: ẩn ô chọn mặt đường (có ô riêng)
+  horizontal?: boolean; // 3 view Trên | Bên | Trước xếp ngang (tab Ref, hoặc bố cục frame dọc): 3 view Trên | Bên | Trước xếp ngang
   pwShow?: boolean; // hiện mặt đường Patchwork++ gợi ý (vạch tím) ở view Bên / Trước
   kind: GroundKind; onKind: (f: number, k: GroundKind) => void; // nguồn mặt đường của RIÊNG frame này (đổi ở frame khác không đụng tới)
   showAll: boolean; // hiện cả 3 mặt đường để so sánh (snap / lock vẫn chỉ dùng nguồn đã chọn)
@@ -560,7 +562,7 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
         title={box ? `Dài × rộng × cao của box ở frame ${f} (m)` : undefined}
       >
         <span style={{ flex: '1 0 auto', whiteSpace: 'nowrap' }}>{box ? <>L×W×H <b>{box.sx.toFixed(2)} × {box.sy.toFixed(2)} × {box.sz.toFixed(2)}</b> m</> : ''}</span>
-        {!horizontal && <GroundPick kind={kind} onChange={(k) => onKind(f, k)} title={`Mặt đường của RIÊNG frame ${f} (đổi ở frame khác không ảnh hưởng frame này). Ground snap / lock dùng mặt đường này.`} />}
+        {!hideGroundPick && <GroundPick kind={kind} onChange={(k) => onKind(f, k)} title={`Mặt đường của RIÊNG frame ${f} (đổi ở frame khác không ảnh hưởng frame này). Ground snap / lock dùng mặt đường này.`} />}
       </div>
       {/* Lỗi & gợi ý ở ĐẦU cột, dạng chip một dòng, vùng cao cố định nên các cột không bao giờ lệch hàng; chi tiết ở dưới các view. */}
       <div style={{ height: 40, overflow: 'hidden', display: 'flex', flexWrap: 'wrap', alignContent: 'flex-start', gap: 2, padding: '2px 2px 0', background: '#fafafa' }}>
@@ -998,8 +1000,10 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
 
   // Cỡ ô: tự khớp độ phân giải màn hình (đủ rộng cho 6 cột và đủ cao cho 3 hàng), hoặc chỉnh tay.
   const cols6 = Math.min(8, Math.max(2, prefs.perWin));
-  const fitW = Math.floor((vp.w - 24 - (cols6 - 1) * prefs.gap) / cols6 - 6);
-  const fitH = Math.floor((vp.h - 190) / 3);
+  const layout = useFrameLayout();
+  const rowsV = layout === 'v'; // frame xếp dọc: mỗi frame một hàng, 3 view nằm ngang
+  const fitW = rowsV ? Math.floor((vp.w - 60 - 2 * VIEW_GAP) / 3) : Math.floor((vp.w - 24 - (cols6 - 1) * prefs.gap) / cols6 - 6);
+  const fitH = rowsV ? CELL_MAX : Math.floor((vp.h - 190) / 3);
   const size = prefs.auto ? Math.min(CELL_MAX, Math.max(CELL_MIN, Math.min(fitW, fitH))) : prefs.size;
 
   const baseHalf = useMemo(() => {
@@ -1447,9 +1451,9 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
   const selCol = cols.find((c) => c.f === selFrame) ?? null;
   const az = selCol?.ref ? azimuthDeg(selCol.ref) : null;
   /** Một cột frame (lưới Batch Review và hai cột của tab Ref dùng chung). */
-  const colEl = (c: (typeof cols)[number], key: string, sz: number, extra: { refl?: RefState | null; onBelow?: (f: number, n: number) => void; onRefPlane?: (f: number, d: number | null) => void; half?: number; locHalf?: number; horizontal?: boolean } = {}) => (
+  const colEl = (c: (typeof cols)[number], key: string, sz: number, extra: { refl?: RefState | null; onBelow?: (f: number, n: number) => void; onRefPlane?: (f: number, d: number | null) => void; half?: number; locHalf?: number; horizontal?: boolean; hideGroundPick?: boolean } = {}) => (
     <Column
-      key={key} nbrZ={nbrZs.get(c.f) ?? null} midSparse={midSet.has(c.f)} pIgnored={ign.has(issueKey(job.id, num, c.f, 'P'))} onIgnoreP={(f, on) => ignoreStore.set([issueKey(job.id, num, f, 'P')], on)} f={c.f} size={sz} st={c.st} refCub={c.ref} half={extra.half ?? half} locHalf={extra.locHalf ?? locHalf} horizontal={extra.horizontal} selected={selFrame === c.f} pan={panEff} onPan={setPanClamped}
+      key={key} nbrZ={nbrZs.get(c.f) ?? null} midSparse={midSet.has(c.f)} pIgnored={ign.has(issueKey(job.id, num, c.f, 'P'))} onIgnoreP={(f, on) => ignoreStore.set([issueKey(job.id, num, f, 'P')], on)} f={c.f} size={sz} st={c.st} refCub={c.ref} half={extra.half ?? half} locHalf={extra.locHalf ?? locHalf} horizontal={extra.horizontal} hideGroundPick={extra.hideGroundPick} selected={selFrame === c.f} pan={panEff} onPan={setPanClamped}
       edited={edited.has(`${num}:${c.f}`)} warn={warn} fixed={!dyn} ignored={ign.has(ignoreKey(job.id, num, c.f))}
       onIgnore={(f, on) => ignoreFrames([f], on)}
       motion={c.mot} motionIgnored={ign.has(motionKey(job.id, num, c.f))}
@@ -1471,7 +1475,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
     const fitSize = Math.max(CELL_MIN, Math.min(REF_CELL_MAX, Math.floor((vp.w - 80 - 2 * VIEW_GAP) / 3), Math.floor((vp.h - 260) / rows) - 70));
     const refSize = refPrefs.auto ? fitSize : refPrefs.size;
     const refHalf = half * refSize / REF_BASE; // cùng tỉ lệ px / m: ô to hơn = tầm nhìn rộng hơn
-    const refGeo = { half: refHalf, locHalf: Math.max(locHalf, refHalf * 1.2), horizontal: true };
+    const refGeo = { half: refHalf, locHalf: Math.max(locHalf, refHalf * 1.2), horizontal: true, hideGroundPick: true };
     const resizeTo = (v: number, save: boolean) => {
       const p = { ...refPrefs, auto: false, size: Math.round(Math.min(REF_CELL_MAX, Math.max(CELL_MIN, v))) };
       if (save) setRefPrefs(p); else setRefPrefsState(p);
@@ -1817,8 +1821,8 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
       <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>
         Mẹo thao tác <Help text={`phím tắt khoá KF / outside / ground snap / chấp nhận / bỏ qua gợi ý (${['kf.toggle', 'outside.from', 'ground.snap', 'suggest.accept', 'suggest.ignore'].map((id) => keyOf(id) ?? 'chưa gán').join(' / ')}) tác dụng lên cột frame đang trỏ chuột (viền xanh) · rê chuột lên nút để xem phím tắt, đổi phím ở tab "Phím tắt" · cuộn chuột trên ô để zoom mọi frame · giữ chuột phải rồi kéo để dời khung nhìn (mọi frame cùng dời), nút ⌖ Về giữa để đưa về giữa ·` + " kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo để xoay (giữ thêm CTRL = xoay frame này và TẤT CẢ keyframe phía sau) · CTRL+kéo trong box = dời frame này và TẤT CẢ keyframe phía sau cùng độ lệch · CTRL+kéo cạnh / góc = đổi kích thước frame này và TẤT CẢ keyframe phía sau (nguồn mặt đường \"box ID nhỏ\" lấy đáy các box có ID nhỏ hơn trong 5 m) (view Trên: yaw · view Bên: pitch · view Trước: roll, nếu bật \"nghiêng theo mặt đường\") · sửa frame nào thì frame đó thành keyframe"} />
       </div>
-      <div style={{ display: 'flex', gap: prefs.gap, overflowX: 'auto', justifyContent: 'safe center', padding: '2px 4px 6px' }}>
-        {cols.map((c) => colEl(c, String(c.f), size, { onBelow: !refS.on && !refS.dismissed ? reportBelow : undefined }))}
+      <div style={{ display: 'flex', flexDirection: rowsV ? 'column' : 'row', gap: prefs.gap, overflowX: 'auto', justifyContent: 'safe center', alignItems: rowsV ? 'safe center' : undefined, padding: '2px 4px 6px' }}>
+        {cols.map((c) => colEl(c, String(c.f), size, { onBelow: !refS.on && !refS.dismissed ? reportBelow : undefined, horizontal: rowsV }))}
       </div>
       <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>
         Viền: <span style={{ color: statusColor('key') }}>■ keyframe</span> <span style={{ color: statusColor('interp') }}>■ nội suy</span>{' '}

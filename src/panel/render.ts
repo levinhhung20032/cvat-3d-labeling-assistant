@@ -166,15 +166,18 @@ export function drawView(
   const solid = ps?.color ?? null;
   const dot = Math.max(1.5, size / 110) * (ps?.scale ?? 1);
   const [ox, oy] = panOffset(view, pan, k);
+  const inRgb = colors.pointIn ? hexRgb(colors.pointIn) : null; // điểm trong box tô màu riêng (tab Màu sắc); '' = tắt
+  const bcs = box ? Math.cos(box.dyaw) : 1, bsn = box ? Math.sin(box.dyaw) : 0;
   // GPU (WebGL) nếu có: chiếu, cắt lát, tô màu và tô hồng điểm lọt ngoài box đều làm trong shader; không thì vẽ bằng canvas 2D như cũ.
   const gpuDone = !!loc && drawPointsGpu(ctx, loc, {
     view: view === 'top' ? 0 : view === 'side' ? 1 : 2, size, half, zClip: scene.zClip, slab: scene.slab, slabFront: scene.slabFront ?? scene.slab,
-    colorHalf: scene.colorHalf, dot, pan: [pan.u, pan.v, pan.w], color: solid ? hexRgb(solid) : null, alpha, misfit: misfit && box && box.dyaw === 0 ? { cu: box.cu, cv: box.cv, cw: box.cw, sx: box.sx, sy: box.sy, sz: box.sz } : null,
+    colorHalf: scene.colorHalf, dot, pan: [pan.u, pan.v, pan.w], color: solid ? hexRgb(solid) : null, alpha, inBox: inRgb && box ? { cu: box.cu, cv: box.cv, cw: box.cw, sx: box.sx, sy: box.sy, sz: box.sz, dyaw: box.dyaw, color: inRgb } : null, misfit: misfit && box && box.dyaw === 0 ? { cu: box.cu, cv: box.cv, cw: box.cw, sx: box.sx, sy: box.sy, sz: box.sz } : null,
   });
   ctx.globalAlpha = alpha;
   if (loc && !gpuDone) {
     const buckets: number[][] = Array.from({ length: BUCKETS }, () => []);
     const shell: number[] = [];
+    const inside: number[] = [];
     for (let i = 0; i < loc.n; i++) {
       // loc được lọc ở phạm vi lớn nhất. Hai trục lên màn hình chỉ bị cắt theo khung nhìn (zoom); trục còn lại
       // (độ cao ở view Trên, bề dày lát cắt ở view Bên / Trước) dùng ngưỡng CỐ ĐỊNH theo object, không đổi theo zoom.
@@ -186,12 +189,17 @@ export function drawView(
         const dw = loc.w[i]! - box.cw - box.sz / 2;
         if ((du > 0 || dv > 0 || dw > 0) && du < 0.6 && dv < 0.6 && dw < 0.6 && loc.w[i]! - box.cw > -box.sz / 2 + 0.2) { shell.push(i); continue; }
       }
+      if (inRgb && box) {
+        const dx = lu - box.cu, dy = lv - box.cv;
+        if (Math.abs(bcs * dx + bsn * dy) <= box.sx / 2 && Math.abs(-bsn * dx + bcs * dy) <= box.sy / 2 && Math.abs(lw - box.cw) <= box.sz / 2) { inside.push(i); continue; }
+      }
       const t = (lw + scene.colorHalf) / (2 * scene.colorHalf); // thang màu theo độ cao, không đổi theo zoom
       buckets[Math.min(BUCKETS - 1, Math.max(0, Math.floor(t * BUCKETS)))]!.push(i);
     }
-    buckets.push(shell); // nhóm cuối: điểm lọt ra ngoài box
+    buckets.push(shell); // điểm lọt ra ngoài box
+    buckets.push(inside); // nhóm cuối: điểm trong box
     buckets.forEach((idx, b) => {
-      ctx.fillStyle = b === BUCKETS ? '#ff2bd6' : solid ?? PALETTE[b]!;
+      ctx.fillStyle = b === BUCKETS + 1 ? colors.pointIn : b === BUCKETS ? '#ff2bd6' : solid ?? PALETTE[b]!;
       for (const i of idx) {
         const [x, y] = project(view, loc.u[i]!, loc.v[i]!, loc.w[i]!, k, c);
         ctx.fillRect(x + ox - dot / 2, y + oy - dot / 2, dot, dot);

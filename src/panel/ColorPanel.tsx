@@ -108,6 +108,12 @@ export function ColorPanel() {
           <span style={{ width: 150 }}>Màu point</span>
           <PointColorPicker value={draft.point} onChange={set('point')} />
         </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }} title="Điểm nằm bên trong box được tô màu này (ở cả ba view). Tắt thì giữ màu point thường.">
+          <span style={{ width: 150 }}>Point trong box</span>
+          <label><input type="checkbox" checked={draft.pointIn !== ''} onChange={(e) => set('pointIn')(e.target.checked ? '#00e5ff' : '')} /> đổi màu</label>
+          {draft.pointIn !== '' && <input type="color" className="cvla-keep" value={draft.pointIn} onChange={(e) => set('pointIn')(e.target.value.toLowerCase())} style={{ width: 36, height: 24, padding: 0, border: '1px solid #64748b', cursor: 'pointer' }} />}
+          {draft.pointIn !== '' && <input value={draft.pointIn} readOnly style={{ width: 70, fontFamily: 'monospace' }} />}
+        </div>
         {head('View')}
         {row('viewBg', 'Nền các view', 'Nền ô Trên / Bên / Trước')}
         {head('Vạch mặt đường')}

@@ -37,15 +37,16 @@ const issueTip = (by: Record<string, number>) => {
 };
 
 /** Cờ cảnh báo của một object (tính khi mở menu chuột phải): frame đi xa (lỗi D), frame ít điểm, và cờ sớm nhất (kind: motion / sparse / drift / overlap hoặc mã lỗi luật). */
-export interface ObjFlags { far: number[]; motion: number[]; sparse: number[]; mid: number[]; first: { frame: number; kind: string } | null; pending: boolean }
+export interface ObjFlags { far: number[]; motion: number[]; sparse: number[]; mid: number[]; rules: [string, number[]][]; first: { frame: number; kind: string } | null; pending: boolean }
 
-export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flagsOf, onOutside, onAcceptHints, onIgnoreMotion, onIgnoreMid, onOpenAt, rows, hints, overlapFrames, overlapPairs, onOpen, onSelect, selectedNum, onDelete, incomplete, tracks, labels: jobLabels, start, stop, cvatFrame }: {
+export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flagsOf, onIgnoreKind, onOutside, onAcceptHints, onIgnoreMotion, onIgnoreMid, onOpenAt, rows, hints, overlapFrames, overlapPairs, onOpen, onSelect, selectedNum, onDelete, incomplete, tracks, labels: jobLabels, start, stop, cvatFrame }: {
   jobId: number;
   locked: readonly number[] | null; onLock: () => void; onUnlock: () => void; // khóa danh sách ID gốc (không xóa được)
   onRelocate: (num: number) => void; // thêm outside phía trước cho object xuất hiện muộn (giữ ID)
   flagsOf: (num: number) => ObjFlags; // menu chuột phải: cờ cảnh báo của object
   onOutside: (num: number, kind: 'far' | 'sparse') => void; // outside toàn bộ frame đi xa (lỗi D) / ít điểm của object
   onAcceptHints: (num: number) => void; // chấp nhận mọi gợi ý attribute của object
+  onIgnoreKind: (num: number, kind: string) => void; // bỏ qua một loại lỗi ở mọi frame của object: 'far' (D), 'sparse' (ít điểm P) hoặc mã lỗi luật
   onIgnoreMid: (num: number) => void; // bỏ qua cảnh báo ít điểm (P) ở các frame nằm giữa hai frame ổn của object
   onIgnoreMotion: (num: number) => void; // bỏ qua lỗi đi xa bất thường (Y) ở mọi frame của object
   onOpenAt: (num: number, frame: number) => void; // mở Batch Review của object ở frame cho trước
@@ -63,6 +64,8 @@ export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flags
   // Menu chuột phải: tác động lên đúng dòng (object) được bấm, không đổi dòng đang chọn. Toạ độ tính theo khung bọc bảng (không dùng fixed vì chế độ tối đảo màu cả trang bằng filter).
   const wrapRef = useRef<HTMLDivElement>(null);
   const [ctx, setCtx] = useState<{ x: number; y: number; row: ObjectRow; flags: ObjFlags } | null>(null);
+  const [sub, setSub] = useState<string | null>(null); // mục lỗi đang mở menu con (hover)
+  useEffect(() => { setSub(null); }, [ctx]);
   useEffect(() => {
     if (!ctx) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setCtx(null); };
@@ -285,17 +288,47 @@ export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flags
         const kindText = first ? (first.kind === 'motion' ? 'đi xa bất thường' : first.kind === 'sparse' ? 'ít điểm' : first.kind === 'drift' ? 'trôi box' : first.kind === 'overlap' ? 'chồng lấn' : `lỗi ${symLabel(first.kind)}`) : '';
         const nHints = h(row);
         const wrapW = wrapRef.current?.getBoundingClientRect().width ?? 600;
+        const flip = Math.min(ctx.x, wrapW - 280) + 280 + 230 > wrapW; // không đủ chỗ bên phải: menu con mở sang trái
+        type Act = { label: string; title: string; run: () => void };
+        const errs: { key: string; name: string; n: number; acts: Act[] }[] = [];
+        if (fl.far.length) errs.push({ key: 'far', name: `Lỗi ${symLabel('D')} · quá xa`, n: fl.far.length, acts: [
+          { label: '⛔ Outside frame đi xa', title: 'Đặt outside cho các frame lỗi D ở đầu / cuối track (có hộp xác nhận, hoàn tác được)', run: () => onOutside(row.num, 'far') },
+          { label: '🚫 Bỏ qua lỗi này', title: 'Bỏ qua lỗi D ở mọi frame của object này', run: () => onIgnoreKind(row.num, 'far') },
+        ] });
+        if (fl.sparse.length) errs.push({ key: 'sparse', name: `Ít điểm${fl.pending ? ' ⏳' : ''}`, n: fl.sparse.length, acts: [
+          { label: '🚫 Bỏ qua cảnh báo ít điểm', title: 'Bỏ qua cảnh báo ít điểm (P) ở mọi frame của object này. Hoàn lại từng frame ở Batch Review (chuột phải chip ít điểm).', run: () => onIgnoreKind(row.num, 'sparse') },
+          ...(fl.mid.length ? [{ label: `🚫 Chỉ bỏ qua frame ở giữa (${fl.mid.length})`, title: 'Chỉ bỏ qua ít điểm ở các frame nằm giữa hai frame không ít điểm (box nội suy)', run: () => onIgnoreMid(row.num) }] : []),
+          { label: '⛔ Outside frame ít điểm', title: 'Đặt outside cho các frame ít điểm ở đầu / cuối track (có hộp xác nhận, hoàn tác được)', run: () => onOutside(row.num, 'sparse') },
+        ] });
+        if (fl.motion.length) errs.push({ key: 'motion', name: 'Đi xa bất thường', n: fl.motion.length, acts: [
+          { label: '🚫 Bỏ qua lỗi này', title: 'Bỏ qua lỗi đi xa bất thường (Y) ở mọi frame của object này', run: () => onIgnoreMotion(row.num) },
+        ] });
+        for (const [k, frs] of fl.rules) errs.push({ key: `rule:${k}`, name: `Lỗi ${symLabel(k)} · ${KIND_NAMES[k] ?? k}`, n: frs.length, acts: [
+          { label: '🚫 Bỏ qua lỗi này', title: `Bỏ qua lỗi ${symLabel(k)} ở mọi frame của object này`, run: () => onIgnoreKind(row.num, k) },
+        ] });
+        if (nHints) errs.push({ key: 'attr', name: 'Gợi ý attribute', n: nHints, acts: [
+          { label: '✔ Chấp nhận gợi ý', title: 'Chấp nhận mọi gợi ý attribute còn hiệu lực của object này, một lần hoàn tác', run: () => onAcceptHints(row.num) },
+        ] });
         return (
           <>
             <div className="cvla-backdrop" onClick={close} onContextMenu={(e) => { e.preventDefault(); close(); }} />
             <div className="cvla-menu cvla-ctxmenu" role="menu" aria-label={`Menu object ${row.num}`} style={{ left: Math.max(0, Math.min(ctx.x, wrapW - 280)), top: ctx.y, right: 'auto' }}>
               <h4>Object #{row.num} · {row.label}</h4>
-              <button role="menuitem" disabled={!fl.far.length} onClick={run(() => onOutside(row.num, 'far'))} title="Đặt outside cho mọi frame của object này bị lỗi D (quá xa: khoảng cách tới ego vượt rule distance ở Cài đặt → Threshold; không tính frame đã bỏ qua). Có hộp xác nhận, hoàn tác được.">⛔ Outside toàn bộ frame đi xa — lỗi D ({fl.far.length})</button>
-              <button role="menuitem" disabled={!fl.sparse.length} onClick={run(() => onOutside(row.num, 'sparse'))} title="Đặt outside cho mọi frame của object này có quá ít điểm trong box (theo ngưỡng ở Cài đặt → Threshold, chỉ frame đã tải point cloud). Có hộp xác nhận, hoàn tác được.">⛔ Outside toàn bộ frame ít điểm ({fl.sparse.length}){fl.pending ? ' ⏳' : ''}</button>
-              <button role="menuitem" disabled={!fl.mid.length} onClick={run(() => onIgnoreMid(row.num))} title="Bỏ qua cảnh báo ít điểm (P) ở các frame nằm giữa hai frame không ít điểm của object này (box nội suy, không đặt outside ở giữa). Hoàn lại từng frame ở Batch Review (chuột phải chip ít điểm).">🚫 Bỏ qua ít điểm ở giữa ({fl.mid.length})</button>
-              <button role="menuitem" disabled={!fl.motion.length} onClick={run(() => onIgnoreMotion(row.num))} title="Bỏ qua cảnh báo đi xa bất thường (Y: vật nhảy vị trí so với các frame trước) ở mọi frame đang báo của object này. Các object khác không bị ảnh hưởng; hoàn lại từng frame ở Batch Review.">🚫 Bỏ qua lỗi đi xa bất thường ({fl.motion.length})</button>
+              <h4>Lỗi (rê chuột vào lỗi để chọn xử lý)</h4>
+              {errs.length === 0 && <div style={{ fontSize: 12, color: '#777', padding: '2px 4px' }}>Không có lỗi nào đang báo</div>}
+              {errs.map((er) => (
+                <div key={er.key} style={{ position: 'relative' }} onMouseEnter={() => setSub(er.key)}>
+                  <button role="menuitem" aria-haspopup="menu" aria-expanded={sub === er.key} onClick={() => setSub(er.key)} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', gap: 8, background: sub === er.key ? '#e8f0ff' : undefined }}>
+                    <span>{er.name} ({er.n})</span><span aria-hidden>▸</span>
+                  </button>
+                  {sub === er.key && (
+                    <div className="cvla-menu" role="menu" aria-label={er.name} style={{ top: -8, minWidth: 220, ...(flip ? { right: '100%', left: 'auto', marginRight: 2 } : { left: '100%', right: 'auto', marginLeft: 2 }) }}>
+                      {er.acts.map((ac) => <button key={ac.label} role="menuitem" title={ac.title} onClick={run(ac.run)}>{ac.label}</button>)}
+                    </div>
+                  )}
+                </div>
+              ))}
               <button role="menuitem" disabled={!first} onClick={run(() => first && onOpenAt(row.num, first.frame))} title="Mở Batch Review của object, cửa sổ bắt đầu ở frame có cờ cảnh báo sớm nhất (lỗi luật gồm D, đi xa bất thường, ít điểm, trôi box, chồng lấn)">⚑ Nhảy tới cờ cảnh báo đầu tiên{first ? ` (frame ${first.frame}: ${kindText})` : ' (không có)'}</button>
-              <button role="menuitem" disabled={!nHints} onClick={run(() => onAcceptHints(row.num))} title="Chấp nhận mọi gợi ý attribute còn hiệu lực của object này, một lần hoàn tác">✔ Chấp nhận attribute gợi ý ({nHints})</button>
               <button role="menuitem" disabled={!lateOf.has(row.num)} onClick={run(() => onRelocate(row.num))} title={lateOf.has(row.num) ? `Object xuất hiện từ frame ${lateOf.get(row.num)}: giữ ID, thêm keyframe outside ở mọi frame trước đó. Có hộp xác nhận, chỉ nằm trong nháp.` : 'Chỉ dùng được cho object xuất hiện muộn (chưa có keyframe nào từ frame đầu job)'}>⇢ Outside phía trước (xuất hiện muộn, giữ ID)</button>
               <hr />
               <button role="menuitem" onClick={run(() => onOpen(row.num, row.first))}>▶ Mở Batch Review (từ frame đầu)</button>

@@ -29,7 +29,7 @@ Extension cho trình duyệt **Edge / Chrome** (và bản thử cho Firefox) gi�
 | **Thuộc tính** | Xem và sửa attribute, có gợi ý theo kích thước box. |
 | **Upload** | Màn hình xem lại → ghi lên CVAT → đọc lại để so khớp; có nhật ký hoàn nguyên. |
 | **Ca làm việc / KPI** | Tự chia ca sáng / chiều / OT theo giờ, thống kê số object và frame đã sửa. |
-| **Giao diện & màu sắc** | Cửa sổ nổi kéo được, giao diện sáng / tối / xám, phím tắt tuỳ chỉnh; tab **Màu sắc** chỉnh màu point, nền view, vạch mặt đường, viền frame (có khung xem trước, bấm Lưu mới đổi). |
+| **Giao diện & màu sắc** | Cửa sổ nổi kéo được, giao diện sáng / tối / xám, phím tắt tuỳ chỉnh; tab **Màu sắc** chỉnh màu point (kể cả màu riêng cho point nằm trong box), nền view, vạch mặt đường, viền frame (có khung xem trước, bấm Lưu mới đổi); tab **Hiển thị** chọn xếp các frame ngang hoặc dọc. |
 
 Tool tải sẵn point cloud của cả job ngầm ở nền (có thanh tiến độ); nút **↻ Tải lại frame** dùng khi có frame bị lỗi. Bản nháp được lưu trong trình duyệt nên F5 không mất.
 
@@ -50,7 +50,11 @@ Ground snap (phím `G`), tự bám mặt đất khi kéo (`gr lock`) và lỗi �
 
 ## Màu sắc
 
-Tab **Màu sắc** chỉnh: màu point (cố định hoặc theo độ cao), nền các view, màu vạch local / ego / patchwork++, và màu viền frame / box theo trạng thái (keyframe, nội suy, giữ nguyên, outside, chưa có box). Khung **Xem trước** vẽ một cảnh mẫu bằng đúng hàm vẽ của Batch Review. Các thay đổi chỉ là bản nháp cho tới khi bấm **💾 Lưu**; có **Hủy thay đổi** và **↺ Mặc định**. Màu lưu cục bộ trong extension, không có trong `setting.json`.
+Tab **Màu sắc** chỉnh: màu point (cố định hoặc theo độ cao), màu riêng cho **point nằm trong box** (tick "đổi màu" rồi chọn màu; tắt là mặc định), nền các view, màu vạch local / ego / patchwork++, và màu viền frame / box theo trạng thái (keyframe, nội suy, giữ nguyên, outside, chưa có box). Khung **Xem trước** vẽ một cảnh mẫu bằng đúng hàm vẽ của Batch Review. Các thay đổi chỉ là bản nháp cho tới khi bấm **💾 Lưu**; có **Hủy thay đổi** và **↺ Mặc định**. Màu lưu cục bộ trong extension, không có trong `setting.json`.
+
+## Hiển thị: xếp frame ngang / dọc
+
+Cài đặt → **Hiển thị** chọn cách Batch Review xếp các frame: **Ngang** (mặc định: mỗi frame một cột, 3 view Trên / Bên / Trước xếp dọc) hoặc **Dọc** (mỗi frame một hàng, 3 view nằm ngang, cỡ ô tự khớp chiều rộng và trang cuộn dọc). Đổi là áp ngay, chỉ là cách hiển thị.
 
 ## Threshold (ngưỡng cảnh báo)
 
@@ -65,7 +69,7 @@ Tool **không kèm sẵn con số ngưỡng nào**. Mỗi loại lỗi là một
 
 - **Đối tượng:** tất cả, một class (danh sách lấy từ nhãn của job đang mở), hoặc một object cụ thể.
 - **Quy tắc:** `>`, `>=`, `<`, `<=`, `=`, `!=`. Một số thuộc tính chỉ cho các quy tắc hợp lý (ví dụ IoU chỉ có `>`, `>=`).
-- **Mã lỗi:** S (kích thước không đồng bộ), K (kích thước), Z (độ cao), H (đổi hướng), D (quá xa), O (chồng lấn), T (trôi box), Y (đi xa bất thường), và lệch / ít điểm, đáy lơ lửng / chìm, outside liên tục. Chữ ký hiệu ở đầu mỗi mục **sửa được**.
+- **Mã lỗi:** S (kích thước không đồng bộ), K (kích thước), Z (độ cao), H (đổi hướng), D (quá xa), O (chồng lấn), T (trôi box), Y (đi xa bất thường), và lệch / ít điểm, đáy lơ lửng / chìm, outside liên tục. Chữ ký hiệu ở đầu mỗi mục **sửa được**; lỗi chưa có mã (trôi box, đáy lơ lửng / chìm, outside liên tục) hiện **NULL**, điền 1–3 ký tự nếu muốn đặt mã (để trống là NULL).
 - **S** chỉ xét object có Dynamic size đang **tắt** (xem tab Dynamic size).
 - **Xuất setting.json / Nạp setting.json…** lưu hoặc nạp toàn bộ cài đặt (rule, ký hiệu, Dynamic size). Đây là file riêng của bạn, **đừng đưa lên GitHub công khai** (đã nằm trong `.gitignore`).
 
@@ -117,6 +121,7 @@ Ví dụ một tab `Matrix` hợp lệ (số liệu minh hoạ tự tạo):
 | `O` | Đánh dấu outside / đưa object trở lại |
 | `G` | Đáy box chạm mặt đường |
 | `A` / `I` | Chấp nhận / bỏ qua gợi ý sửa box |
+| `R` | Reflection mode: chuyển qua lại giữa Batch Review và trang Ref (chưa bật ref cho object đang chọn thì bật luôn) |
 | `F` | Thu nhỏ tool, zoom cận cảnh object trong CVAT |
 | `Ctrl+Z` `Ctrl+Y` | Hoàn tác / làm lại |
 | `` ` `` | Thu nhỏ / mở lại cửa sổ tool |

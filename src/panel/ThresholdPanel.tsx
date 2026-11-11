@@ -8,7 +8,7 @@ import { metricsOf, METRIC_BY_ID, type MetricDef, type Op, type Rule, type Secti
 import { parseLabelSpecs } from '../shared/attributes';
 import { ruleValues } from '../shared/dynrule';
 import { DynClassTable } from './DynSizePanel';
-import { SYMBOL_DEFAULTS, type SymbolKind } from '../shared/symbols';
+import { NULLABLE_KINDS, SYMBOL_DEFAULTS, type SymbolKind } from '../shared/symbols';
 import { symbolStore, sym, useSymbols } from './symbolStore';
 import { thresholdStore, useRules, useThresholdVersion } from './thresholdStore';
 
@@ -52,13 +52,15 @@ function FieldRow({ f }: { f: Field }) {
 function SymbolInput({ kind }: { kind: SymbolKind }) {
   const [text, setText] = useState(sym(kind));
   const [bad, setBad] = useState(false);
+  const nullable = NULLABLE_KINDS.includes(kind);
   useEffect(() => { setText(sym(kind)); setBad(false); }, [sym(kind)]);
   return (
     <input
-      value={text} maxLength={3} title={`Ký hiệu hiển thị của lỗi này (mặc định ${SYMBOL_DEFAULTS[kind]}); 1–3 ký tự, không trùng loại khác`}
-      style={{ width: 34, textAlign: 'center', fontWeight: 700, marginRight: 6, borderColor: bad ? '#b00' : undefined, background: bad ? '#fee' : undefined }}
+      value={text} maxLength={3} placeholder={nullable ? 'NULL' : undefined}
+      title={nullable ? 'Lỗi này chưa có mã (NULL). Điền 1–3 ký tự nếu muốn đặt mã, không trùng loại khác; để trống = NULL' : `Ký hiệu hiển thị của lỗi này (mặc định ${SYMBOL_DEFAULTS[kind]}); 1–3 ký tự, không trùng loại khác`}
+      style={{ width: nullable ? 48 : 34, textAlign: 'center', fontWeight: 700, marginRight: 6, borderColor: bad ? '#b00' : undefined, background: bad ? '#fee' : undefined }}
       onClick={(e) => e.preventDefault()} onKeyDown={(e) => e.stopPropagation()}
-      onChange={(e) => { const v = e.target.value; setText(v); setBad(v.trim() !== '' && !symbolStore.set(kind, v)); }}
+      onChange={(e) => { const v = e.target.value; setText(v); setBad((v.trim() !== '' || nullable) && !symbolStore.set(kind, v)); }}
       onBlur={() => { setText(sym(kind)); setBad(false); }}
     />
   );
@@ -213,7 +215,7 @@ export function ThresholdPanel({ jobId, labels, tracks }: { jobId: number; label
         <button onClick={() => { resetAll(); thresholdStore.changed(); }} disabled={!SECTIONS.some((s) => sectionChanged(s.id))}>↺ Tham số</button>{' '}
         <button onClick={() => symbolStore.reset()} title="Về ký hiệu mặc định (đi xa bất thường = Y)">↺ Ký hiệu lỗi</button>
       </p>
-      <p style={{ margin: '2px 0', color: '#777', fontSize: 11 }}>Ô chữ đậm đầu mỗi mục = ký hiệu lỗi, sửa được. Tên class và attribute trong dropbox lấy từ nhãn của job này.</p>
+      <p style={{ margin: '2px 0', color: '#777', fontSize: 11 }}>Ô chữ đậm đầu mỗi mục = ký hiệu lỗi, sửa được; lỗi chưa có mã hiện NULL (điền 1–3 ký tự nếu sau này muốn đặt mã). Tên class và attribute trong dropbox lấy từ nhãn của job này.</p>
       <p style={{ margin: '2px 0', color: '#456', fontSize: 12 }}>
         <b>Ưu tiên</b>: nhiều rule cùng thuộc tính và cùng chiều (&gt; / &gt;= hoặc &lt; / &lt;=) cùng khớp một object thì chỉ rule cụ thể nhất có hiệu lực:
         một object &gt; class · attribute &gt; class &gt; tất cả object. Ví dụ có rule Vehicle "Dài &gt; 5.5" thì rule "Tất cả object: Dài &gt; 2" không áp cho Vehicle,

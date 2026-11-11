@@ -3,7 +3,7 @@ import { findOverlaps, groupPairs } from '../shared/overlap';
 import { applyDraft, buildDraft, checkDraft, draftKey, type SavedDraft } from '../shared/draft';
 import { hostScope, kv, onStorageHealth, storageHealth } from './storage';
 import { seenStore } from './seenStore';
-import { useRefState } from './refStore';
+import { refStore, useRefState } from './refStore';
 import { api } from '../shared/api';
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react';
 import type { Cuboid } from '../shared/cuboid';
@@ -25,7 +25,9 @@ import { QcPanel } from './QcPanel';
 import { DynSizePanel } from './DynSizePanel';
 import { ThresholdPanel } from './ThresholdPanel';
 import { CameraTab } from './CameraPanel';
+import { symLabel } from './symbolStore';
 import { ColorPanel } from './ColorPanel';
+import { ViewPanel } from './ViewPanel';
 import { SettingsIO } from './SettingsIO';
 import { thresholdStore, useThresholdVersion } from './thresholdStore';
 import { backgroundConfigKey } from '../shared/thresholds';
@@ -173,7 +175,7 @@ try { const m = api.runtime.getManifest() as chrome.runtime.Manifest & { version
 const EMPTY: Draft = { work: null, edited: new Set<string>(), undo: [], redo: [] };
 
 type State = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ok'; data: Data };
-type Tab = 'objects' | 'review' | 'ref' | 'shift' | 'qc' | 'dyn' | 'thr' | 'cam' | 'color' | 'keys' | 'job';
+type Tab = 'objects' | 'review' | 'ref' | 'shift' | 'qc' | 'dyn' | 'thr' | 'cam' | 'color' | 'view' | 'keys' | 'job';
 /** Tải ưu tiên ngần này frame đầu; tải xong là mở được Batch Review (job ngắn hơn: cả job), phần còn lại tải và tính ngầm. */
 const UNLOCK_FRAMES = 6;
 
@@ -356,6 +358,7 @@ export function App() {
       else if (id === 'focus.cvat') focusRef.current();
       else if (id === 'window.toggle') post({ type: 'toggleWindow' });
       else if (id === 'ids.remap') syncIdsRef.current();
+      else if (id === 'ref.toggle') toggleRefRef.current();
       else emitAction(id);
     };
     const kt = keyTarget();
@@ -723,6 +726,16 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
   };
   // Lấy ID hiển thị đang dùng trong CVAT (CVAT không đánh lại ID khi tạo / xóa object) để bảng object và việc chọn object khớp với CVAT.
   const syncIds = () => post({ type: 'readIds' });
+  // Phím R: Batch Review ⇄ trang Ref. Chưa bật ref mode cho object đang chọn thì bật (chỉ là tuỳ chọn xem, không đổi nhãn).
+  const toggleRefRef = useRef<() => void>(() => {});
+  toggleRefRef.current = () => {
+    if (!data || refNum === null) return;
+    if (tab === 'ref') setTab('review');
+    else if (tab === 'review') {
+      if (!refS.on) refStore.set(data.job.id, refNum, { on: true });
+      openRef();
+    }
+  };
   const syncIdsRef = useRef(syncIds);
   syncIdsRef.current = syncIds;
   const [resumeTab, setResumeTab] = useState<Tab | null>(null);
@@ -757,7 +770,7 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
   // ---- Menu chuột phải ở bảng object: tác động lên đúng object của dòng được bấm ----
   /** Các frame cảnh báo của một object: đi xa (lỗi D), đi xa bất thường (Y), ít điểm, lỗi luật QC, trôi box, chồng lấn (không tính cái đã bỏ qua). */
   const objectFlags = (num: number): ObjFlags => {
-    const none: ObjFlags = { far: [], motion: [], sparse: [], mid: [], first: null, pending: false };
+    const none: ObjFlags = { far: [], motion: [], sparse: [], mid: [], rules: [], first: null, pending: false };
     if (!data || !work) return none;
     const t = work.tracks[num - 1];
     if (!t) return none;
@@ -766,6 +779,7 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
     const frames: number[] = [];
     for (let f = data.job.start_frame; f <= data.job.stop_frame; f++) frames.push(f);
     const far: number[] = [], sparse: number[] = [], motion: number[] = [];
+    const rules = new Map<string, number[]>(); // lỗi luật khác D (S K Z H O…): mã → frame
     const midFrames = new Set(passView.midOut.get(num) ?? []);
     for (const f of frames) {
       const c = stateAt(t, f).cuboid;
@@ -785,10 +799,11 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
         if (ignAll.has(issueKey(jid, num, f, i.kind))) continue;
         cand.push({ frame: f, kind: i.kind });
         if (i.kind === 'D') far.push(f); // lỗi D (quá xa: khoảng cách tới ego vượt rule distance)
+        else rules.set(i.kind, [...(rules.get(i.kind) ?? []), f]);
       }
     }
     cand.sort((x, y) => x.frame - y.frame);
-    return { far: far.sort((x, y) => x - y), motion, sparse, mid: sparse.filter((f) => midFrames.has(f)), first: cand[0] ?? null, pending: passView.incomplete.has(num) };
+    return { far: far.sort((x, y) => x - y), motion, sparse, mid: sparse.filter((f) => midFrames.has(f)), rules: [...rules].map(([k, fr]) => [k, fr.sort((x, y) => x - y)] as [string, number[]]), first: cand[0] ?? null, pending: passView.incomplete.has(num) };
   };
   /** Outside toàn bộ frame đã gắn cờ (đi xa = lỗi D / ít điểm) của một object: gom thành các đoạn liên tiếp, hoàn tác được. */
   /** Bỏ qua cảnh báo ít điểm (P) ở các frame nằm giữa hai frame ổn của một object (menu chuột phải bảng object). */
@@ -846,6 +861,16 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
     dispatch({ t: 'track', idx: num - 1, track: cur, frames: [...changed] });
     shiftStore.edit(data.job.id, num);
     setToast(`Object #${num}: đã đặt outside ${frames.length} frame ${what} (${runs.length} đoạn). Hoàn tác ở ô Nháp.`);
+  };
+  /** Bỏ qua một loại lỗi ở mọi frame đang báo của MỘT object (menu lỗi ở bảng object): 'far' = D, 'sparse' = P, hoặc mã lỗi luật. Hoàn lại từng frame ở Batch Review. */
+  const ignoreKind = (num: number, kind: string) => {
+    if (!data) return;
+    const fl = objectFlags(num);
+    const frames = kind === 'far' ? fl.far : kind === 'sparse' ? fl.sparse : fl.rules.find(([k]) => k === kind)?.[1] ?? [];
+    const code = kind === 'far' ? 'D' : kind === 'sparse' ? 'P' : kind;
+    if (!frames.length) { setToast(`Object #${num}: không có lỗi nào để bỏ qua.`); return; }
+    ignoreStore.set(frames.map((f) => issueKey(data.job.id, num, f, code)), true);
+    setToast(`Object #${num}: đã bỏ qua lỗi ${symLabel(code)} ở ${frames.length} frame (${frames.length > 8 ? `${frames.slice(0, 8).join(', ')}…` : frames.join(', ')}). Hoàn lại từng frame ở Batch Review.`);
   };
   /** Bỏ qua lỗi đi xa bất thường (Y) ở mọi frame đang báo của MỘT object (như nút "bỏ qua tất cả" ở Batch Review: chỉ object này). */
   const ignoreMotionAll = (num: number) => {
@@ -940,7 +965,7 @@ Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', dange
 
   const settingsTabs: { id: Tab; label: string }[] = [
     { id: 'dyn', label: 'Dynamic size' }, { id: 'thr', label: 'Threshold' }, { id: 'cam', label: 'Camera' },
-    { id: 'color', label: 'Màu sắc' }, { id: 'keys', label: 'Phím tắt' }, { id: 'job', label: 'Thông tin job' },
+    { id: 'color', label: 'Màu sắc' }, { id: 'view', label: 'Hiển thị' }, { id: 'keys', label: 'Phím tắt' }, { id: 'job', label: 'Thông tin job' },
   ];
   const inSettings = settingsTabs.some((x) => x.id === tab);
   if (inSettings) lastSettings.current = tab;
@@ -976,7 +1001,7 @@ Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', dange
             {tabBtn('qc', 'QC')}
             <button
               role="tab" aria-selected={inSettings} className={inSettings ? 'cvla-tab cvla-tab-on' : 'cvla-tab'}
-              onClick={() => setTab(lastSettings.current)} title="Dynamic size, Threshold, Camera, Màu sắc, Phím tắt, Thông tin job"
+              onClick={() => setTab(lastSettings.current)} title="Dynamic size, Threshold, Camera, Màu sắc, Hiển thị, Phím tắt, Thông tin job"
             >Cài đặt</button>
           </div>
           <span className="cvla-spacer" />
@@ -1175,7 +1200,7 @@ Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', dange
       )}
       {data && work && tab === 'objects' && (
         <ObjectTable
-          jobId={data.job.id} locked={lockedIds} onLock={lockBaseline} onUnlock={unlockBaseline} onRelocate={(n) => { void relocateLate(n); }} onDelete={deleteMade} flagsOf={objectFlags} onOutside={(n, k) => { void outsideFlagged(n, k); }} onAcceptHints={acceptHints} onIgnoreMotion={ignoreMotionAll} onIgnoreMid={ignoreMid} onOpenAt={openAtFrame} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs} incomplete={passView.incomplete}
+          jobId={data.job.id} locked={lockedIds} onLock={lockBaseline} onUnlock={unlockBaseline} onRelocate={(n) => { void relocateLate(n); }} onDelete={deleteMade} flagsOf={objectFlags} onOutside={(n, k) => { void outsideFlagged(n, k); }} onAcceptHints={acceptHints} onIgnoreMotion={ignoreMotionAll} onIgnoreKind={ignoreKind} onIgnoreMid={ignoreMid} onOpenAt={openAtFrame} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs} incomplete={passView.incomplete}
           tracks={work.tracks} labels={data.labels} start={data.job.start_frame} stop={data.job.stop_frame} cvatFrame={focus?.frame ?? null}
           selectedNum={selectedNum} onSelect={selectFromTool}
           onOpen={(num) => {
@@ -1229,6 +1254,7 @@ Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', dange
       {data && work && tab === 'thr' && <ThresholdPanel jobId={data.job.id} labels={data.labels} tracks={work.tracks} />}
       {data && tab === 'cam' && <CameraTab start={data.job.start_frame} stop={data.job.stop_frame} />}
       {tab === 'color' && <ColorPanel />}
+      {tab === 'view' && <ViewPanel />}
       {tab === 'shift' && <ShiftPanel />}
       {tab === 'keys' && <KeysPanel map={keymap} setMap={setKeymap} />}
       {data && tab === 'job' && <JobInfo s={summarize(data.job, data.labels, data.ann)} />}

@@ -17,13 +17,15 @@ export interface GpuParams {
   alpha: number; // độ đậm 0–1 (điểm chồng nhau thì đậm dần)
   /** Tô hồng điểm nằm ngay sát ngoài box (cảnh báo lệch). */
   misfit: { cu: number; cv: number; cw: number; sx: number; sy: number; sz: number } | null;
+  /** Tô màu riêng cho điểm nằm trong box (box đã xoay dyaw quanh tâm). */
+  inBox: { cu: number; cv: number; cw: number; sx: number; sy: number; sz: number; dyaw: number; color: [number, number, number] } | null;
 }
 
 const BUCKETS = 8;
 const VERT = `
 attribute vec3 a_pos;
-uniform float u_view, u_size, u_half, u_zClip, u_slab, u_slabFront, u_colorHalf, u_dotPx, u_dpr, u_misfit, u_useSolid, u_alpha;
-uniform vec3 u_bc, u_bs, u_pan, u_solid;
+uniform float u_view, u_size, u_half, u_zClip, u_slab, u_slabFront, u_colorHalf, u_dotPx, u_dpr, u_misfit, u_useSolid, u_alpha, u_inOn, u_inCs, u_inSn;
+uniform vec3 u_bc, u_bs, u_pan, u_solid, u_inBc, u_inBs, u_inCol;
 varying vec4 v_col;
 vec3 hsl2rgb(float h, float s, float l) {
   float c = (1.0 - abs(2.0 * l - 1.0)) * s;
@@ -53,6 +55,11 @@ void main() {
   float t = (p.z + u_colorHalf) / (2.0 * u_colorHalf);
   float b = min(${BUCKETS - 1}.0, max(0.0, floor(t * ${BUCKETS}.0)));
   vec3 col = u_useSolid > 0.5 ? u_solid : hsl2rgb(220.0 - b * 200.0 / ${BUCKETS - 1}.0, 0.8, 0.55);
+  if (u_inOn > 0.5) {
+    vec3 d = p - u_inBc;
+    float lu = u_inCs * d.x + u_inSn * d.y, lv = -u_inSn * d.x + u_inCs * d.y;
+    if (abs(lu) <= u_inBs.x * 0.5 && abs(lv) <= u_inBs.y * 0.5 && abs(d.z) <= u_inBs.z * 0.5) col = u_inCol;
+  }
   if (u_misfit > 0.5) {
     float du = abs(p.x - u_bc.x) - u_bs.x * 0.5, dv = abs(p.y - u_bc.y) - u_bs.y * 0.5, dw = p.z - u_bc.z - u_bs.z * 0.5;
     if ((du > 0.0 || dv > 0.0 || dw > 0.0) && du < 0.6 && dv < 0.6 && dw < 0.6 && p.z - u_bc.z > -u_bs.z * 0.5 + 0.2) col = vec3(1.0, 0.169, 0.839);
@@ -97,7 +104,7 @@ function init(): Gl | null {
     gl.linkProgram(prog);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog) ?? 'link');
     const u: Record<string, WebGLUniformLocation | null> = {};
-    for (const n of ['u_view', 'u_size', 'u_half', 'u_zClip', 'u_slab', 'u_slabFront', 'u_colorHalf', 'u_dotPx', 'u_dpr', 'u_misfit', 'u_bc', 'u_bs', 'u_pan', 'u_useSolid', 'u_solid', 'u_alpha']) u[n] = gl.getUniformLocation(prog, n);
+    for (const n of ['u_view', 'u_size', 'u_half', 'u_zClip', 'u_slab', 'u_slabFront', 'u_colorHalf', 'u_dotPx', 'u_dpr', 'u_misfit', 'u_inOn', 'u_inCs', 'u_inSn', 'u_inBc', 'u_inBs', 'u_inCol', 'u_bc', 'u_bs', 'u_pan', 'u_useSolid', 'u_solid', 'u_alpha']) u[n] = gl.getUniformLocation(prog, n);
     canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); lost = true; });
     canvas.addEventListener('webglcontextrestored', () => { lost = false; state = null; });
     state = { canvas, gl, prog, u, aPos: gl.getAttribLocation(prog, 'a_pos'), buffers: new Map() };
@@ -155,6 +162,12 @@ export function drawPointsGpu(ctx: CanvasRenderingContext2D, loc: Local, p: GpuP
       gl.uniform1f(u.u_misfit!, p.misfit ? 1 : 0);
       gl.uniform3f(u.u_bc!, p.misfit?.cu ?? 0, p.misfit?.cv ?? 0, p.misfit?.cw ?? 0);
       gl.uniform3f(u.u_bs!, p.misfit?.sx ?? 0, p.misfit?.sy ?? 0, p.misfit?.sz ?? 0);
+      const ib = p.inBox;
+      gl.uniform1f(u.u_inOn!, ib ? 1 : 0);
+      gl.uniform1f(u.u_inCs!, ib ? Math.cos(ib.dyaw) : 1); gl.uniform1f(u.u_inSn!, ib ? Math.sin(ib.dyaw) : 0);
+      gl.uniform3f(u.u_inBc!, ib?.cu ?? 0, ib?.cv ?? 0, ib?.cw ?? 0);
+      gl.uniform3f(u.u_inBs!, ib?.sx ?? 0, ib?.sy ?? 0, ib?.sz ?? 0);
+      gl.uniform3f(u.u_inCol!, ib?.color[0] ?? 0, ib?.color[1] ?? 0, ib?.color[2] ?? 0);
       gl.uniform3f(u.u_pan!, p.pan[0], p.pan[1], p.pan[2]);
       gl.uniform1f(u.u_useSolid!, p.color ? 1 : 0);
       gl.uniform3f(u.u_solid!, p.color?.[0] ?? 0, p.color?.[1] ?? 0, p.color?.[2] ?? 0);
