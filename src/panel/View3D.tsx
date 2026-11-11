@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Cuboid } from '../shared/cuboid';
 import type { Status } from '../shared/interp';
-import { boxEdges, boxInView, defaultOrbit, gatherAround, heightColor, orbitMatrix, projectPoint, ORBIT_EL_MAX, type Mat4, type Orbit } from '../shared/view3d';
+import { boxEdges, boxInView, defaultOrbit, egoMarker, gatherAround, gatherEgoArea, heightColor, orbitMatrix, projectPoint, yawVsEgoDeg, ORBIT_EL_MAX, type Mat4, type Orbit } from '../shared/view3d';
 import { comboOf } from '../shared/keymap';
 import { useViewportOverlay } from './overlay';
 import { pointClouds } from './stores';
@@ -41,7 +41,7 @@ export function View3D(p: View3dProps) {
 
 function Scene3D({ id, label, frame, cub, status, others, onClose }: View3dProps) {
   const colors = useColors();
-  const { radius, pointSize } = useView3d();
+  const { radius, pointSize, egoRadius } = useView3d();
   const keymap = useCurrentKeymap();
   const wrap = useRef<HTMLDivElement>(null);
   const glCv = useRef<HTMLCanvasElement>(null);
@@ -59,7 +59,10 @@ function Scene3D({ id, label, frame, cub, status, others, onClose }: View3dProps
   // Dữ liệu: điểm trong bán kính + màu, và các cạnh box.
   const scene = useMemo(() => {
     if (!pc) return null;
-    const g = gatherAround(pc.xyz, pc.count, cub, radius);
+    const g1 = gatherAround(pc.xyz, pc.count, cub, radius);
+    const g2 = gatherEgoArea(pc.xyz, pc.count, cub, egoRadius, radius); // vùng nhỏ quanh ego (bỏ phần đã nằm trong vùng quanh box)
+    const g = { n: g1.n + g2.n, pos: new Float32Array((g1.n + g2.n) * 3), inBox: new Uint8Array(g1.n + g2.n) };
+    g.pos.set(g1.pos); g.pos.set(g2.pos, g1.n * 3); g.inBox.set(g1.inBox); g.inBox.set(g2.inBox, g1.n);
     const solid = colors.point ? hexRgb(colors.point) : null;
     const inCol = colors.pointIn ? hexRgb(colors.pointIn) : null;
     const buf = new Float32Array(g.n * 6);
@@ -75,15 +78,19 @@ function Scene3D({ id, label, frame, cub, status, others, onClose }: View3dProps
     const segs: number[] = [];
     const addBox = (e: Float32Array, col: number[]) => { for (let i = 0; i < e.length; i += 3) segs.push(e[i]!, e[i + 1]!, e[i + 2]!, col[0]!, col[1]!, col[2]!); };
     addBox(boxEdges({ cu: 0, cv: 0, cw: 0, yaw: 0, sx: cub.sx, sy: cub.sy, sz: cub.sz }), main);
-    const tags: { x: number; y: number; z: number; text: string; main: boolean }[] = [{ x: 0, y: 0, z: cub.sz / 2, text: `▶ #${id}`, main: true }];
+    const ego = egoMarker(cub);
+    for (let i = 0; i < ego.lines.length; i++) segs.push(ego.lines[i]!);
+    const tags: { x: number; y: number; z: number; text: string; kind: 'main' | 'other' }[] = [{ x: 0, y: 0, z: cub.sz / 2, text: `▶ #${id}`, kind: 'main' }];
     for (const o of others) {
-      const b = boxInView(cub, o.cub, radius);
+      // box trong tầm quanh box đang chọn, hoặc quanh ego (vùng ego) dù xa box đang chọn
+      const nearEgo = egoRadius > 0 && Math.hypot(o.cub.x, o.cub.y) <= egoRadius + Math.max(o.cub.sx, o.cub.sy) / 2;
+      const b = boxInView(cub, o.cub, radius, nearEgo);
       if (!b) continue;
       addBox(boxEdges(b), other);
-      tags.push({ x: b.cu, y: b.cv, z: b.cw + b.sz / 2, text: `#${o.id}`, main: false });
+      tags.push({ x: b.cu, y: b.cv, z: b.cw + b.sz / 2, text: `#${o.id}`, kind: 'other' });
     }
-    return { buf, n: g.n, inside, lines: Float32Array.from(segs), tags };
-  }, [pc, cub, radius, status, others, colors.point, colors.pointIn, id, pcVer]);
+    return { buf, n: g.n, nEgo: g2.n, egoDist: ego.dist, egoIcon: ego.icon, egoAhead: ego.ahead, yawDeg: yawVsEgoDeg(cub.yaw), inside, lines: Float32Array.from(segs), tags };
+  }, [pc, cub, radius, egoRadius, status, others, colors.point, colors.pointIn, id, pcVer]);
 
   const draw = () => {
     raf.current = 0;
@@ -117,11 +124,51 @@ function Scene3D({ id, label, frame, cub, status, others, onClose }: View3dProps
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.font = '12px system-ui, sans-serif';
     ctx.textBaseline = 'bottom';
+    const cw = ov.width / dpr, ch = ov.height / dpr;
+    if (scene) {
+      // biểu tượng ego nổi: mũi tên đỏ xoay theo hướng trước của ego trên màn hình
+      const q0 = projectPoint(m, scene.egoIcon[0], scene.egoIcon[1], scene.egoIcon[2], cw, ch);
+      const q1 = projectPoint(m, scene.egoAhead[0], scene.egoAhead[1], scene.egoAhead[2], cw, ch);
+      if (q0) {
+        ctx.save();
+        ctx.translate(q0[0], q0[1]);
+        const dx = q1 ? q1[0] - q0[0] : 0, dy = q1 ? q1[1] - q0[1] : 0;
+        if (Math.hypot(dx, dy) > 3) {
+          ctx.rotate(Math.atan2(dy, dx));
+          ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(-10, -10); ctx.lineTo(-4, 0); ctx.lineTo(-10, 10); ctx.closePath();
+        } else { ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI * 2); } // đang nhìn dọc theo hướng ego: chỉ hiện chấm
+        ctx.fillStyle = '#ef4444'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.stroke();
+        ctx.restore();
+        ctx.fillStyle = 'rgba(220,38,38,0.92)'; ctx.fillRect(q0[0] - 17, q0[1] - 34, 34, 15);
+        ctx.fillStyle = '#fff'; ctx.fillText('EGO', q0[0] - 13, q0[1] - 22);
+      }
+      // góc quay của box so với ego, ở góc dưới trái khung: kim đỏ = hướng trước của ego (lên), kim xanh = hướng của box
+      const cx0 = 62, cy0 = ch - 62, R0 = 38;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(8, ch - 128, 150, 120);
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(cx0, cy0, R0, 0, Math.PI * 2); ctx.stroke();
+      const needle = (angCcw: number, col: string, len: number) => {
+        ctx.save(); ctx.translate(cx0, cy0); ctx.rotate(-angCcw);
+        ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -len); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, -len - 7); ctx.lineTo(-5, -len + 3); ctx.lineTo(5, -len + 3); ctx.closePath(); ctx.fill();
+        ctx.restore();
+      };
+      needle(0, '#ef4444', R0 - 8);
+      needle((scene.yawDeg * Math.PI) / 180, '#22c55e', R0 - 8);
+      ctx.font = '11px system-ui, sans-serif'; ctx.fillStyle = '#fff'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText('trước', cx0 - 13, cy0 - R0 - 3);
+      ctx.font = 'bold 12px system-ui, sans-serif';
+      ctx.fillText(`yaw so với ego`, 12, ch - 14 - 0);
+      ctx.fillStyle = '#86efac';
+      ctx.fillText(`${scene.yawDeg >= 0 ? '+' : ''}${scene.yawDeg.toFixed(1)}°`, 112, cy0 + 4);
+      ctx.font = '12px system-ui, sans-serif'; ctx.textBaseline = 'bottom';
+    }
     for (const t of scene?.tags ?? []) {
       const q = projectPoint(m, t.x, t.y, t.z, ov.width / dpr, ov.height / dpr);
       if (!q) continue;
       const wd = ctx.measureText(t.text).width + 6;
-      ctx.fillStyle = t.main ? 'rgba(34,197,94,0.9)' : 'rgba(70,74,80,0.85)';
+      ctx.fillStyle = t.kind === 'main' ? 'rgba(34,197,94,0.9)' : 'rgba(70,74,80,0.85)';
       ctx.fillRect(q[0] - wd / 2, q[1] - 16, wd, 15);
       ctx.fillStyle = '#fff';
       ctx.fillText(t.text, q[0] - wd / 2 + 3, q[1] - 2);
@@ -238,7 +285,8 @@ function Scene3D({ id, label, frame, cub, status, others, onClose }: View3dProps
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: 12, marginBottom: 4 }}>
         <b>#{id} {label} · frame {frame}</b>
         <span>bán kính {radius} m</span>
-        {scene && <span>{scene.n.toLocaleString()} điểm ({scene.inside.toLocaleString()} trong box)</span>}
+        {scene && <span>{scene.n.toLocaleString()} điểm ({scene.inside.toLocaleString()} trong box{scene.nEgo ? `, ${scene.nEgo.toLocaleString()} quanh ego` : ''})</span>}
+        {scene && <span title="Biểu tượng ego nổi (mũi tên đỏ) chỉ hướng trước của xe; vòng trắng trên mặt đất dưới xe, đường xám nối tới tâm box. Góc dưới trái: kim đỏ = hướng ego, kim xanh = hướng box">ego cách box {scene.egoDist.toFixed(1)} m</span>}
         <span style={{ color: '#667' }}>kéo chuột: xoay · lăn: zoom · bấm đúp: về mặc định</span>
         <button onClick={() => { orbit.current = defaultOrbit(radius); scheduleRef.current(); }} style={{ marginLeft: 'auto' }}>⟲ Góc nhìn mặc định</button>
         <button onClick={onClose}>Đóng (Q)</button>

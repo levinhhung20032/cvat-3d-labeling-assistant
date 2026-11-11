@@ -26,6 +26,12 @@ export function ViewPanel() {
         <b>{v3.radius} m</b>
         <button type="button" disabled={v3.radius === VIEW3D_LIMITS.radius.def} onClick={() => view3dStore.save({ radius: VIEW3D_LIMITS.radius.def })} style={{ padding: '0 5px' }} title={`Về mặc định ${VIEW3D_LIMITS.radius.def} m`}>↺</button>
       </label>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }} title="Thêm vùng nhỏ quanh xe (ego, gốc toạ độ) vào view 3D, kèm dấu ego chỉ hướng trước. 0 = không tải vùng này (dấu ego vẫn hiện).">
+        Vùng quanh ego
+        <input type="range" min={VIEW3D_LIMITS.egoRadius.min} max={VIEW3D_LIMITS.egoRadius.max} step={1} value={v3.egoRadius} onChange={(e) => view3dStore.save({ egoRadius: Number(e.target.value) })} />
+        <b>{v3.egoRadius === 0 ? 'tắt' : `${v3.egoRadius} m`}</b>
+        <button type="button" disabled={v3.egoRadius === VIEW3D_LIMITS.egoRadius.def} onClick={() => view3dStore.save({ egoRadius: VIEW3D_LIMITS.egoRadius.def })} style={{ padding: '0 5px' }} title={`Về mặc định ${VIEW3D_LIMITS.egoRadius.def} m`}>↺</button>
+      </label>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }}>
         Cỡ điểm
         <input type="range" min={VIEW3D_LIMITS.pointSize.min} max={VIEW3D_LIMITS.pointSize.max} step={0.5} value={v3.pointSize} onChange={(e) => view3dStore.save({ pointSize: Number(e.target.value) })} />

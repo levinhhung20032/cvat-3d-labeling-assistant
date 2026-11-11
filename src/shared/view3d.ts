@@ -30,13 +30,74 @@ export function gatherAround(xyz: Float32Array, count: number, c: Cuboid, radius
   return { pos: pos.subarray(0, n * 3), inBox: inBox.subarray(0, n), n };
 }
 
+/**
+ * Thêm vùng nhỏ quanh ego (gốc hệ ego, `egoRadius` m) vào view; điểm đã nằm trong vùng quanh box (`boxRadius`) bị bỏ để không trùng.
+ * Trả điểm đã đổi sang hệ của view tâm `c` (như gatherAround).
+ */
+export function gatherEgoArea(xyz: Float32Array, count: number, c: Cuboid, egoRadius: number, boxRadius: number, maxPts = 120000): Gathered {
+  if (egoRadius <= 0) return { pos: new Float32Array(0), inBox: new Uint8Array(0), n: 0 };
+  const cos = Math.cos(c.yaw), sin = Math.sin(c.yaw), e2 = egoRadius * egoRadius, b2 = boxRadius * boxRadius;
+  const pos = new Float32Array(Math.min(count, maxPts) * 3), inBox = new Uint8Array(Math.min(count, maxPts));
+  let n = 0;
+  for (let i = 0; i < count; i++) {
+    const x = xyz[i * 3]!, y = xyz[i * 3 + 1]!, z = xyz[i * 3 + 2]!;
+    if (x > egoRadius || x < -egoRadius || y > egoRadius || y < -egoRadius || z > egoRadius || z < -egoRadius) continue;
+    if (x * x + y * y + z * z > e2) continue;
+    const dx = x - c.x, dy = y - c.y, dz = z - c.z;
+    if (dx * dx + dy * dy + dz * dz <= b2) continue; // đã có ở vùng quanh box
+    if (n >= maxPts) break;
+    const u = dx * cos + dy * sin, v = -dx * sin + dy * cos;
+    pos[n * 3] = u; pos[n * 3 + 1] = v; pos[n * 3 + 2] = dz;
+    inBox[n] = Math.abs(u) <= c.sx / 2 && Math.abs(v) <= c.sy / 2 && Math.abs(dz) <= c.sz / 2 ? 1 : 0;
+    n++;
+  }
+  return { pos: pos.subarray(0, n * 3), inBox: inBox.subarray(0, n), n };
+}
+
+/** Vị trí ego (gốc hệ ego, mặt đất dưới xe) và hướng trước của nó (Ox) viết trong hệ của view tâm `c`. */
+export function egoInView(c: Cuboid): { x: number; y: number; z: number; heading: number; dist: number } {
+  const cos = Math.cos(c.yaw), sin = Math.sin(c.yaw);
+  return { x: -(c.x * cos + c.y * sin), y: -(-c.x * sin + c.y * cos), z: -c.z, heading: -c.yaw, dist: Math.hypot(c.x, c.y) };
+}
+
+/**
+ * Dấu ego: vòng tròn trên mặt đất, cọc thẳng đứng lên tới biểu tượng nổi (vẽ bằng 2D ở View3D) và đường nối từ tâm box tới ego.
+ * Mỗi đỉnh 6 số (x, y, z, r, g, b), cặp đỉnh = một đoạn. `icon` = vị trí biểu tượng nổi, `ahead` = điểm phía trước nó 1.5 m (theo hướng
+ * trước của ego) để xoay biểu tượng theo hướng nhìn.
+ */
+export const EGO_ICON_HEIGHT = 1.8;
+export function egoMarker(c: Cuboid): { lines: Float32Array; icon: [number, number, number]; ahead: [number, number, number]; dist: number } {
+  const e = egoInView(c);
+  const ch = Math.cos(e.heading), sh = Math.sin(e.heading);
+  const at = (a: number, b: number, h = 0): [number, number, number] => [e.x + a * ch - b * sh, e.y + a * sh + b * ch, e.z + h];
+  const out: number[] = [];
+  const seg = (p: number[], q: number[], col: number[]) => out.push(...p, ...col, ...q, ...col);
+  const RED = [1, 0.25, 0.25], WHITE = [0.95, 0.95, 0.95], GRAY = [0.55, 0.6, 0.68];
+  const N = 28;
+  for (let i = 0; i < N; i++) {
+    const a = (i / N) * 2 * Math.PI, b = ((i + 1) / N) * 2 * Math.PI;
+    seg(at(Math.cos(a), Math.sin(a)), at(Math.cos(b), Math.sin(b)), WHITE);
+  }
+  seg(at(0, 0), at(0, 0, EGO_ICON_HEIGHT), RED); // cọc
+  seg([0, 0, 0], at(0, 0), GRAY); // box → ego
+  return { lines: Float32Array.from(out), icon: at(0, 0, EGO_ICON_HEIGHT), ahead: at(1.5, 0, EGO_ICON_HEIGHT), dist: e.dist };
+}
+
+/** Góc quay (độ, trong (−180, 180]) của box so với hướng trước của ego: yaw của box trong hệ ego chính là góc lệch so với ego. */
+export function yawVsEgoDeg(yaw: number): number {
+  let d = (yaw * 180) / Math.PI;
+  while (d > 180) d -= 360;
+  while (d <= -180) d += 360;
+  return d;
+}
+
 export interface Box3 { cu: number; cv: number; cw: number; yaw: number; sx: number; sy: number; sz: number }
 
-/** Box `o` (hệ ego) viết trong hệ của view tâm `c`; null nếu tâm của nó xa hơn `radius` + nửa đường chéo. */
-export function boxInView(c: Cuboid, o: Cuboid, radius: number): Box3 | null {
+/** Box `o` (hệ ego) viết trong hệ của view tâm `c`; null nếu tâm của nó xa hơn `radius` + nửa đường chéo (trừ khi `always`). */
+export function boxInView(c: Cuboid, o: Cuboid, radius: number, always = false): Box3 | null {
   const dx = o.x - c.x, dy = o.y - c.y, dz = o.z - c.z;
   const reach = radius + Math.hypot(o.sx, o.sy, o.sz) / 2;
-  if (dx * dx + dy * dy + dz * dz > reach * reach) return null;
+  if (!always && dx * dx + dy * dy + dz * dz > reach * reach) return null;
   const cos = Math.cos(c.yaw), sin = Math.sin(c.yaw);
   return { cu: dx * cos + dy * sin, cv: -dx * sin + dy * cos, cw: dz, yaw: o.yaw - c.yaw, sx: o.sx, sy: o.sy, sz: o.sz };
 }

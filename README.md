@@ -58,7 +58,7 @@ Cài đặt → **Hiển thị** chọn cách Batch Review xếp các frame: **N
 
 ## View 3D (cửa sổ phụ)
 
-Ở Batch Review, nút **🧊 3D** (nhóm *Object & cửa sổ*) hoặc phím `Q` mở một **cửa sổ phụ** nổi trong trang (không phải tab; chiếm 70% màn hình, căn giữa, nền phía sau làm mờ) hiện không gian 3D quanh box của object ở **frame đang chọn**: chỉ point trong bán kính quanh tâm box, kèm box và ID các object khác. Kéo chuột để xoay, lăn để zoom, bấm đúp để về góc mặc định; bấm ra vùng mờ, Esc hoặc `Q` để đóng. Bán kính (mặc định 15 m) và cỡ điểm chỉnh ở Cài đặt › **Hiển thị**. Mặc định không mở; chỉ để xem, không đổi nhãn. Cửa sổ nằm trong trang nên không bị chặn popup.
+Ở Batch Review, nút **🧊 3D** (nhóm *Object & cửa sổ*) hoặc phím `Q` mở một **cửa sổ phụ** nổi trong trang (không phải tab; chiếm 70% màn hình, căn giữa, nền phía sau làm mờ) hiện không gian 3D quanh box của object ở **frame đang chọn**: chỉ point trong bán kính quanh tâm box, kèm box và ID các object khác. Kéo chuột để xoay, lăn để zoom, bấm đúp để về góc mặc định; bấm ra vùng mờ, Esc hoặc `Q` để đóng. Cửa sổ còn tải thêm một **vùng nhỏ quanh xe (ego)** (kèm box các object nằm trong vùng đó) và vẽ **dấu ego** dạng biểu tượng nổi: mũi tên đỏ "EGO" xoay theo hướng trước của xe, cọc xuống vòng tròn trên mặt đất, đường nối tới tâm box. Góc dưới trái khung có **đồng hồ yaw**: kim đỏ = hướng ego, kim xanh = hướng box, kèm số độ lệch của box so với ego. Bán kính quanh box (mặc định 15 m), bán kính vùng ego (mặc định 3 m, 0 = tắt) và cỡ điểm chỉnh ở Cài đặt › **Hiển thị**. Mặc định không mở; chỉ để xem, không đổi nhãn. Cửa sổ nằm trong trang nên không bị chặn popup.
 
 ## Threshold (ngưỡng cảnh báo)
 
