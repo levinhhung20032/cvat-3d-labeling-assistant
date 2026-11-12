@@ -50,6 +50,12 @@ echo.
 echo === Co ban moi tren GitHub: %CUR% -^> %NEW% ^(%BEHIND% commit^) ===
 git log --oneline -n 10 HEAD..@{u}
 echo.
+set "ANS="
+set /p "ANS=Cap nhat len %NEW% roi build? [y/N] "
+if /i not "%ANS%"=="y" (
+    echo Bo qua cap nhat, build ban hien tai %CUR%.
+    goto :noupdate
+)
 set "DIRTY="
 for /f %%i in ('git status --porcelain --untracked-files=no') do set "DIRTY=1"
 if defined DIRTY (

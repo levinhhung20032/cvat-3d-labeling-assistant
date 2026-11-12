@@ -69,7 +69,10 @@ else
             echo "=== New version on GitHub: $cur -> ${new:-?} ($behind commit(s)) ==="
             git log --oneline -n 10 'HEAD..@{u}'
             echo
-            if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+            read -r -p "Update to ${new:-?} then build? [y/N] " ans || ans=""
+            if [[ ! "$ans" =~ ^[Yy] ]]; then
+                echo "Skipping update, building the current version $cur."
+            elif [ -n "$(git status --porcelain --untracked-files=no)" ]; then
                 echo "You have uncommitted changes, NOT pulling to avoid losing code. Commit or stash, then re-run."
             elif git pull --ff-only; then
                 cur="$(version)"
