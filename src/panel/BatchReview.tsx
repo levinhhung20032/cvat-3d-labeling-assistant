@@ -159,7 +159,7 @@ interface DragState { hit: NonNullable<Hit>; x0: number; y0: number; base: Local
 function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, tiltOn, autoSnap, lockKind, onPreview, onCommit, onZoom, pan, onPan, reflect, pwPlane, ovCount, onPreviewOther, onCommitOther }: {
   nbrPlane: EgoPlane | null; nbrZ: number | null; // mặt đường theo đáy box ID nhỏ (vẽ) và độ cao thế giới của nó (snap)
   ovCount: number; // overlays[0 … ovCount − 1] là box của object khác đang chồng lấn (kéo được); phần còn lại (box gương ref) không kéo
-  onPreviewOther: (i: number, b: LocalBox | null) => void; onCommitOther: (i: number, delta: [number, number, number]) => void; // dời box chồng lấn: xem trước / ghi (độ dời tâm theo hệ của khung nhìn)
+  onPreviewOther: (i: number, b: LocalBox | null) => void; onCommitOther: (i: number, delta: [number, number, number], dyaw?: number) => void; // dời box chồng lấn: xem trước / ghi (độ dời tâm theo hệ của khung nhìn)
   pwPlane: EgoPlane | null; // mặt đường Patchwork++ gợi ý (tím) trong hệ của khung nhìn
   lockKind: GroundKind | null; // nguồn mặt đường của lock (frame chọn đúng 1 nguồn); null: không lock
   reflect: { pts: Local | null; plane: number } | null; // ref mode (chỉ ở tab Ref)
@@ -175,7 +175,7 @@ function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, g
   const ref = useRef<HTMLCanvasElement>(null);
   const drag = useRef<DragState | null>(null);
   const panDrag = useRef<{ x0: number; y0: number; base: Pan } | null>(null);
-  const ovDrag = useRef<{ i: number; base: LocalBox; x0: number; y0: number; last: LocalBox; moved: boolean } | null>(null);
+  const ovDrag = useRef<{ i: number; base: LocalBox; x0: number; y0: number; last: LocalBox; moved: boolean; rot: { cx: number; cy: number } | null } | null>(null);
   const k = size / (2 * half);
   const [ox, oy] = panOffset(view, pan, k);
   const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -231,10 +231,13 @@ function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, g
     // Giữ Alt: kéo ở bất kỳ đâu trong ô = xoay thay vì di chuyển (cạnh vẫn đổi kích thước).
     let hit = hitTest(view, base, px, py, size, half);
     // Box chồng lấn: kéo ở phần chỉ thuộc box đó (ngoài box đang xét), hoặc giữ Shift để kéo nó ngay cả ở vùng chồng lên box đang xét.
-    const oi = e.altKey ? -1 : ovAt(px, py);
+    const oi = ovAt(px, py);
     if (oi >= 0 && (e.shiftKey || !hit)) {
       ref.current!.setPointerCapture(e.pointerId);
-      ovDrag.current = { i: oi, base: overlays[oi]!, x0: px, y0: py, last: overlays[oi]!, moved: false };
+      // Giữ Alt: xoay box chồng lấn (view Trên: quanh tâm của nó, hướng về phía con trỏ; view Bên / Trước: theo độ dời ngang) thay vì dời.
+      const ob = overlays[oi]!;
+      const rc = screenRect(view, { ...ob, dyaw: 0 }, size, half);
+      ovDrag.current = { i: oi, base: ob, x0: px, y0: py, last: ob, moved: false, rot: e.altKey ? { cx: (rc.left + rc.right) / 2, cy: (rc.top + rc.bottom) / 2 } : null };
       return;
     }
     if (e.altKey && (!hit || hit.mode === 'move')) hit = { mode: 'move' };
@@ -251,7 +254,10 @@ function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, g
     if (od) {
       const dx = px - od.x0, dy = py - od.y0;
       if (Math.hypot(dx, dy) > 1) od.moved = true;
-      od.last = dragMove(view, od.base, dx, dy, k);
+      if (od.rot) {
+        const r = view === 'top' ? dragRotateRel(od.base, od.x0 - od.rot.cx, od.y0 - od.rot.cy, px - od.rot.cx, py - od.rot.cy) : dragYawByX(od.base, dx);
+        od.last = { ...od.base, dyaw: od.base.dyaw + r.dyaw };
+      } else od.last = dragMove(view, od.base, dx, dy, k);
       onPreviewOther(od.i, od.last);
       return;
     }
@@ -289,7 +295,7 @@ function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, g
     const od = ovDrag.current;
     if (od) {
       ovDrag.current = null;
-      if (od.moved) onCommitOther(od.i, [od.last.cu - od.base.cu, od.last.cv - od.base.cv, od.last.cw - od.base.cw]);
+      if (od.moved) onCommitOther(od.i, [od.last.cu - od.base.cu, od.last.cv - od.base.cv, od.last.cw - od.base.cw], od.last.dyaw - od.base.dyaw);
       onPreviewOther(od.i, null);
       return;
     }
@@ -518,12 +524,12 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
     return plane && box ? [...o, { ...mirrorBox(box, plane.w), color: REF_COLOR }] : o;
   }, [refCub, overlayCubs, M, ovPrev, plane?.w, plane ? box : null]);
   /** Ghi vị trí mới của box chồng lấn: dời tâm theo độ dời trong hệ khung nhìn (đã quy về hệ yaw của box đang xét), giữ nguyên cỡ / góc của nó. */
-  const commitOther = (i: number, delta: [number, number, number]) => {
+  const commitOther = (i: number, delta: [number, number, number], dyaw = 0) => {
     const other = overlayCubs[i], num = overlayNums[i];
     if (!refCub || !other || num === undefined) return;
     const [du, dv, dw] = M ? apply(transpose(M), delta) : delta;
     const cos = Math.cos(refCub.yaw), sin = Math.sin(refCub.yaw);
-    onCommitOther(num, f, { ...other, x: other.x + du * cos - dv * sin, y: other.y + du * sin + dv * cos, z: other.z + dw });
+    onCommitOther(num, f, { ...other, x: other.x + du * cos - dv * sin, y: other.y + du * sin + dv * cos, z: other.z + dw, yaw: other.yaw + dyaw });
   }; // ref tắt: không phụ thuộc box (box tạo mới mỗi lần vẽ)
   const color = statusColor(st.status);
   return (
@@ -992,7 +998,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
   /** Dời box của object kia (đang chồng lấn với object đang chọn) ở frame f: ghi vào nháp như một lần sửa của object đó, hoàn tác được. */
   const commitOther = (n: number, f: number, cub: Cuboid) => {
     onEdit(n - 1, f, cub, false);
-    setNote(`Đã dời object #${n} ở frame ${f} (đang chồng lấn với #${num}). Hoàn tác được.`);
+    setNote(`Đã sửa (dời / xoay) object #${n} ở frame ${f} (đang chồng lấn với #${num}). Hoàn tác được.`);
   };
   useEffect(() => { onSel(selFrame); }, [selFrame]);
 
@@ -1856,7 +1862,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
         })()}
       </details>
       <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>
-        Mẹo thao tác <Help text={`phím tắt khoá KF / outside / ground snap / chấp nhận / bỏ qua gợi ý (${['kf.toggle', 'outside.from', 'ground.snap', 'suggest.accept', 'suggest.ignore'].map((id) => keyOf(id) ?? 'chưa gán').join(' / ')}) tác dụng lên cột frame đang trỏ chuột (viền xanh) · rê chuột lên nút để xem phím tắt, đổi phím ở tab "Phím tắt" · cuộn chuột trên ô để zoom mọi frame · giữ chuột phải rồi kéo để dời khung nhìn (mọi frame cùng dời), nút ⌖ Về giữa để đưa về giữa ·` + " kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo để xoay (giữ thêm CTRL = xoay frame này và TẤT CẢ keyframe phía sau) · CTRL+kéo trong box = dời frame này và TẤT CẢ keyframe phía sau cùng độ lệch · CTRL+kéo cạnh / góc = đổi kích thước frame này và TẤT CẢ keyframe phía sau (nguồn mặt đường \"box ID nhỏ\" lấy đáy các box có ID nhỏ hơn trong 5 m) (view Trên: yaw · view Bên: pitch · view Trước: roll, nếu bật \"nghiêng theo mặt đường\") · sửa frame nào thì frame đó thành keyframe"} />
+        Mẹo thao tác <Help text={`phím tắt khoá KF / outside / ground snap / chấp nhận / bỏ qua gợi ý (${['kf.toggle', 'outside.from', 'ground.snap', 'suggest.accept', 'suggest.ignore'].map((id) => keyOf(id) ?? 'chưa gán').join(' / ')}) tác dụng lên cột frame đang trỏ chuột (viền xanh) · rê chuột lên nút để xem phím tắt, đổi phím ở tab "Phím tắt" · cuộn chuột trên ô để zoom mọi frame · giữ chuột phải rồi kéo để dời khung nhìn (mọi frame cùng dời), nút ⌖ Về giữa để đưa về giữa ·` + " kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo để xoay (giữ thêm CTRL = xoay frame này và TẤT CẢ keyframe phía sau) · GIỮ ALT rồi kéo ở phần box chồng lấn (nét đứt vàng, ngoài box đang xét) = xoay box đó · CTRL+kéo trong box = dời frame này và TẤT CẢ keyframe phía sau cùng độ lệch · CTRL+kéo cạnh / góc = đổi kích thước frame này và TẤT CẢ keyframe phía sau (nguồn mặt đường \"box ID nhỏ\" lấy đáy các box có ID nhỏ hơn trong 5 m) (view Trên: yaw · view Bên: pitch · view Trước: roll, nếu bật \"nghiêng theo mặt đường\") · sửa frame nào thì frame đó thành keyframe"} />
       </div>
       <div style={{ display: 'flex', flexDirection: rowsV ? 'column' : 'row', gap: prefs.gap, overflowX: 'auto', justifyContent: 'safe center', alignItems: rowsV ? 'safe center' : undefined, padding: '2px 4px 6px' }}>
         {cols.map((c) => colEl(c, String(c.f), size, { onBelow: !refS.on && !refS.dismissed ? reportBelow : undefined, horizontal: rowsV }))}
