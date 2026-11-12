@@ -159,7 +159,7 @@ interface DragState { hit: NonNullable<Hit>; x0: number; y0: number; base: Local
 function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, tiltOn, autoSnap, lockKind, onPreview, onCommit, onZoom, pan, onPan, reflect, pwPlane, ovCount, onPreviewOther, onCommitOther }: {
   nbrPlane: EgoPlane | null; nbrZ: number | null; // mặt đường theo đáy box ID nhỏ (vẽ) và độ cao thế giới của nó (snap)
   ovCount: number; // overlays[0 … ovCount − 1] là box của object khác đang chồng lấn (kéo được); phần còn lại (box gương ref) không kéo
-  onPreviewOther: (i: number, b: LocalBox | null) => void; onCommitOther: (i: number, delta: [number, number, number], dyaw?: number) => void; // dời box chồng lấn: xem trước / ghi (độ dời tâm theo hệ của khung nhìn)
+  onPreviewOther: (i: number, b: LocalBox | null) => void; onCommitOther: (i: number, delta: [number, number, number], dyaw?: number, all?: boolean) => void; // dời box chồng lấn: xem trước / ghi (độ dời tâm theo hệ của khung nhìn)
   pwPlane: EgoPlane | null; // mặt đường Patchwork++ gợi ý (tím) trong hệ của khung nhìn
   lockKind: GroundKind | null; // nguồn mặt đường của lock (frame chọn đúng 1 nguồn); null: không lock
   reflect: { pts: Local | null; plane: number } | null; // ref mode (chỉ ở tab Ref)
@@ -295,7 +295,7 @@ function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, g
     const od = ovDrag.current;
     if (od) {
       ovDrag.current = null;
-      if (od.moved) onCommitOther(od.i, [od.last.cu - od.base.cu, od.last.cv - od.base.cv, od.last.cw - od.base.cw], od.last.dyaw - od.base.dyaw);
+      if (od.moved) onCommitOther(od.i, [od.last.cu - od.base.cu, od.last.cv - od.base.cv, od.last.cw - od.base.cw], od.last.dyaw - od.base.dyaw, !!od.rot && e.ctrlKey);
       onPreviewOther(od.i, null);
       return;
     }
@@ -377,7 +377,7 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
   pIgnored: boolean; onIgnoreP: (f: number, on: boolean) => void; // bỏ qua / hoàn lại cảnh báo ít điểm (P) của frame này
   issues: FrameIssue[]; issueIgnored: (kind: string) => boolean; onIgnoreIssue: (f: number, kind: string, on: boolean) => void;
   qcOn: boolean; qcNote: string; onQcNote: (f: number, text: string) => void;
-  overlap: { other: number; ratio: number }[]; overlayCubs: Cuboid[]; overlayNums: number[]; onCommitOther: (num: number, f: number, c: Cuboid) => void; ignoredOverlap: number[]; onRestoreOverlap: (other: number) => void; onIgnoreOverlap: (other: number) => void; onOpenObject: (other: number) => void;
+  overlap: { other: number; ratio: number }[]; overlayCubs: Cuboid[]; overlayNums: number[]; onCommitOther: (num: number, f: number, c: Cuboid, allAfter?: boolean) => void; ignoredOverlap: number[]; onRestoreOverlap: (other: number) => void; onIgnoreOverlap: (other: number) => void; onOpenObject: (other: number) => void;
   onToggleOutside: (f: number) => void; onHover: (f: number | null) => void; scene: Scene;
   motion: MotionWarning | null; motionIgnored: boolean; onIgnoreMotion: (f: number, on: boolean) => void;
   autoSnap: boolean; onSnap: (f: number, g: GroundResult | null) => void; onGround: (f: number) => void;
@@ -524,12 +524,12 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
     return plane && box ? [...o, { ...mirrorBox(box, plane.w), color: REF_COLOR }] : o;
   }, [refCub, overlayCubs, M, ovPrev, plane?.w, plane ? box : null]);
   /** Ghi vị trí mới của box chồng lấn: dời tâm theo độ dời trong hệ khung nhìn (đã quy về hệ yaw của box đang xét), giữ nguyên cỡ / góc của nó. */
-  const commitOther = (i: number, delta: [number, number, number], dyaw = 0) => {
+  const commitOther = (i: number, delta: [number, number, number], dyaw = 0, all = false) => {
     const other = overlayCubs[i], num = overlayNums[i];
     if (!refCub || !other || num === undefined) return;
     const [du, dv, dw] = M ? apply(transpose(M), delta) : delta;
     const cos = Math.cos(refCub.yaw), sin = Math.sin(refCub.yaw);
-    onCommitOther(num, f, { ...other, x: other.x + du * cos - dv * sin, y: other.y + du * sin + dv * cos, z: other.z + dw, yaw: other.yaw + dyaw });
+    onCommitOther(num, f, { ...other, x: other.x + du * cos - dv * sin, y: other.y + du * sin + dv * cos, z: other.z + dw, yaw: other.yaw + dyaw }, all && dyaw !== 0);
   }; // ref tắt: không phụ thuộc box (box tạo mới mỗi lần vẽ)
   const color = statusColor(st.status);
   return (
@@ -996,7 +996,16 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
   }, [ignoredOverlaps, num]);
   const EMPTY_NUMS: number[] = [];
   /** Dời box của object kia (đang chồng lấn với object đang chọn) ở frame f: ghi vào nháp như một lần sửa của object đó, hoàn tác được. */
-  const commitOther = (n: number, f: number, cub: Cuboid) => {
+  const commitOther = (n: number, f: number, cub: Cuboid, allAfter = false) => {
+    const tr = ann.tracks[n - 1], cur = tr ? stateAt(tr, f).cuboid : null;
+    if (allAfter && tr && cur) {
+      // Ctrl+Alt+kéo box chồng lấn: độ xoay vừa kéo cộng vào frame này (thành keyframe nếu chưa) và MỌI keyframe có box phía sau của object đó
+      const d = cub.yaw - cur.yaw;
+      const r2 = rotateAllKeyframes(upsertKf(tr, f, cub), d, 0, 0, f + 1); // frame này đặt đúng box vừa xoay, các keyframe sau cộng độ xoay
+      onTrack(n - 1, r2.track, [f, ...r2.frames]);
+      setNote(`Đã xoay object #${n} ở frame ${f} và mọi keyframe phía sau (đang chồng lấn với #${num}). Hoàn tác được.`);
+      return;
+    }
     onEdit(n - 1, f, cub, false);
     setNote(`Đã sửa (dời / xoay) object #${n} ở frame ${f} (đang chồng lấn với #${num}). Hoàn tác được.`);
   };
@@ -1862,7 +1871,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
         })()}
       </details>
       <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>
-        Mẹo thao tác <Help text={`phím tắt khoá KF / outside / ground snap / chấp nhận / bỏ qua gợi ý (${['kf.toggle', 'outside.from', 'ground.snap', 'suggest.accept', 'suggest.ignore'].map((id) => keyOf(id) ?? 'chưa gán').join(' / ')}) tác dụng lên cột frame đang trỏ chuột (viền xanh) · rê chuột lên nút để xem phím tắt, đổi phím ở tab "Phím tắt" · cuộn chuột trên ô để zoom mọi frame · giữ chuột phải rồi kéo để dời khung nhìn (mọi frame cùng dời), nút ⌖ Về giữa để đưa về giữa ·` + " kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo để xoay (giữ thêm CTRL = xoay frame này và TẤT CẢ keyframe phía sau) · GIỮ ALT rồi kéo ở phần box chồng lấn (nét đứt vàng, ngoài box đang xét) = xoay box đó · CTRL+kéo trong box = dời frame này và TẤT CẢ keyframe phía sau cùng độ lệch · CTRL+kéo cạnh / góc = đổi kích thước frame này và TẤT CẢ keyframe phía sau (nguồn mặt đường \"box ID nhỏ\" lấy đáy các box có ID nhỏ hơn trong 5 m) (view Trên: yaw · view Bên: pitch · view Trước: roll, nếu bật \"nghiêng theo mặt đường\") · sửa frame nào thì frame đó thành keyframe"} />
+        Mẹo thao tác <Help text={`phím tắt khoá KF / outside / ground snap / chấp nhận / bỏ qua gợi ý (${['kf.toggle', 'outside.from', 'ground.snap', 'suggest.accept', 'suggest.ignore'].map((id) => keyOf(id) ?? 'chưa gán').join(' / ')}) tác dụng lên cột frame đang trỏ chuột (viền xanh) · rê chuột lên nút để xem phím tắt, đổi phím ở tab "Phím tắt" · cuộn chuột trên ô để zoom mọi frame · giữ chuột phải rồi kéo để dời khung nhìn (mọi frame cùng dời), nút ⌖ Về giữa để đưa về giữa ·` + " kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo để xoay (giữ thêm CTRL = xoay frame này và TẤT CẢ keyframe phía sau) · GIỮ ALT rồi kéo ở phần box chồng lấn (nét đứt vàng, ngoài box đang xét) = xoay box đó (thêm CTRL = xoay luôn mọi keyframe phía sau của object đó) · CTRL+kéo trong box = dời frame này và TẤT CẢ keyframe phía sau cùng độ lệch · CTRL+kéo cạnh / góc = đổi kích thước frame này và TẤT CẢ keyframe phía sau (nguồn mặt đường \"box ID nhỏ\" lấy đáy các box có ID nhỏ hơn trong 5 m) (view Trên: yaw · view Bên: pitch · view Trước: roll, nếu bật \"nghiêng theo mặt đường\") · sửa frame nào thì frame đó thành keyframe"} />
       </div>
       <div style={{ display: 'flex', flexDirection: rowsV ? 'column' : 'row', gap: prefs.gap, overflowX: 'auto', justifyContent: 'safe center', alignItems: rowsV ? 'safe center' : undefined, padding: '2px 4px 6px' }}>
         {cols.map((c) => colEl(c, String(c.f), size, { onBelow: !refS.on && !refS.dismissed ? reportBelow : undefined, horizontal: rowsV }))}
