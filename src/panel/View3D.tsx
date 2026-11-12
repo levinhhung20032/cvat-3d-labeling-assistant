@@ -53,8 +53,10 @@ function Scene3D({ id, label, frame, cub, status, others, onClose }: View3dProps
   const [tick, setTick] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const [pcVer, setPcVer] = useState(0);
-  useEffect(() => pointClouds.subscribe(() => setPcVer((x) => x + 1)), []);
+  const pcRef = useRef<ReturnType<typeof pointClouds.peek>>(undefined);
+  useEffect(() => pointClouds.subscribe(() => { if (pointClouds.peek(frame) !== pcRef.current) setPcVer((x) => x + 1); }), [frame]); // chỉ vẽ lại khi đám mây của frame này đổi (không theo mọi lần nạp frame khác)
   const pc = pointClouds.peek(frame);
+  pcRef.current = pc;
 
   // Dữ liệu: điểm trong bán kính + màu, và các cạnh box.
   const scene = useMemo(() => {

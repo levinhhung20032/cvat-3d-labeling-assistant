@@ -42,6 +42,7 @@ import { findLateStart, findLongOutsideGaps, SPLIT_OUTSIDE_FRAMES, type OutsideG
 import { useColors } from './colorStore';
 import { useFrameLayout } from './layoutStore';
 import { View3D, type View3dOther } from './View3D';
+import { yawVsEgoDeg } from '../shared/view3d';
 import { clientIdOf } from './cvatIds';
 import { adviseGround, type GroundAdvice } from '../shared/groundSuggest';
 import { confirmSnap, DEFAULT_GROUND, egoGround, levelGround, neighborGroundZ, enforceConsistency, GROUND_KINDS, groundSnap, groundSnapBy, pwGroundPlane, type ConsistencyItem, tiltFromPlane, type GroundKind, type GroundResult, type GroundSector } from '../shared/ground';
@@ -537,7 +538,7 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
     >
       <div style={{ background: color, color: '#fff', padding: '1px 4px', fontSize: Math.max(11, Math.min(14, size / 14)), display: 'flex', alignItems: 'center', gap: 4 }}>
         <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={`frame ${f} · ${STATUS_TEXT[st.status]}`}>
-        {bad || shownMotion || overlap.length ? '⚠ ' : ''}frame {f} · {STATUS_TEXT[st.status]}{edited ? ' · ✎' : ''}{qcNote ? ' · 📝' : ''}{st.cuboid && (st.cuboid.rx !== 0 || st.cuboid.ry !== 0) ? ` · ∠${(st.cuboid.rx * 57.2958).toFixed(1)}°/${(st.cuboid.ry * 57.2958).toFixed(1)}°` : ''}
+        {bad || shownMotion || overlap.length ? '⚠ ' : ''}frame {f} · {STATUS_TEXT[st.status]}{edited ? ' · ✎' : ''}{qcNote ? ' · 📝' : ''}{st.cuboid ? ` · yaw ${yawVsEgoDeg(st.cuboid.yaw).toFixed(1)}°` : ''}{st.cuboid && (st.cuboid.rx !== 0 || st.cuboid.ry !== 0) ? ` · ∠${(st.cuboid.rx * 57.2958).toFixed(1)}°/${(st.cuboid.ry * 57.2958).toFixed(1)}°` : ''}
         </span>
         <span style={{ flex: 'none', display: 'flex', gap: 2 }}>
           {st.cuboid && (
@@ -1454,8 +1455,10 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
   // View 3D (cửa sổ phụ): object + frame đang chọn (chưa chọn frame thì frame đầu có box của cửa sổ); theo frame chọn khi đang mở.
   const [view3d, setView3d] = useState(false);
   const v3Frame = selFrame ?? cols.find((c) => c.st.cuboid)?.f ?? null;
-  const v3Cub = track && v3Frame !== null ? stateAt(track, v3Frame).cuboid : null;
-  const v3Status = track && v3Frame !== null ? stateAt(track, v3Frame).status : 'none';
+  // Chỉ tính khi cửa sổ 3D đang mở (không tính sẵn mỗi lần render).
+  const v3State = view3d && track && v3Frame !== null ? stateAt(track, v3Frame) : null;
+  const v3Cub = v3State?.cuboid ?? null;
+  const v3Status = v3State?.status ?? 'none';
   const v3Others = useMemo<View3dOther[]>(() => {
     if (!view3d || v3Frame === null) return [];
     const out: View3dOther[] = [];
@@ -1468,12 +1471,12 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
   }, [view3d, v3Frame, ann, num]);
   const toggle3d = () => {
     if (view3d) { setView3d(false); return; }
-    if (!v3Cub) { setNote('View 3D: object này không có box ở frame đang chọn (hãy chọn một frame có box).'); return; }
+    if (!track || v3Frame === null || !stateAt(track, v3Frame).cuboid) { setNote('View 3D: object này không có box ở frame đang chọn (hãy chọn một frame có box).'); return; }
     setView3d(true);
   };
   const toggle3dRef = useRef(toggle3d);
   toggle3dRef.current = toggle3d;
-  useEffect(() => { if (view3d && !v3Cub) setView3d(false); }, [view3d, v3Cub]); // frame đang chọn không còn box: đóng
+  useEffect(() => { if (view3d && !v3Cub) setView3d(false); }, [view3d, !!v3Cub]); // frame đang chọn không còn box: đóng
   const az = selCol?.ref ? azimuthDeg(selCol.ref) : null;
   /** Một cột frame (lưới Batch Review và hai cột của tab Ref dùng chung). */
   const colEl = (c: (typeof cols)[number], key: string, sz: number, extra: { refl?: RefState | null; onBelow?: (f: number, n: number) => void; onRefPlane?: (f: number, d: number | null) => void; half?: number; locHalf?: number; horizontal?: boolean; hideGroundPick?: boolean } = {}) => (
