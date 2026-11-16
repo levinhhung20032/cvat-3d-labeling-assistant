@@ -41,7 +41,7 @@ export function DeleteDialog({ job, baseline, labels, ids, allowed, onClose, onD
   };
 
   return (
-    <div ref={root} style={{ border: '2px solid var(--cvla-c-bb0000, #b00)', background: 'var(--cvla-c-fff5f5, #fff5f5)', padding: 10, margin: '8px 0' }}>
+    <div ref={root} style={{ border: '2px solid #b00', background: '#fff5f5', padding: 10, margin: '8px 0' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
         <b>Xóa object ngoài danh sách gốc khỏi CVAT (job {job.id})</b>
         <button onClick={onClose} disabled={busy}>Đóng</button>
@@ -56,11 +56,11 @@ export function DeleteDialog({ job, baseline, labels, ids, allowed, onClose, onD
       </p>
       <div style={{ display: 'flex', gap: 8 }}>
         <button disabled={busy} onClick={() => run(false)}>Chạy thử (không gửi gì)</button>
-        <button disabled={busy || !ok} onClick={() => run(true)} style={{ fontWeight: 700, background: ok ? 'var(--cvla-c-ffd6d6, #ffd6d6)' : undefined }}>🗑 Xóa khỏi CVAT</button>
+        <button disabled={busy || !ok} onClick={() => run(true)} style={{ fontWeight: 700, background: ok ? '#ffd6d6' : undefined }}>🗑 Xóa khỏi CVAT</button>
       </div>
       {busy && <p>Đang xử lý…</p>}
       {result && (
-        <div style={{ margin: '8px 0', padding: 6, border: `1px solid ${result.ok ? 'var(--cvla-c-00aa00, #0a0)' : 'var(--cvla-c-bb0000, #b00)'}`, background: result.ok ? 'var(--cvla-c-e8ffe8, #e8ffe8)' : 'var(--cvla-c-ffdddd, #fdd)' }}>
+        <div style={{ margin: '8px 0', padding: 6, border: `1px solid ${result.ok ? '#0a0' : '#b00'}`, background: result.ok ? '#e8ffe8' : '#fdd' }}>
           <b>{result.ok ? (result.sent ? 'Thành công' : 'Chạy thử đạt') : 'Không thành công'}</b> · bước: {result.stage}
           <div>{result.message}</div>
         </div>

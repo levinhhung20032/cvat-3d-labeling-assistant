@@ -21,7 +21,7 @@ export function OtAllocator({ shift }: { shift: Shift }) {
   const [split, setSplit] = useState(true);
   const [preview, setPreview] = useState<Record<string, string | null> | null>(null);
   const multiJob = new Set(own.map((c) => c.jobId)).size > 1;
-  if (!own.length) return <p style={{ color: 'var(--cvla-c-666666, #666)', margin: '4px 0' }}>Ca OT này chưa có ID nào để dồn KPI (chỉ tính những gì đã upload; ID đã làm trước đó trong ngày thuộc ca đầu tiên đã làm).</p>;
+  if (!own.length) return <p style={{ color: '#666', margin: '4px 0' }}>Ca OT này chưa có ID nào để dồn KPI (chỉ tính những gì đã upload; ID đã làm trước đó trong ngày thuộc ca đầu tiên đã làm).</p>;
 
   const mineKeys = new Set(own.map((c) => c.key));
   /** KPI ca `name` đã có, không kể các ID của ca OT này (đang được dồn lại). */
@@ -50,14 +50,14 @@ export function OtAllocator({ shift }: { shift: Shift }) {
   const summary = (rows: [string, { kpi: number; rework: number; n: number }][]) => rows.map(([to, e]) => (
     <span key={to} style={{ marginRight: 12, whiteSpace: 'nowrap' }}>
       <b>{to === shift.name ? `giữ ở ${shift.name}` : to}</b>: {e.n} ID · {e.kpi}{e.rework ? ` (rework ${e.rework})` : ''}
-      {to !== shift.name && targets.some((t) => t.name === to) ? <span style={{ color: 'var(--cvla-c-555555, #555)' }}> → ca có {current(to) + e.kpi}/{sch.kpiTarget}</span> : null}
+      {to !== shift.name && targets.some((t) => t.name === to) ? <span style={{ color: '#555' }}> → ca có {current(to) + e.kpi}/{sch.kpiTarget}</span> : null}
     </span>
   ));
   const assigned = own.some((c) => c.owner !== shift.name);
 
   return (
-    <div style={{ border: '1px dashed var(--cvla-c-7c3aed, #7c3aed)', background: 'var(--cvla-c-faf7ff, #faf7ff)', padding: 6, margin: '6px 0' }}>
-      <b>Dồn KPI ca OT</b> <span style={{ color: 'var(--cvla-c-555555, #555)' }}>({own.length} ID · {own.reduce((n, c) => n + c.kpi, 0)} KPI)</span>
+    <div style={{ border: '1px dashed #7c3aed', background: '#faf7ff', padding: 6, margin: '6px 0' }}>
+      <b>Dồn KPI ca OT</b> <span style={{ color: '#555' }}>({own.length} ID · {own.reduce((n, c) => n + c.kpi, 0)} KPI)</span>
       <div style={{ margin: '4px 0' }}>Hiện tại: {summary(byShift((c) => c.owner))}</div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', alignItems: 'center' }}>
         <label>Dồn vào ca{' '}
@@ -78,9 +78,9 @@ export function OtAllocator({ shift }: { shift: Shift }) {
             <thead><tr style={{ textAlign: 'left' }}><th>ID</th><th>Nhãn</th><th>KPI</th><th>Dồn vào</th></tr></thead>
             <tbody>
               {own.map((c) => (
-                <tr key={c.key} style={{ borderTop: '1px solid var(--cvla-c-e5e0f5, #e5e0f5)' }}>
+                <tr key={c.key} style={{ borderTop: '1px solid #e5e0f5' }}>
                   <td>{idText(c, multiJob)}</td><td>{c.label}</td>
-                  <td>{c.kpi}{c.rework ? <span style={{ color: 'var(--cvla-c-7c2d12, #7c2d12)' }} title="Rework: sửa lại ID đã làm ở ngày trước (vẫn tính KPI)"> (rework)</span> : ''}</td>
+                  <td>{c.kpi}{c.rework ? <span style={{ color: '#7c2d12' }} title="Rework: sửa lại ID đã làm ở ngày trước (vẫn tính KPI)"> (rework)</span> : ''}</td>
                   <td>
                     <select value={preview[c.key] ?? ''} onChange={(e) => setPreview({ ...preview, [c.key]: e.target.value || null })}>
                       <option value="">giữ ở {shift.name}</option>

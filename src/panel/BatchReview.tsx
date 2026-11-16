@@ -334,7 +334,7 @@ function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, g
         onContextMenu={(e) => e.preventDefault()}
       />
       {tip && !ovDrag.current && !drag.current && (
-        <div style={{ position: 'absolute', left: Math.min(tip.x + 10, size - 44), top: Math.max(0, tip.y - 20), background: 'var(--cvla-c-0b3a6b, #0b3a6b)', color: 'var(--cvla-c-ffffff, #fff)', fontSize: 12, fontWeight: 700, padding: '1px 6px', borderRadius: 6, pointerEvents: 'none', whiteSpace: 'nowrap' }}>ID #{tip.n}</div>
+        <div style={{ position: 'absolute', left: Math.min(tip.x + 10, size - 44), top: Math.max(0, tip.y - 20), background: '#0b3a6b', color: '#fff', fontSize: 12, fontWeight: 700, padding: '1px 6px', borderRadius: 6, pointerEvents: 'none', whiteSpace: 'nowrap' }}>ID #{tip.n}</div>
       )}
     </div>
   );
@@ -532,7 +532,7 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
   useEffect(() => { onRefPlane?.(f, plane && box ? plane.w - (box.cw - box.sz / 2) : null); }, [f, plane?.w, box?.cw, box?.sz]);
   const [ovPrev, setOvPrev] = useState<{ i: number; box: LocalBox } | null>(null); // box chồng lấn đang được kéo (xem trước ở cả 3 view)
   const overlays = useMemo(() => {
-    const o = refCub ? overlayCubs.map((x, i) => { const b = boxV(localBoxOf(refCub, x)); return i >= overlayCubs.length - nbCount ? { ...b, color: 'var(--cvla-c-2f9bff, #2f9bff)' } : b; }) : [];
+    const o = refCub ? overlayCubs.map((x, i) => { const b = boxV(localBoxOf(refCub, x)); return i >= overlayCubs.length - nbCount ? { ...b, color: '#2f9bff' } : b; }) : [];
     if (ovPrev && o[ovPrev.i]) o[ovPrev.i] = { ...ovPrev.box, color: o[ovPrev.i]!.color };
     return plane && box ? [...o, { ...mirrorBox(box, plane.w), color: REF_COLOR }] : o;
   }, [refCub, overlayCubs, nbCount, M, ovPrev, plane?.w, plane ? box : null]);
@@ -551,11 +551,11 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
       // Bấm đúp vào cột: thu nhỏ tool và đưa camera 3D của CVAT tới object ở frame này (không áp dụng khi bấm vào nút / ô nhập)
       onDoubleClick={(e) => { if ((e.target as HTMLElement).closest('button, input, textarea, select')) return; onFocusFrame(f); }}
       // Phím khoá KF / outside / ground snap / chấp nhận / bỏ qua gợi ý tác dụng lên cột đang trỏ chuột; viền xanh cho biết cột nào sẽ nhận phím.
-      onMouseEnter={(e) => { onHover(f); e.currentTarget.style.boxShadow = '0 0 0 3px var(--cvla-c-2563eb, #2563eb)'; }}
+      onMouseEnter={(e) => { onHover(f); e.currentTarget.style.boxShadow = '0 0 0 3px #2563eb'; }}
       onMouseLeave={(e) => { onHover(null); e.currentTarget.style.boxShadow = ''; }}
-      style={{ border: `3px solid ${color}`, outline: selected ? '2px solid var(--cvla-c-111111, #111)' : 'none', width: horizontal ? size * 3 + 2 * VIEW_GAP : size, flex: 'none' }}
+      style={{ border: `3px solid ${color}`, outline: selected ? '2px solid #111' : 'none', width: horizontal ? size * 3 + 2 * VIEW_GAP : size, flex: 'none' }}
     >
-      <div style={{ background: color, color: 'var(--cvla-c-ffffff, #fff)', padding: '1px 4px', fontSize: Math.max(11, Math.min(14, size / 14)), display: 'flex', alignItems: 'center', gap: 4 }}>
+      <div style={{ background: color, color: '#fff', padding: '1px 4px', fontSize: Math.max(11, Math.min(14, size / 14)), display: 'flex', alignItems: 'center', gap: 4 }}>
         <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={`frame ${f} · ${STATUS_TEXT[st.status]}`}>
         {bad || shownMotion || overlap.length ? '⚠ ' : ''}frame {f} · {STATUS_TEXT[st.status]}{edited ? ' · ✎' : ''}{qcNote ? ' · 📝' : ''}{st.cuboid ? ` · yaw ${yawVsEgoDeg(st.cuboid.yaw).toFixed(1)}°` : ''}{st.cuboid && (st.cuboid.rx !== 0 || st.cuboid.ry !== 0) ? ` · ∠${(st.cuboid.rx * 57.2958).toFixed(1)}°/${(st.cuboid.ry * 57.2958).toFixed(1)}°` : ''}
         </span>
@@ -579,31 +579,31 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
       {/* Kích thước box ở frame này (dài × rộng × cao, m): dòng riêng cao cố định ngay dưới tiêu đề, không đè lên point cloud; đang kéo thì hiện
           kích thước mới. Frame không có box vẫn giữ dòng trống để các cột thẳng hàng. */}
       <div
-        style={{ height: 16, lineHeight: '16px', fontSize: 11, padding: '0 4px', background: 'var(--cvla-c-eef2f7, #eef2f7)', color: 'var(--cvla-c-222222, #222)', whiteSpace: 'nowrap', overflow: 'hidden', display: 'flex', alignItems: 'center', gap: 4, fontVariantNumeric: 'tabular-nums' }}
+        style={{ height: 16, lineHeight: '16px', fontSize: 11, padding: '0 4px', background: '#eef2f7', color: '#222', whiteSpace: 'nowrap', overflow: 'hidden', display: 'flex', alignItems: 'center', gap: 4, fontVariantNumeric: 'tabular-nums' }}
         title={box ? `Dài × rộng × cao của box ở frame ${f} (m)` : undefined}
       >
         <span style={{ flex: '1 0 auto', whiteSpace: 'nowrap' }}>{box ? <>L×W×H <b>{box.sx.toFixed(2)} × {box.sy.toFixed(2)} × {box.sz.toFixed(2)}</b> m</> : ''}</span>
         {!hideGroundPick && <GroundPick kind={kind} onChange={(k) => onKind(f, k)} title={`Mặt đường của RIÊNG frame ${f} (đổi ở frame khác không ảnh hưởng frame này). Ground snap / lock dùng mặt đường này.`} />}
       </div>
       {/* Lỗi & gợi ý ở ĐẦU cột, dạng chip một dòng, vùng cao cố định nên các cột không bao giờ lệch hàng; chi tiết ở dưới các view. */}
-      <div style={{ height: 40, overflow: 'hidden', display: 'flex', flexWrap: 'wrap', alignContent: 'flex-start', gap: 2, padding: '2px 2px 0', background: 'var(--cvla-c-fafafa, #fafafa)' }}>
+      <div style={{ height: 40, overflow: 'hidden', display: 'flex', flexWrap: 'wrap', alignContent: 'flex-start', gap: 2, padding: '2px 2px 0', background: '#fafafa' }}>
         {sug && (
-          <span style={{ ...CHIP, background: 'var(--cvla-c-c9f3ff, #c9f3ff)', color: 'var(--cvla-c-00505c, #00505c)' }} title={sug.message}>
+          <span style={{ ...CHIP, background: '#c9f3ff', color: '#00505c' }} title={sug.message}>
             💡 gợi ý
             <button onClick={(e) => { e.stopPropagation(); onAccept(f, sug); }} style={CHIP_BTN} title={hint('suggest.accept', 'Chấp nhận box gợi ý')}>✔</button>
             <button onClick={(e) => { e.stopPropagation(); onIgnore(f, true); }} style={CHIP_BTN} title={hint('suggest.ignore', 'Bỏ qua gợi ý')}>✖</button>
           </span>
         )}
-        {bad && !sug && <span style={{ ...CHIP, background: 'var(--cvla-c-ffe0f7, #ffe0f7)', color: 'var(--cvla-c-5a0040, #5a0040)' }} title={bad.level === 'sparse' ? `${bad.message}${midSparse ? ' · nằm giữa hai frame ổn (box nội suy)' : ''} · chuột phải để bỏ qua` : bad.message} onContextMenu={bad.level === 'sparse' ? (e) => { e.preventDefault(); e.stopPropagation(); onIgnoreP(f, true); } : undefined}>⚠ {bad.level === 'misfit' ? 'lệch' : 'ít điểm'}</span>}
-        {bad && sug && <span style={{ ...CHIP, background: 'var(--cvla-c-ffe0f7, #ffe0f7)', color: 'var(--cvla-c-5a0040, #5a0040)' }} title={bad.message}>⚠ lệch</span>}
-        {issues.filter((i) => !issueIgnored(i.kind)).map((i) => <span key={i.kind} style={{ ...CHIP, background: 'var(--cvla-c-f9d4ee, #f9d4ee)', color: 'var(--cvla-c-5a0040, #5a0040)' }} title={i.message}>⚠ {symLabel(i.kind)}</span>)}
-        {ignoredOverlap.map((o) => <span key={`ig${o}`} style={{ ...CHIP, background: 'var(--cvla-c-e5e7eb, #e5e7eb)', color: 'var(--cvla-c-4b5563, #4b5563)' }} title={`Cặp chồng lấn với #${o} ở frame này đã được bỏ qua (không báo lỗi). Hoàn lại ở dòng ghi chú bên dưới cột.`}>⊘ O #{o} bỏ qua</span>)}
-        {overlap.map((o) => <span key={o.other} style={{ ...CHIP, background: 'var(--cvla-c-ffd9a8, #ffd9a8)', color: 'var(--cvla-c-5a2d00, #5a2d00)' }} title={`Chồng với #${o.other} (IoU ${fmtIou(o.ratio)}). Kéo box cam nét đứt trong view để dời object #${o.other} ở frame này (giữ Shift để kéo ở vùng chồng lên box đang xét).`}>⚠ O #{o.other}</span>)}
-        {fileFlags.filter((ff) => ff.state === 'open').map((ff) => <span key={ff.kind} style={{ ...CHIP, background: 'var(--cvla-c-ffd6d6, #ffd6d6)', color: 'var(--cvla-c-660000, #600)' }} title="Flag từ file QC mà tool không tự phát hiện">QC {ff.kind}</span>)}
-        {shownMotion && <span style={{ ...CHIP, background: 'var(--cvla-c-ffe9c7, #ffe9c7)', color: 'var(--cvla-c-6b3a00, #6b3a00)' }} title={shownMotion.message}>⚠ {sym('M')} đi xa</span>}
-        {kind === 'measured' && snap?.warn && <span style={{ ...CHIP, background: 'var(--cvla-c-eaf6d8, #eaf6d8)', color: 'var(--cvla-c-2d5a00, #2d5a00)' }} title={groundTip(snap)}>⏬ {groundAction(snap)}</span>}
+        {bad && !sug && <span style={{ ...CHIP, background: '#ffe0f7', color: '#5a0040' }} title={bad.level === 'sparse' ? `${bad.message}${midSparse ? ' · nằm giữa hai frame ổn (box nội suy)' : ''} · chuột phải để bỏ qua` : bad.message} onContextMenu={bad.level === 'sparse' ? (e) => { e.preventDefault(); e.stopPropagation(); onIgnoreP(f, true); } : undefined}>⚠ {bad.level === 'misfit' ? 'lệch' : 'ít điểm'}</span>}
+        {bad && sug && <span style={{ ...CHIP, background: '#ffe0f7', color: '#5a0040' }} title={bad.message}>⚠ lệch</span>}
+        {issues.filter((i) => !issueIgnored(i.kind)).map((i) => <span key={i.kind} style={{ ...CHIP, background: '#f9d4ee', color: '#5a0040' }} title={i.message}>⚠ {symLabel(i.kind)}</span>)}
+        {ignoredOverlap.map((o) => <span key={`ig${o}`} style={{ ...CHIP, background: '#e5e7eb', color: '#4b5563' }} title={`Cặp chồng lấn với #${o} ở frame này đã được bỏ qua (không báo lỗi). Hoàn lại ở dòng ghi chú bên dưới cột.`}>⊘ O #{o} bỏ qua</span>)}
+        {overlap.map((o) => <span key={o.other} style={{ ...CHIP, background: '#ffd9a8', color: '#5a2d00' }} title={`Chồng với #${o.other} (IoU ${fmtIou(o.ratio)}). Kéo box cam nét đứt trong view để dời object #${o.other} ở frame này (giữ Shift để kéo ở vùng chồng lên box đang xét).`}>⚠ O #{o.other}</span>)}
+        {fileFlags.filter((ff) => ff.state === 'open').map((ff) => <span key={ff.kind} style={{ ...CHIP, background: '#ffd6d6', color: '#600' }} title="Flag từ file QC mà tool không tự phát hiện">QC {ff.kind}</span>)}
+        {shownMotion && <span style={{ ...CHIP, background: '#ffe9c7', color: '#6b3a00' }} title={shownMotion.message}>⚠ {sym('M')} đi xa</span>}
+        {kind === 'measured' && snap?.warn && <span style={{ ...CHIP, background: '#eaf6d8', color: '#2d5a00' }} title={groundTip(snap)}>⏬ {groundAction(snap)}</span>}
         {advice && (advice.kind !== kind || advice.conflict) && (
-          <span style={{ ...CHIP, background: advice.conflict ? 'var(--cvla-c-fff0c2, #fff0c2)' : 'var(--cvla-c-e6f0ff, #e6f0ff)', color: 'var(--cvla-c-223333, #233)' }} title={advice.detail}>
+          <span style={{ ...CHIP, background: advice.conflict ? '#fff0c2' : '#e6f0ff', color: '#233' }} title={advice.detail}>
             💡 mặt đường: {GROUND_OPT[advice.kind]}{advice.conflict ? ' ⚠' : ''}
             {advice.kind !== kind && <button onClick={(e) => { e.stopPropagation(); onKind(f, advice.kind); }} style={CHIP_BTN} title="Dùng mặt đường gợi ý cho frame này">✔</button>}
           </span>
@@ -615,7 +615,7 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
       ))}
       </div>
       {reflect && plane && (
-        <div style={{ fontSize: 11, padding: '1px 4px', background: 'var(--cvla-c-f3e8ff, #f3e8ff)', color: 'var(--cvla-c-4c1d95, #4c1d95)' }} title="Điểm trong box ảo (tím nét đứt) được lật qua mặt phản chiếu (vạch tím) và vẽ chồng lên box chính bằng màu tím">
+        <div style={{ fontSize: 11, padding: '1px 4px', background: '#f3e8ff', color: '#4c1d95' }} title="Điểm trong box ảo (tím nét đứt) được lật qua mặt phản chiếu (vạch tím) và vẽ chồng lên box chính bằng màu tím">
           ref: {reflect.pts?.n ?? 0} điểm gộp{mirrorFit && mirrorFit.best > 0 ? ` · khớp hình ${Math.round((100 * mirrorFit.scoreAt(plane.w)) / mirrorFit.best)}% mức tốt nhất${mirrorFit.valid ? '' : ' (ít điểm phản chiếu)'}` : ''} · mặt phản chiếu: {PLANE_TEXT[plane.src]} ({plane.w >= (box ? box.cw - box.sz / 2 : 0) ? '+' : ''}{((plane.w - (box ? box.cw - box.sz / 2 : 0)) * 100).toFixed(0)} cm so với đáy box)
         </div>
       )}
@@ -626,10 +626,10 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
       )}
       {/* cảnh báo / ghi chú đặt DƯỚI các view để các cột luôn thẳng hàng dù số cảnh báo khác nhau */}
       {bad && (
-        <div style={{ background: bad.level === 'misfit' ? 'var(--cvla-c-ffe0f7, #ffe0f7)' : 'var(--cvla-c-fff1d6, #fff1d6)', color: 'var(--cvla-c-5a0040, #5a0040)', fontSize: 11, padding: '1px 4px' }} title={bad.message}>
+        <div style={{ background: bad.level === 'misfit' ? '#ffe0f7' : '#fff1d6', color: '#5a0040', fontSize: 11, padding: '1px 4px' }} title={bad.message}>
           ⚠ {bad.message}
           {sug && (
-            <div style={{ color: 'var(--cvla-c-006b7a, #006b7a)' }}>
+            <div style={{ color: '#006b7a' }}>
               {sug.message}{' '}
               <button onClick={(e) => { e.stopPropagation(); onAccept(f, sug); }} style={{ padding: '0 4px' }} title={hint('suggest.accept', 'Chấp nhận box gợi ý ở frame này')}>✔ nhận</button>{' '}
               <button onClick={(e) => { e.stopPropagation(); onIgnore(f, true); }} style={{ padding: '0 4px' }} title={hint('suggest.ignore', 'Bỏ qua gợi ý ở frame này')}>✖ bỏ qua</button>
@@ -638,13 +638,13 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
         </div>
       )}
       {pIgnored && fit?.level === 'sparse' && (
-        <div style={{ background: 'var(--cvla-c-eeeeee, #eee)', color: 'var(--cvla-c-555555, #555)', fontSize: 11, padding: '1px 4px' }}>
+        <div style={{ background: '#eee', color: '#555', fontSize: 11, padding: '1px 4px' }}>
           đã bỏ qua ít điểm{' '}
           <button onClick={(e) => { e.stopPropagation(); onIgnoreP(f, false); }} style={{ padding: '0 4px' }}>hoàn lại</button>
         </div>
       )}
       {ignored && fit?.level === 'misfit' && (
-        <div style={{ background: 'var(--cvla-c-eeeeee, #eee)', color: 'var(--cvla-c-555555, #555)', fontSize: 11, padding: '1px 4px' }}>
+        <div style={{ background: '#eee', color: '#555', fontSize: 11, padding: '1px 4px' }}>
           đã bỏ qua gợi ý{' '}
           <button onClick={(e) => { e.stopPropagation(); onIgnore(f, false); }} style={{ padding: '0 4px' }}>hoàn lại</button>
         </div>
@@ -654,11 +654,11 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
           value={qcNote} maxLength={500} placeholder="note QC…" readOnly={!qcOn}
           title={qcOn ? 'Ghi chú QC cho frame này (lưu cục bộ, xuất Excel ở tab QC)' : qcNote}
           onClick={(e) => e.stopPropagation()} onChange={(e) => onQcNote(f, e.target.value)}
-          style={{ width: '100%', boxSizing: 'border-box', fontSize: 11, background: 'var(--cvla-c-fffbe0, #fffbe0)', border: 0, borderBottom: '1px solid var(--cvla-c-e0b000, #e0b000)' }}
+          style={{ width: '100%', boxSizing: 'border-box', fontSize: 11, background: '#fffbe0', border: 0, borderBottom: '1px solid #e0b000' }}
         />
       )}
       {nearby.cand.length > 0 && (
-        <div style={{ background: 'var(--cvla-c-e3f0ff, #e3f0ff)', color: 'var(--cvla-c-0b3a6b, #0b3a6b)', fontSize: 11, padding: '1px 4px' }} onClick={(e) => e.stopPropagation()} title="Hiện thêm box của các ID xung quanh (xanh dương nét đứt) trong frame này. Chỉ áp cho frame này. Phím tắt: C.">
+        <div style={{ background: '#e3f0ff', color: '#0b3a6b', fontSize: 11, padding: '1px 4px' }} onClick={(e) => e.stopPropagation()} title="Hiện thêm box của các ID xung quanh (xanh dương nét đứt) trong frame này. Chỉ áp cho frame này. Phím tắt: C.">
           <label><input type="checkbox" checked={nearby.cfg.on} onChange={(e) => onNearby(f, { ...nearby.cfg, on: e.target.checked })} /> ID xung quanh</label>
           {nearby.cfg.on && (
             <>
@@ -679,19 +679,19 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
         </div>
       )}
       {ignoredOverlap.map((o) => (
-        <div key={`ig${o}`} style={{ background: 'var(--cvla-c-e5e7eb, #e5e7eb)', color: 'var(--cvla-c-4b5563, #4b5563)', fontSize: 11, padding: '1px 4px' }} title="Cặp này đã được bỏ qua ở mọi frame nên không báo lỗi O; ghi chú này cho biết ở frame này hai object vẫn đang chồng nhau.">
+        <div key={`ig${o}`} style={{ background: '#e5e7eb', color: '#4b5563', fontSize: 11, padding: '1px 4px' }} title="Cặp này đã được bỏ qua ở mọi frame nên không báo lỗi O; ghi chú này cho biết ở frame này hai object vẫn đang chồng nhau.">
           ⊘ đã bỏ qua cặp chồng lấn với <button onClick={(e) => { e.stopPropagation(); onOpenObject(o); }} style={{ padding: '0 4px' }}>#{o}</button>{' '}
           <button onClick={(e) => { e.stopPropagation(); onRestoreOverlap(o); }} style={{ padding: '0 4px' }} title="Báo lại lỗi chồng lấn của cặp này ở mọi frame">↺ hoàn lại</button>
         </div>
       ))}
       {overlap.map((o) => (
-        <div key={o.other} style={{ background: 'var(--cvla-c-ffd9a8, #ffd9a8)', color: 'var(--cvla-c-5a2d00, #5a2d00)', fontSize: 11, padding: '1px 4px' }} title="Phần giao trên hình chiếu từ trên / diện tích box nhỏ hơn. Box cam nét đứt trên ô là object kia.">
+        <div key={o.other} style={{ background: '#ffd9a8', color: '#5a2d00', fontSize: 11, padding: '1px 4px' }} title="Phần giao trên hình chiếu từ trên / diện tích box nhỏ hơn. Box cam nét đứt trên ô là object kia.">
           ⚠ chồng với <button onClick={(e) => { e.stopPropagation(); onOpenObject(o.other); }} style={{ padding: '0 4px' }}>#{o.other}</button> {fmtIou(o.ratio)}{' '}
           <button onClick={(e) => { e.stopPropagation(); onIgnoreOverlap(o.other); }} style={{ padding: '0 4px' }} title="Bỏ qua cặp này ở mọi frame (ví dụ người ngồi trên xe máy)">✖ bỏ qua cặp</button>
         </div>
       ))}
       {fileFlags.map((ff) => (
-        <div key={ff.kind} style={{ background: ff.state === 'open' ? 'var(--cvla-c-ffd6d6, #ffd6d6)' : ff.state === 'cleared' ? 'var(--cvla-c-dff5df, #dff5df)' : 'var(--cvla-c-eeeeee, #eee)', color: ff.state === 'open' ? 'var(--cvla-c-660000, #600)' : 'var(--cvla-c-333333, #333)', fontSize: 11, padding: '1px 4px' }} title={`Flag từ file QC đã nạp (tab QC); khi trùng với cảnh báo tự động thì chỉ hiện cảnh báo tự động${ff.msg ? ` — tool thấy: ${ff.msg}` : ''}`}>
+        <div key={ff.kind} style={{ background: ff.state === 'open' ? '#ffd6d6' : ff.state === 'cleared' ? '#dff5df' : '#eee', color: ff.state === 'open' ? '#600' : '#333', fontSize: 11, padding: '1px 4px' }} title={`Flag từ file QC đã nạp (tab QC); khi trùng với cảnh báo tự động thì chỉ hiện cảnh báo tự động${ff.msg ? ` — tool thấy: ${ff.msg}` : ''}`}>
           QC file: <b>{ff.kind}</b> {ff.state === 'open' ? 'còn lỗi' : ff.state === 'cleared' ? 'đã hết' : ff.state === 'ignore' ? 'bỏ qua' : 'đã sửa'}{' '}
           {(ff.state === 'open' || ff.state === 'cleared') && (
             <>
@@ -704,29 +704,29 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
       ))}
       {issues.map((i) => (issueIgnored(i.kind)
         ? (
-          <div key={i.kind} style={{ background: 'var(--cvla-c-eeeeee, #eee)', color: 'var(--cvla-c-555555, #555)', fontSize: 11, padding: '1px 4px' }}>
+          <div key={i.kind} style={{ background: '#eee', color: '#555', fontSize: 11, padding: '1px 4px' }}>
             đã bỏ qua {symLabel(i.kind)}{' '}<button onClick={(e) => { e.stopPropagation(); onIgnoreIssue(f, i.kind, false); }} style={{ padding: '0 4px' }}>hoàn lại</button>
           </div>
         ) : (
-          <div key={i.kind} style={{ background: 'var(--cvla-c-f9d4ee, #f9d4ee)', color: 'var(--cvla-c-5a0040, #5a0040)', fontSize: 11, padding: '1px 4px' }} title={i.message}>
+          <div key={i.kind} style={{ background: '#f9d4ee', color: '#5a0040', fontSize: 11, padding: '1px 4px' }} title={i.message}>
             ⚠ <b>{symLabel(i.kind)}</b> {i.message}{' '}
             <button onClick={(e) => { e.stopPropagation(); onIgnoreIssue(f, i.kind, true); }} style={{ padding: '0 4px' }}>✖ bỏ qua</button>
           </div>
         )))}
       {shownMotion && (
-        <div style={{ background: 'var(--cvla-c-ffe9c7, #ffe9c7)', color: 'var(--cvla-c-6b3a00, #6b3a00)', fontSize: 11, padding: '1px 4px' }} title={shownMotion.message}>
+        <div style={{ background: '#ffe9c7', color: '#6b3a00', fontSize: 11, padding: '1px 4px' }} title={shownMotion.message}>
           ⚠ <b>{sym('M')}</b> {shownMotion.message}{' '}
           <button onClick={(e) => { e.stopPropagation(); onIgnoreMotion(f, true); }} style={{ padding: '0 4px' }} title="Bỏ qua lỗi Y ở frame này của MỌI object có lỗi Y ở frame đó">✖ bỏ qua</button>
         </div>
       )}
       {motion && motionIgnored && (
-        <div style={{ background: 'var(--cvla-c-eeeeee, #eee)', color: 'var(--cvla-c-555555, #555)', fontSize: 11, padding: '1px 4px' }}>
+        <div style={{ background: '#eee', color: '#555', fontSize: 11, padding: '1px 4px' }}>
           đã bỏ qua cảnh báo đi xa{' '}
           <button onClick={(e) => { e.stopPropagation(); onIgnoreMotion(f, false); }} style={{ padding: '0 4px' }}>hoàn lại</button>
         </div>
       )}
       {snap?.warn && (
-        <div style={{ background: 'var(--cvla-c-eaf6d8, #eaf6d8)', color: 'var(--cvla-c-2d5a00, #2d5a00)', fontSize: 11, padding: '1px 4px' }} title={groundTip(snap)}>
+        <div style={{ background: '#eaf6d8', color: '#2d5a00', fontSize: 11, padding: '1px 4px' }} title={groundTip(snap)}>
           ⏬ {groundAction(snap)}: đáy {snap.dz < 0 ? 'cao hơn' : 'thấp hơn'} mặt đường {cm(snap.dz)} cm (±{cm(snap.sigma)}){snap.slopeDeg >= 1 ? ` · dốc ${snap.slopeDeg.toFixed(1)}°${snap.steep ? ' — dốc lớn, đáy chỉ chạm một phía' : ''}` : ''}{' '}
           <button onClick={(e) => { e.stopPropagation(); onGround(f); }} style={{ padding: '0 4px' }} title={hint('ground.snap', 'Dời box theo z để đáy chạm mặt đường')}>snap</button>
         </div>
@@ -750,7 +750,7 @@ function EdgeResize({ size, onResize, children }: { size: number; onResize: (siz
       onPointerMove={(e) => { if (drag.current) onResize(next(e), false); }}
       onPointerUp={(e) => { if (drag.current) { onResize(next(e), true); drag.current = null; } }}
       onClick={(e) => e.stopPropagation()}
-      style={{ position: 'absolute', zIndex: 3, touchAction: 'none', background: 'var(--cvla-c-rgba-192-132-252-p35, rgba(192, 132, 252, .35))', borderRadius: 3, cursor: mode === 'x' ? 'ew-resize' : mode === 'y' ? 'ns-resize' : 'nwse-resize', ...style }}
+      style={{ position: 'absolute', zIndex: 3, touchAction: 'none', background: 'rgba(192, 132, 252, .35)', borderRadius: 3, cursor: mode === 'x' ? 'ew-resize' : mode === 'y' ? 'ns-resize' : 'nwse-resize', ...style }}
     />
   );
   return (
@@ -785,9 +785,9 @@ function IdBox({ value, max, onCommit }: { value: number; max: number; onCommit:
         onFocus={(e) => e.target.select()}
         onKeyDown={(e) => { if (e.key === 'Enter') { go(); (e.target as HTMLInputElement).blur(); } }}
         onBlur={() => { if (text !== String(value)) go(); }}
-        style={{ width: 64, borderColor: bad ? 'var(--cvla-c-bb0000, #b00)' : undefined, background: bad ? 'var(--cvla-c-ffeeee, #fee)' : undefined }}
+        style={{ width: 64, borderColor: bad ? '#b00' : undefined, background: bad ? '#fee' : undefined }}
       />
-      {bad && <span style={{ color: 'var(--cvla-c-bb0000, #b00)' }}> không có object này (1–{max})</span>}
+      {bad && <span style={{ color: '#b00' }}> không có object này (1–{max})</span>}
     </>
   );
 }
@@ -803,8 +803,8 @@ function Group({ id, title, bg, children }: { id: string; title: ReactNode; bg?:
   const pop = useContext(PopCtx);
   return (
     // cao 100% ô của bố cục (hàng đặt chiều cao cố định thì nội dung dài cuộn trong nhóm)
-    <fieldset className="cvla-group" style={{ border: '1px solid var(--cvla-c-c5ccd6, #c5ccd6)', margin: 0, minWidth: 0, height: '100%', boxSizing: 'border-box', overflow: 'auto', padding: '1px 8px 4px', display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center', alignContent: 'flex-start', background: bg }}>
-      <legend style={{ fontSize: 11, fontWeight: 700, color: 'var(--cvla-c-445566, #456)', padding: '0 4px' }}>
+    <fieldset className="cvla-group" style={{ border: '1px solid #c5ccd6', margin: 0, minWidth: 0, height: '100%', boxSizing: 'border-box', overflow: 'auto', padding: '1px 8px 4px', display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center', alignContent: 'flex-start', background: bg }}>
+      <legend style={{ fontSize: 11, fontWeight: 700, color: '#456', padding: '0 4px' }}>
         {grip?.(id)}
         {pop?.(id)}
         <span role="button" tabIndex={0} onClick={toggle} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggle(); }} style={{ cursor: 'pointer', userSelect: 'none' }} title={shut ? 'Mở rộng' : 'Thu nhỏ'}>{shut ? '▸' : '▾'} </span>
@@ -1627,7 +1627,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
     const offset = refS.mode === 'custom' ? refS.dh : refOffset;
     return (
       <>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', alignItems: 'center', marginBottom: 6, padding: '4px 8px', background: 'var(--cvla-c-f6f0ff, #f6f0ff)', border: '1px solid var(--cvla-c-d8c4f5, #d8c4f5)', borderRadius: 4 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', alignItems: 'center', marginBottom: 6, padding: '4px 8px', background: '#f6f0ff', border: '1px solid #d8c4f5', borderRadius: 4 }}>
           <b>Ref mode · object #{num}</b>
           <span>
             frame <button disabled={refF <= start} onClick={() => setRefF(refF - 1)} title="Frame trước">◀</button>{' '}
@@ -1654,7 +1654,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
           </span>
           <button onClick={onCloseRef}>← Batch Review</button>
           <button onClick={() => { refStore.set(job.id, num, { on: false }); onCloseRef?.(); }} title="Tắt ref mode cho object này">Tắt ref mode</button>
-          {note && <span style={{ color: 'var(--cvla-c-7a4b00, #7a4b00)' }}>{note}</span>}
+          {note && <span style={{ color: '#7a4b00' }}>{note}</span>}
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', alignItems: 'center', marginBottom: 6 }}>
           <span>
@@ -1670,7 +1670,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
           <label title="Ẩn hàng Gốc, chỉ còn hàng Gộp đối xứng">
             <input type="checkbox" checked={refPrefs.orig} onChange={(e) => setRefPrefs({ ...refPrefs, orig: e.target.checked })} /> hiện hàng Gốc
           </label>
-          <span style={{ color: 'var(--cvla-c-777777, #777)', fontSize: 11 }}>tầm nhìn ±{refHalf.toFixed(1)} m</span>
+          <span style={{ color: '#777', fontSize: 11 }}>tầm nhìn ±{refHalf.toFixed(1)} m</span>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'safe center', overflowX: 'auto', padding: '2px 12px 12px 4px' }}>
           {refPrefs.orig && (
@@ -1680,11 +1680,11 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
             </div>
           )}
           <div>
-            <div style={{ fontWeight: 600, color: 'var(--cvla-c-6b21a8, #6b21a8)' }}>Gộp đối xứng (ref)</div>
+            <div style={{ fontWeight: 600, color: '#6b21a8' }}>Gộp đối xứng (ref)</div>
             <EdgeResize size={refSize} onResize={resizeTo}>{colEl(rc, 'ref', refSize, { ...refGeo, refl: refS, onRefPlane })}</EdgeResize>
           </div>
         </div>
-        <p style={{ fontSize: 11, color: 'var(--cvla-c-666666, #666)', margin: '2px 0' }}>
+        <p style={{ fontSize: 11, color: '#666', margin: '2px 0' }}>
           Box ảo (tím nét đứt) đối xứng với box chính qua mặt phản chiếu (vạch tím); điểm trong box ảo được lật lại và vẽ chồng lên box chính bằng màu tím.
           Chỉ để xem, không đổi dữ liệu nhãn. Sửa box ở cột nào cũng được (frame sửa thành keyframe như ở Batch Review).
         </p>
@@ -1716,7 +1716,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
           Mặc định 3 hàng (chủ dự án 2026-10-30): Keyframe & kích thước + Outside · Gợi ý & mặt đất + QC · Object & cửa sổ + Hiển thị. */}
       <ControlLayout groups={{
         '3': (
-          <Group id="3" title={<>Keyframe & kích thước <Help text="🔒 / 🔓 trên tiêu đề cột hoặc nút 🔒 frame: khoá / mở khoá frame đang chọn. 🔓 KF giữa: mở khoá keyframe ở giữa Phạm vi. Rê chuột lên nút để xem phím tắt." /></>} bg="var(--cvla-c-f4f4f4, #f4f4f4)">
+          <Group id="3" title={<>Keyframe & kích thước <Help text="🔒 / 🔓 trên tiêu đề cột hoặc nút 🔒 frame: khoá / mở khoá frame đang chọn. 🔓 KF giữa: mở khoá keyframe ở giữa Phạm vi. Rê chuột lên nút để xem phím tắt." /></>} bg="#f4f4f4">
           <label title={`Chỉ áp dụng cho object #${num} đang chọn, không đổi cả class. BẬT: kích thước nội suy giữa các keyframe. TẮT (static): đổi kích thước ở một frame thì áp cho mọi keyframe của object. Hiện đang: ${dynWhy}. Mặc định theo class / attribute đặt ở tab Dynamic size.`} style={{ fontWeight: 600 }}>
             <input type="checkbox" checked={dyn} onChange={(e) => setDyn(e.target.checked)} /> Dynamic size · #{num}
           </label>
@@ -1742,7 +1742,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
           </Group>
         ),
         '4': (
-          <Group id="4" title={<>Outside</>} bg="var(--cvla-c-fff4f4, #fff4f4)">
+          <Group id="4" title={<>Outside</>} bg="#fff4f4">
           <button
             disabled={selFrame === null}
             onClick={() => selFrame !== null && toggleOutside(selFrame)}
@@ -1751,17 +1751,17 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
           <button onClick={outsideRange} title={hint('outside.window', 'Đặt outside cho mọi frame có box trong cửa sổ đang hiển thị; frame ngay sau cửa sổ giữ nguyên trạng thái')}>② ⛔ Current window</button>
           <button
             onClick={togglePick}
-            style={{ background: pick ? 'var(--cvla-c-ffd9d9, #ffd9d9)' : undefined, fontWeight: pick ? 700 : 400 }}
+            style={{ background: pick ? '#ffd9d9' : undefined, fontWeight: pick ? 700 : 400 }}
             title={hint('outside.pick', 'Select range: bấm nút rồi bấm tiêu đề hai cột (đầu và cuối khoảng, có thể ở hai cửa sổ khác nhau): mọi frame có box trong khoảng thành outside. Esc hoặc bấm lại để hủy.')}
           >{pick ? (pick.first === null ? '③ Bấm cột đầu…' : `③ Bấm cột cuối (từ ${pick.first})…`) : '③ ⛔ Select range'}</button>
           </Group>
         ),
         '5': (
-          <Group id="5" title={<>Gợi ý & mặt đất</>} bg="var(--cvla-c-f0fbff, #f0fbff)">
+          <Group id="5" title={<>Gợi ý & mặt đất</>} bg="#f0fbff">
           <button
             onClick={acceptSelectedOrAll}
             disabled={![...sugs.values()].some(Boolean)}
-            style={{ fontWeight: 700, background: [...sugs.values()].some(Boolean) ? 'var(--cvla-c-c9f3ff, #c9f3ff)' : undefined }}
+            style={{ fontWeight: 700, background: [...sugs.values()].some(Boolean) ? '#c9f3ff' : undefined }}
             title={hint('suggest.accept', 'Áp box gợi ý (nét đứt xanh lơ) cho frame đang chọn; nếu chưa chọn frame thì cho mọi frame có gợi ý trong cửa sổ.')}
           >✔ Chấp nhận{[...sugs.entries()].filter(([f, s]) => s && frames.includes(f)).length ? ` · ${[...sugs.entries()].filter(([f, s]) => s && frames.includes(f)).length}` : ''}</button>
           <button
@@ -1801,10 +1801,10 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
           <label title="QC mode: hiện ô ghi chú ở mỗi cột frame (xuất Excel ở tab QC)" style={{ fontWeight: 600 }}><input type="checkbox" checked={qcOn} onChange={(e) => qcStore.setMode(e.target.checked)} /> QC</label>
           <label title="Cảnh báo box không bao đúng cụm điểm (điểm lọt ra ngoài box) hoặc dưới 6 điểm"><input type="checkbox" checked={warn} onChange={(e) => setWarn(e.target.checked)} /> cảnh báo lệch</label>
           {([
-            ['lệch', allWarn.misfit, 'var(--cvla-c-a0006e, #a0006e)', 'Box không bao đúng cụm điểm (cả track, các frame đã tải point cloud)', true],
-            ['ít điểm', allWarn.sparse, 'var(--cvla-c-a0006e, #a0006e)', 'Dưới 6 điểm trong box (cả track, các frame đã tải point cloud)', true],
-            ['⏬ đáy lơ lửng / chìm', allWarn.ground, 'var(--cvla-c-2d5a00, #2d5a00)', `Đáy box lệch mặt đường quá ngưỡng (cả track, mặt đường đo riêng ở từng frame, trong ${DEFAULT_GROUND.maxRange} m quanh ego)`, true],
-            ['chồng lấn', allWarn.overl, 'var(--cvla-c-b45a00, #b45a00)', 'Box chồng lên object khác (xét chéo giữa các ID)', false],
+            ['lệch', allWarn.misfit, '#a0006e', 'Box không bao đúng cụm điểm (cả track, các frame đã tải point cloud)', true],
+            ['ít điểm', allWarn.sparse, '#a0006e', 'Dưới 6 điểm trong box (cả track, các frame đã tải point cloud)', true],
+            ['⏬ đáy lơ lửng / chìm', allWarn.ground, '#2d5a00', `Đáy box lệch mặt đường quá ngưỡng (cả track, mặt đường đo riêng ở từng frame, trong ${DEFAULT_GROUND.maxRange} m quanh ego)`, true],
+            ['chồng lấn', allWarn.overl, '#b45a00', 'Box chồng lên object khác (xét chéo giữa các ID)', false],
           ] as [string, number[], string, string, boolean][]).filter(([, fr]) => fr.length > 0).map(([name, fr, color, tip, needsCloud]) => (
             <span
               key={name} style={{ color, fontWeight: 600, ...(needsCloud && cloudPartial ? PENDING_STYLE : null) }}
@@ -1817,13 +1817,13 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
             </span>
           ))}
           {(warn || anyMeasured) && cloudPartial && (
-            <span style={{ color: 'var(--cvla-c-666666, #666)', fontSize: 11, ...PENDING_STYLE }} title="Lệch / ít điểm / đáy chỉ kiểm được ở frame đã tải point cloud; các frame còn lại đang tải ngầm, số liệu tự cập nhật">(đã kiểm {fitSeries.checked}/{row?.assigned ?? 0} frame có box)</span>
+            <span style={{ color: '#666', fontSize: 11, ...PENDING_STYLE }} title="Lệch / ít điểm / đáy chỉ kiểm được ở frame đã tải point cloud; các frame còn lại đang tải ngầm, số liệu tự cập nhật">(đã kiểm {fitSeries.checked}/{row?.assigned ?? 0} frame có box)</span>
           )}
           {trackSummary.byKind.map(([kind, fr]) => (
-            <span key={kind} style={{ color: 'var(--cvla-c-a0006e, #a0006e)', fontWeight: 600 }} title="Cả track (ký hiệu lỗi đặt ở tab Threshold). Bấm một đoạn để nhảy tới frame đầu của đoạn.">
+            <span key={kind} style={{ color: '#a0006e', fontWeight: 600 }} title="Cả track (ký hiệu lỗi đặt ở tab Threshold). Bấm một đoạn để nhảy tới frame đầu của đoạn.">
               ⚠ {symLabel(kind)} ({fr.length}):{' '}
               {toRanges(fr).map(([x, y]) => (
-                <button key={x} onClick={() => goFrame(x)} style={{ padding: '0 3px', marginRight: 2, fontWeight: 600, color: 'var(--cvla-c-a0006e, #a0006e)' }}>{x === y ? x : `${x}–${y}`}</button>
+                <button key={x} onClick={() => goFrame(x)} style={{ padding: '0 3px', marginRight: 2, fontWeight: 600, color: '#a0006e' }}>{x === y ? x : `${x}–${y}`}</button>
               ))}
               <button
                 onClick={() => { ignoreStore.set(fr.map((f) => issueKey(job.id, num, f, kind)), true); setNote(`Đã bỏ qua ${fr.length} cảnh báo ${symLabel(kind)} của object #${num}.`); }}
@@ -1832,13 +1832,13 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
             </span>
           ))}
           {lateStart && (
-            <span style={{ color: 'var(--cvla-c-7a1f1f, #7a1f1f)', fontWeight: 600 }} title={`Object bắt đầu từ frame ${lateStart.first}, không phải frame đầu job.`}>
+            <span style={{ color: '#7a1f1f', fontWeight: 600 }} title={`Object bắt đầu từ frame ${lateStart.first}, không phải frame đầu job.`}>
               ⚠ xuất hiện từ frame {lateStart.first}{' '}
               <button onClick={relocateLate} style={{ padding: '0 4px', fontWeight: 600 }} title="Giữ ID, thêm keyframe outside ở mọi frame trước lúc xuất hiện. Có hộp xác nhận.">⇢ outside phía trước</button>
             </span>
           )}
           {outGaps.map((g) => (
-            <span key={g.from} style={{ color: 'var(--cvla-c-7a1f1f, #7a1f1f)', fontWeight: 600 }} title={`Outside liên tục ${g.len} frame (${g.from}–${g.to}) rồi có box lại từ frame ${g.resume}. Từ ${SPLIT_OUTSIDE_FRAMES} frame trở lên nên tách ID (guideline).`}>
+            <span key={g.from} style={{ color: '#7a1f1f', fontWeight: 600 }} title={`Outside liên tục ${g.len} frame (${g.from}–${g.to}) rồi có box lại từ frame ${g.resume}. Từ ${SPLIT_OUTSIDE_FRAMES} frame trở lên nên tách ID (guideline).`}>
               ⚠ outside {g.len} frame ({g.from}–{g.to}){' '}
               <button
                 onClick={() => splitAt(g)}
@@ -1848,10 +1848,10 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
             </span>
           ))}
           {trackSummary.far.length > 0 && (
-            <span style={{ color: 'var(--cvla-c-a05a00, #a05a00)', fontWeight: 600 }} title="Cả track. Bấm một đoạn để nhảy tới frame đầu của đoạn.">
+            <span style={{ color: '#a05a00', fontWeight: 600 }} title="Cả track. Bấm một đoạn để nhảy tới frame đầu của đoạn.">
               ⚠ đi xa bất thường ({trackSummary.far.length}):{' '}
               {toRanges(trackSummary.far).map(([x, y]) => (
-                <button key={x} onClick={() => goFrame(x)} style={{ padding: '0 3px', marginRight: 2, fontWeight: 600, color: 'var(--cvla-c-a05a00, #a05a00)' }}>{x === y ? x : `${x}–${y}`}</button>
+                <button key={x} onClick={() => goFrame(x)} style={{ padding: '0 3px', marginRight: 2, fontWeight: 600, color: '#a05a00' }}>{x === y ? x : `${x}–${y}`}</button>
               ))}
               <button
                 onClick={() => { ignoreStore.set(trackSummary.far.map((f) => motionKey(job.id, num, f)), true); setNote(`Đã bỏ qua ${trackSummary.far.length} cảnh báo đi xa của object #${num}.`); }}
@@ -1899,7 +1899,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
           <span>
             Zoom <button onClick={() => zoomBy(1 / 1.25)} title={hint('zoom.out', 'Thu nhỏ')}>−</button> <b>{Math.round(zoom * 100)}%</b>{' '}
             <button onClick={() => zoomBy(1.25)} title={hint('zoom.in', 'Phóng to')}>+</button> <button onClick={() => { setZoom(1); setPan(NO_PAN); }} title={hint('zoom.reset', 'Zoom 100% và đưa box về giữa ô')}>Vừa object</button>{' '}
-            <button onClick={() => setPan(NO_PAN)} disabled={!panned} style={panned ? { fontWeight: 700, color: 'var(--cvla-c-a16207, #a16207)' } : undefined} title={hint('view.center', 'Đưa khung nhìn về giữa box (đang dời bằng chuột phải). Giữ chuột phải trên ô rồi kéo để dời khung nhìn.')}>⌖ Về giữa</button>
+            <button onClick={() => setPan(NO_PAN)} disabled={!panned} style={panned ? { fontWeight: 700, color: '#a16207' } : undefined} title={hint('view.center', 'Đưa khung nhìn về giữa box (đang dời bằng chuột phải). Giữ chuột phải trên ô rồi kéo để dời khung nhìn.')}>⌖ Về giữa</button>
           </span>
           <span>
             Cỡ ô{' '}
@@ -1935,16 +1935,16 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
           </span>
         )}
         <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>cửa sổ: {frames.filter((f) => pointClouds.has(f)).length}/{frames.length} · {gpuActive() ? 'GPU ✓ · ' : ''}đã tải: {loadedFrames}/{stop - start + 1}{pointClouds.secondsPerFrame() !== null && loadedFrames < stop - start + 1 ? ` · ~${pointClouds.secondsPerFrame()!.toFixed(1)} s/frame` : ''}</span>
-        {note && <span style={{ color: 'var(--cvla-c-7a4b00, #7a4b00)' }}>{note}</span>}
+        {note && <span style={{ color: '#7a4b00' }}>{note}</span>}
         {refHint.length > 0 && (
-          <span style={{ background: 'var(--cvla-c-f3e8ff, #f3e8ff)', color: 'var(--cvla-c-4c1d95, #4c1d95)', padding: '1px 6px', borderRadius: 8 }} title={`Dưới mặt đường, trong chân box, có từ ${DEFAULT_REFLECT.minBelow} điểm (ngưỡng ở tab Threshold, mục Đáy lơ lửng / chìm): có thể là ảnh phản chiếu của vật. Ref mode gộp các điểm đó vào box để hình vật nét hơn.`}>
+          <span style={{ background: '#f3e8ff', color: '#4c1d95', padding: '1px 6px', borderRadius: 8 }} title={`Dưới mặt đường, trong chân box, có từ ${DEFAULT_REFLECT.minBelow} điểm (ngưỡng ở tab Threshold, mục Đáy lơ lửng / chìm): có thể là ảnh phản chiếu của vật. Ref mode gộp các điểm đó vào box để hình vật nét hơn.`}>
             💡 nhiều điểm dưới mặt đường ở frame {refHint.join(', ')}: bật ref mode?{' '}
             <button onClick={() => { refStore.set(job.id, num, { on: true }); onOpenRef?.(refHint[0]); }} style={{ padding: '0 4px' }}>Bật</button>{' '}
             <button onClick={() => refStore.set(job.id, num, { dismissed: true })} style={{ padding: '0 4px' }} title="Không gợi ý ref mode cho object này nữa">Bỏ qua</button>
           </span>
         )}
       </div>
-      <details open style={{ margin: '0 0 6px', background: 'var(--cvla-c-f8fbff, #f8fbff)', border: '1px solid var(--cvla-c-cfe0f5, #cfe0f5)', padding: '2px 6px' }}>
+      <details open style={{ margin: '0 0 6px', background: '#f8fbff', border: '1px solid #cfe0f5', padding: '2px 6px' }}>
         <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
           Thuộc tính (attribute){(() => {
             const sp = specs.get(track.label_id);
@@ -1967,20 +1967,20 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
           );
         })()}
       </details>
-      <div style={{ fontSize: 11, color: 'var(--cvla-c-666666, #666)', marginBottom: 4 }}>
+      <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>
         Mẹo thao tác <Help text={`phím tắt khoá KF / outside / ground snap / chấp nhận / bỏ qua gợi ý (${['kf.toggle', 'outside.from', 'ground.snap', 'suggest.accept', 'suggest.ignore'].map((id) => keyOf(id) ?? 'chưa gán').join(' / ')}) tác dụng lên cột frame đang trỏ chuột (viền xanh) · rê chuột lên nút để xem phím tắt, đổi phím ở tab "Phím tắt" · cuộn chuột trên ô để zoom mọi frame · giữ chuột phải rồi kéo để dời khung nhìn (mọi frame cùng dời), nút ⌖ Về giữa để đưa về giữa ·` + " kéo trong box để dời, kéo cạnh để đổi kích thước, kéo chấm trắng ngắn ở đầu mũi tên (view Trên) hoặc GIỮ ALT rồi kéo để xoay (giữ thêm CTRL = xoay frame này và TẤT CẢ keyframe phía sau) · GIỮ ALT rồi kéo ở phần box chồng lấn (nét đứt vàng, ngoài box đang xét) = xoay box đó (thêm CTRL = xoay luôn mọi keyframe phía sau của object đó) · CTRL+kéo trong box = dời frame này và TẤT CẢ keyframe phía sau cùng độ lệch · CTRL+kéo cạnh / góc = đổi kích thước frame này và TẤT CẢ keyframe phía sau (nguồn mặt đường \"box ID nhỏ\" lấy đáy các box có ID nhỏ hơn trong 5 m) (view Trên: yaw · view Bên: pitch · view Trước: roll, nếu bật \"nghiêng theo mặt đường\") · sửa frame nào thì frame đó thành keyframe"} />
       </div>
       <div style={{ display: 'flex', flexDirection: rowsV ? 'column' : 'row', gap: prefs.gap, overflowX: 'auto', justifyContent: 'safe center', alignItems: rowsV ? 'safe center' : undefined, padding: '2px 4px 6px' }}>
         {cols.map((c) => colEl(c, String(c.f), size, { onBelow: !refS.on && !refS.dismissed ? reportBelow : undefined, horizontal: rowsV }))}
       </div>
-      <div style={{ fontSize: 11, color: 'var(--cvla-c-555555, #555)', marginTop: 4 }}>
+      <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>
         Viền: <span style={{ color: statusColor('key') }}>■ keyframe</span> <span style={{ color: statusColor('interp') }}>■ nội suy</span>{' '}
         <span style={{ color: statusColor('hold') }}>■ giữ nguyên</span> <span style={{ color: statusColor('outside') }}>■ outside</span>{' '}
         <span style={{ color: statusColor('none') }}>■ chưa có</span> · khung nhìn rộng ±{half.toFixed(1)} m quanh object
       </div>
       {bulk && (
-        <div role="dialog" aria-modal="true" onClick={() => setBulk(null)} style={{ position: 'fixed', inset: 0, background: 'var(--cvla-c-rgba-0-0-0-p35, rgba(0,0,0,.35))', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--cvla-c-ffffff, #fff)', color: 'var(--cvla-c-111111, #111)', border: '1px solid var(--cvla-c-888888, #888)', borderRadius: 6, padding: 14, maxWidth: 420, boxShadow: '0 4px 18px var(--cvla-c-rgba-0-0-0-p4, rgba(0,0,0,.4))' }}>
+        <div role="dialog" aria-modal="true" onClick={() => setBulk(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', color: '#111', border: '1px solid #888', borderRadius: 6, padding: 14, maxWidth: 420, boxShadow: '0 4px 18px rgba(0,0,0,.4)' }}>
             <p style={{ margin: '0 0 6px' }}>
               Bạn vừa chọn <b>{bulk.verb}</b> lỗi <b>{symLabel(bulk.kind)}</b> của object #{num} ở frame {bulk.f}.
             </p>
@@ -1997,7 +1997,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
         </div>
       )}
       {bindMenu && <KeyBindMenu id={bindMenu.id} x={bindMenu.x} y={bindMenu.y} maxW={brRoot.current?.getBoundingClientRect().width ?? 600} onClose={() => setBindMenu(null)} />}
-      {camShow ? <CameraPanel frame={selCol?.f ?? null} azimuth={az} /> : <p style={{ color: 'var(--cvla-c-666666, #666)' }}>Ảnh camera đang tắt (bật lại ở tab Camera).</p>}
+      {camShow ? <CameraPanel frame={selCol?.f ?? null} azimuth={az} /> : <p style={{ color: '#666' }}>Ảnh camera đang tắt (bật lại ở tab Camera).</p>}
     </div>
   );
 }

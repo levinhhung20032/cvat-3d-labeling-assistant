@@ -9,7 +9,7 @@ import { thresholdStore } from './thresholdStore';
 import { loadCameraBank, saveCameraBank } from './cameraStore';
 
 const ALL = SETTINGS_PARTS.map((p) => p.id);
-const box = { border: '1px solid var(--cvla-c-bbbbbb, #bbb)', borderRadius: 6, padding: '6px 8px', margin: '6px 0', fontSize: 12 } as const;
+const box = { border: '1px solid #bbb', borderRadius: 6, padding: '6px 8px', margin: '6px 0', fontSize: 12 } as const;
 
 /**
  * Xuất / nạp `setting.json` (dùng chung cho tab Threshold và Camera): chọn xuất / nạp toàn bộ hoặc từng phần
@@ -91,7 +91,7 @@ export function SettingsIO({ jobId, labels }: { jobId: number; labels: CvatLabel
   return (
     <div style={{ margin: '4px 0' }}>
       <button onClick={() => setOpen((v) => !v)} aria-expanded={open}>⇅ Xuất / Nạp setting.json</button>
-      {msg && <span style={{ color: 'var(--cvla-c-334455, #345)', marginLeft: 8 }}>{msg}</span>}
+      {msg && <span style={{ color: '#345', marginLeft: 8 }}>{msg}</span>}
       {open && (
         <>
           <div style={box}>
@@ -103,7 +103,7 @@ export function SettingsIO({ jobId, labels }: { jobId: number; labels: CvatLabel
             <b>Nạp</b>: chọn file (nhận cả file xuất toàn bộ lẫn một phần), rồi chọn phần cần nạp{' '}
             <label style={{ cursor: 'pointer' }}>
               <input type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={(e) => { void readFile(e.target.files?.[0]); e.target.value = ''; }} />
-              <span style={{ border: '1px solid var(--cvla-c-888888, #888)', borderRadius: 3, padding: '1px 6px' }}>Chọn file…</span>
+              <span style={{ border: '1px solid #888', borderRadius: 3, padding: '1px 6px' }}>Chọn file…</span>
             </label>
             {pending && (
               <div style={{ marginTop: 6 }}>

@@ -21,7 +21,7 @@ export function PopWindow({ title, rootClass, width, height, onClose, onFail, ch
     w.document.head.appendChild(style);
     const root = w.document.createElement('div');
     root.className = rootClass;
-    root.style.cssText = 'font: 13px/1.4 system-ui; padding: 8px; color: var(--cvla-c-111111, #111);';
+    root.style.cssText = 'font: 13px/1.4 system-ui; padding: 8px; color: #111;';
     w.document.body.appendChild(root);
     setHost(root);
     const t = window.setInterval(() => { if (w.closed) onClose(); }, 500);

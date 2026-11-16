@@ -113,7 +113,7 @@ function ZoomImage({ url }: { url: string }) {
       </div>
       <div
         ref={wrap}
-        style={{ position: 'relative', display: 'inline-block', overflow: 'hidden', maxWidth: 'min(100%, 1100px)', border: '1px solid var(--cvla-c-cccccc, #ccc)', touchAction: 'none', cursor: mode === 'lens' ? 'crosshair' : view.s > 1 ? 'grab' : 'zoom-in' }}
+        style={{ position: 'relative', display: 'inline-block', overflow: 'hidden', maxWidth: 'min(100%, 1100px)', border: '1px solid #ccc', touchAction: 'none', cursor: mode === 'lens' ? 'crosshair' : view.s > 1 ? 'grab' : 'zoom-in' }}
         onPointerMove={(e) => {
           const p = local(e);
           if (mode === 'lens') setCur(p);
@@ -143,12 +143,12 @@ function ZoomImage({ url }: { url: string }) {
           <div
             style={{
               position: 'absolute', left: lx, top: ly, width: LENS, height: LENS, borderRadius: '50%',
-              border: '3px solid var(--cvla-c-ffffff, #fff)', boxShadow: '0 0 0 1px var(--cvla-c-000000, #000), 0 2px 8px var(--cvla-c-rgba-0-0-0-p6, rgba(0,0,0,.6))', pointerEvents: 'none',
+              border: '3px solid #fff', boxShadow: '0 0 0 1px #000, 0 2px 8px rgba(0,0,0,.6)', pointerEvents: 'none',
             }}
           >
             <LensCanvas img={img.current} cx={cur.x} cy={cur.y} zoom={lensZoom} shown={size} />
-            <span style={{ position: 'absolute', left: LENS / 2 - 6, top: LENS / 2 - 1, width: 12, height: 2, background: 'var(--cvla-c-rgba-255-255-255-p9, rgba(255,255,255,.9))' }} />
-            <span style={{ position: 'absolute', left: LENS / 2 - 1, top: LENS / 2 - 6, width: 2, height: 12, background: 'var(--cvla-c-rgba-255-255-255-p9, rgba(255,255,255,.9))' }} />
+            <span style={{ position: 'absolute', left: LENS / 2 - 6, top: LENS / 2 - 1, width: 12, height: 2, background: 'rgba(255,255,255,.9)' }} />
+            <span style={{ position: 'absolute', left: LENS / 2 - 1, top: LENS / 2 - 6, width: 2, height: 12, background: 'rgba(255,255,255,.9)' }} />
           </div>
         )}
       </div>
@@ -166,7 +166,7 @@ function CameraSetupEditor({ files, setup, onChange, onCount }: { files: string[
   const used = new Map<string, number>();
   for (const c of cams) if (c.dir) used.set(c.dir, (used.get(c.dir) ?? 0) + 1);
   return (
-    <div style={{ border: '1px solid var(--cvla-c-bbbbbb, #bbb)', borderRadius: 6, padding: 8, margin: '6px 0', fontSize: 12, textAlign: 'left', maxWidth: 'min(100%, 760px)' }}>
+    <div style={{ border: '1px solid #bbb', borderRadius: 6, padding: 8, margin: '6px 0', fontSize: 12, textAlign: 'left', maxWidth: 'min(100%, 760px)' }}>
       <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
         <b>Bộ camera:</b>
         {([6, 8] as const).map((n) => (
@@ -178,7 +178,7 @@ function CameraSetupEditor({ files, setup, onChange, onCount }: { files: string[
         <label title="Bật khi ảnh camera của job bị lật: object bên trái xe lại hiện ở camera bên phải. Đổi dấu mọi yaw cùng lúc.">
           <input type="checkbox" checked={setup.flip} onChange={(e) => onChange({ ...setup, flip: e.target.checked })} /> Đảo trái ↔ phải
         </label>
-        <span style={{ color: 'var(--cvla-c-888888, #888)' }}>Góc nhìn là ước lượng ±15°, chỉnh được.</span>
+        <span style={{ color: '#888' }}>Góc nhìn là ước lượng ±15°, chỉnh được.</span>
       </div>
       <table style={{ borderCollapse: 'collapse', width: '100%', tableLayout: 'auto' }}>
         <thead>
@@ -192,12 +192,12 @@ function CameraSetupEditor({ files, setup, onChange, onCount }: { files: string[
                 <select
                   value={c.dir}
                   onChange={(e) => onChange({ ...setup, map: { ...setup.map, [c.key]: e.target.value }, over: { ...setup.over, [c.key]: {} } })}
-                  style={{ borderColor: c.dir && (used.get(c.dir) ?? 0) > 1 ? 'var(--cvla-c-dd9900, #d90)' : undefined }}
+                  style={{ borderColor: c.dir && (used.get(c.dir) ?? 0) > 1 ? '#d90' : undefined }}
                 >
                   <option value={UNMAPPED}>— chưa gán —</option>
                   {dirs.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
-                {c.suggested && c.dir && <span title="Đề xuất theo tên file; chọn lại để chốt" style={{ color: 'var(--cvla-c-888888, #888)' }}> ✦</span>}
+                {c.suggested && c.dir && <span title="Đề xuất theo tên file; chọn lại để chốt" style={{ color: '#888' }}> ✦</span>}
               </td>
               <td><input type="number" style={num} value={yawToUi(c.yaw)} min={-180} max={180} step={5} disabled={!c.dir} onChange={(e) => patchOver(c.key, { yaw: (setup.flip ? 1 : -1) * Number(e.target.value) || 0 })} /></td>
               <td>
@@ -210,7 +210,7 @@ function CameraSetupEditor({ files, setup, onChange, onCount }: { files: string[
           ))}
         </tbody>
       </table>
-      {[...used].some(([, n]) => n > 1) && <p style={{ color: 'var(--cvla-c-aa6600, #a60)', margin: '4px 0 0' }}>⚠ Có hướng được gán cho nhiều hơn một camera.</p>}
+      {[...used].some(([, n]) => n > 1) && <p style={{ color: '#a60', margin: '4px 0 0' }}>⚠ Có hướng được gán cho nhiều hơn một camera.</p>}
     </div>
   );
 }
@@ -249,7 +249,7 @@ export function CameraTab({ start, stop }: { start: number; stop: number }) {
         <input type="number" style={{ width: 64 }} min={start} max={stop} value={frame} onChange={(e) => setFrame(clamp(Math.round(Number(e.target.value) || start), start, stop))} />
         {' '}(cấu hình áp cho mọi frame).
       </p>
-      {err && <p style={{ color: 'var(--cvla-c-bb0000, #b00)' }}>Lỗi: {err}</p>}
+      {err && <p style={{ color: '#b00' }}>Lỗi: {err}</p>}
       {!files && !err && <p>đang tải ảnh…</p>}
       {files && files.length === 0 && <p>Frame này không có ảnh camera.</p>}
       {files && files.length > 0 && <CameraSetupEditor files={files} setup={setup} onChange={setSetup} onCount={(n) => setBank({ ...bank, active: n })} />}
@@ -272,7 +272,7 @@ const MIN_W = 240, MIN_H = 160;
 
 /**
  * Cửa sổ nổi nhỏ: kéo thanh tiêu đề để dời, kéo bất kỳ cạnh / góc nào để đổi cỡ; vị trí / cỡ nhớ trên máy này, luôn được kéo về trong khung tool.
- * Vẽ qua portal ra ngoài `.cvla-root` (nên mang lớp giao diện tối / xám riêng, cvla-skin).
+ * Vẽ qua portal ra ngoài `.cvla-root` (giao diện tối / xám đặt `filter` ở đó, làm `position: fixed` bám theo nội dung thay vì khung tool).
  */
 function FloatWin({ host, title, onDock, children }: { host: Element; title: ReactNode; onDock: () => void; children: ReactNode }) {
   const fitIn = (g: PopGeo): PopGeo => {
@@ -299,14 +299,12 @@ function FloatWin({ host, title, onDock, children }: { host: Element; title: Rea
     window.addEventListener('resize', on);
     return () => window.removeEventListener('resize', on);
   }, []);
-  const skinCls = (['cvla-dark', 'cvla-gray'] as const).find((c) => host.querySelector(`.cvla-root.${c}`)) ?? '';
   return createPortal(
     <div
-      className={`cvla-skin ${skinCls}`}
       style={{
         position: 'fixed', left: geo.x, top: geo.y, width: geo.w, height: geo.h, zIndex: 60, boxSizing: 'border-box',
-        display: 'flex', flexDirection: 'column', background: 'var(--cvla-c-ffffff, #fff)', color: 'var(--cvla-c-111111, #111)', font: '12px/1.4 system-ui',
-        border: '1px solid var(--cvla-c-1f2937, #1f2937)', borderRadius: 6, boxShadow: '0 6px 24px var(--cvla-c-rgba-0-0-0-p45, rgba(0,0,0,.45))',
+        display: 'flex', flexDirection: 'column', background: '#fff', color: '#111', font: '12px/1.4 system-ui',
+        border: '1px solid #1f2937', borderRadius: 6, boxShadow: '0 6px 24px rgba(0,0,0,.45)',
       }}
     >
       {EDGES.map((ed) => (
@@ -326,7 +324,7 @@ function FloatWin({ host, title, onDock, children }: { host: Element; title: Rea
         }}
         onPointerMove={(e) => { const d = drag.current; if (d) setGeo(fitIn({ ...geo, x: d.x + e.clientX - d.px, y: d.y + e.clientY - d.py })); }}
         onPointerUp={() => { if (drag.current) { drag.current = null; save(geo); } }}
-        style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 6, padding: '3px 6px', background: 'var(--cvla-c-1f2937, #1f2937)', color: 'var(--cvla-c-e5e7eb, #e5e7eb)', cursor: 'move', userSelect: 'none', touchAction: 'none' }}
+        style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 6, padding: '3px 6px', background: '#1f2937', color: '#e5e7eb', cursor: 'move', userSelect: 'none', touchAction: 'none' }}
       >
         <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
         <button onClick={onDock} title="Gắn ảnh camera trở lại dưới các cột frame" style={{ padding: '0 6px' }}>⧈ Gắn lại</button>
@@ -394,7 +392,7 @@ export function CameraPanel({ frame, azimuth }: { frame: number | null; azimuth:
     return () => { live = false; };
   }, [images, files, cur?.key]);
   useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
-  const status = <>{loading && <span style={{ color: 'var(--cvla-c-aa6600, #a60)' }}> · đang tải ảnh frame {frame}{shownFrame !== null ? ` (đang hiện frame ${shownFrame})` : ''}…</span>}</>;
+  const status = <>{loading && <span style={{ color: '#a60' }}> · đang tải ảnh frame {frame}{shownFrame !== null ? ` (đang hiện frame ${shownFrame})` : ''}…</span>}</>;
   const body = (
     <>
       <div style={{ margin: '4px 0', minHeight: 26, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 4 }}>
@@ -404,10 +402,10 @@ export function CameraPanel({ frame, azimuth }: { frame: number | null; azimuth:
           </button>
         ))}
       </div>
-      {err && <p style={{ color: 'var(--cvla-c-bb0000, #b00)', margin: '2px 0' }}>Lỗi: {err}</p>}
+      {err && <p style={{ color: '#b00', margin: '2px 0' }}>Lỗi: {err}</p>}
       <div ref={area} style={{ minHeight: floating ? 0 : lastAreaH, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: url && frame !== null ? 'flex-start' : 'center', opacity: loading && url ? 0.55 : 1, transition: 'opacity .15s' }}>
-        {frame === null && <p style={{ color: 'var(--cvla-c-666666, #666)' }}>Bấm vào một cột (tiêu đề frame) để xem ảnh camera của frame đó.</p>}
-        {frame !== null && !images && !err && <p style={{ color: 'var(--cvla-c-666666, #666)' }}>đang tải ảnh…</p>}
+        {frame === null && <p style={{ color: '#666' }}>Bấm vào một cột (tiêu đề frame) để xem ảnh camera của frame đó.</p>}
+        {frame !== null && !images && !err && <p style={{ color: '#666' }}>đang tải ảnh…</p>}
         {!loading && images && images.size === 0 && <p>Frame này không có ảnh camera.</p>}
         {!loading && images && images.size > 0 && !url && <p>Không đọc được ảnh đã chọn.</p>}
         {url && frame !== null && <ZoomImage url={url} />}
@@ -420,14 +418,14 @@ export function CameraPanel({ frame, azimuth }: { frame: number | null; azimuth:
         <b>Ảnh camera · frame {frame ?? '—'}</b>
         {!floating && status}
         {azimuth !== null && <> · phương vị object {azimuth.toFixed(0)}°</>}
-        <span style={{ color: 'var(--cvla-c-888888, #888)' }}> · gán camera ↔ hướng, tắt ảnh camera ở tab Camera</span>{' '}
+        <span style={{ color: '#888' }}> · gán camera ↔ hướng, tắt ảnh camera ở tab Camera</span>{' '}
         {floating
           ? <button onClick={() => setPop(false)} title="Gắn ảnh camera trở lại dưới các cột frame">⧈ Gắn lại</button>
           : <button onClick={() => setPop(true)} title="Tách ảnh camera ra cửa sổ nổi nhỏ: kéo thanh tiêu đề để dời, kéo góc dưới phải để đổi cỡ">⧉ Tách cửa sổ</button>}
       </div>
       {floating
         ? <>
-            <p style={{ color: 'var(--cvla-c-666666, #666)', margin: '2px 0' }}>Ảnh camera đang ở cửa sổ nổi.</p>
+            <p style={{ color: '#666', margin: '2px 0' }}>Ảnh camera đang ở cửa sổ nổi.</p>
             <FloatWin host={host!} onDock={() => setPop(false)} title={<><b>📷 frame {frame ?? '—'}</b>{status}</>}>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>{body}</div>
             </FloatWin>

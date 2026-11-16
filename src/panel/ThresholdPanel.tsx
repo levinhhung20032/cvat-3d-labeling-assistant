@@ -20,7 +20,7 @@ function NumField({ value, onCommit, step, width = 78, title }: { value: number;
   return (
     <input
       type="number" value={text} step={step} title={title}
-      style={{ width, borderColor: bad ? 'var(--cvla-c-bb0000, #b00)' : undefined, background: bad ? 'var(--cvla-c-ffeeee, #fee)' : undefined }}
+      style={{ width, borderColor: bad ? '#b00' : undefined, background: bad ? '#fee' : undefined }}
       onChange={(e) => {
         const s = e.target.value;
         setText(s);
@@ -36,13 +36,13 @@ function NumField({ value, onCommit, step, width = 78, title }: { value: number;
 function FieldRow({ f }: { f: Field }) {
   const changed = isChanged(f);
   return (
-    <tr style={{ background: changed ? 'var(--cvla-c-fff8dc, #fff8dc)' : undefined }}>
+    <tr style={{ background: changed ? '#fff8dc' : undefined }}>
       <td style={{ padding: '2px 10px 2px 0' }} title={f.help}>{f.label}{f.help ? ' ⓘ' : ''}</td>
       <td style={{ whiteSpace: 'nowrap' }}>
         <NumField value={f.get()} step={f.step} onCommit={(v) => { const ok = setValue(f.key, v); if (ok) thresholdStore.changed(); return ok; }} />
         {f.unit ? ` ${f.unit}` : ''}
       </td>
-      <td style={{ padding: '2px 8px', color: 'var(--cvla-c-777777, #777)', fontSize: 11 }}>mặc định {f.def}{f.unit ? ` ${f.unit}` : ''}</td>
+      <td style={{ padding: '2px 8px', color: '#777', fontSize: 11 }}>mặc định {f.def}{f.unit ? ` ${f.unit}` : ''}</td>
       <td>{changed && <button onClick={() => { f.set(f.def); thresholdStore.changed(); }} title="Về giá trị mặc định">↺</button>}</td>
     </tr>
   );
@@ -58,7 +58,7 @@ function SymbolInput({ kind }: { kind: SymbolKind }) {
     <input
       value={text} maxLength={3} placeholder={nullable ? 'NULL' : undefined}
       title={nullable ? 'Lỗi này chưa có mã (NULL). Điền 1–3 ký tự nếu muốn đặt mã, không trùng loại khác; để trống = NULL' : `Ký hiệu hiển thị của lỗi này (mặc định ${SYMBOL_DEFAULTS[kind]}); 1–3 ký tự, không trùng loại khác`}
-      style={{ width: nullable ? 48 : 34, textAlign: 'center', fontWeight: 700, marginRight: 6, borderColor: bad ? 'var(--cvla-c-bb0000, #b00)' : undefined, background: bad ? 'var(--cvla-c-ffeeee, #fee)' : undefined }}
+      style={{ width: nullable ? 48 : 34, textAlign: 'center', fontWeight: 700, marginRight: 6, borderColor: bad ? '#b00' : undefined, background: bad ? '#fee' : undefined }}
       onClick={(e) => e.preventDefault()} onKeyDown={(e) => e.stopPropagation()}
       onChange={(e) => { const v = e.target.value; setText(v); setBad((v.trim() !== '' || nullable) && !symbolStore.set(kind, v)); }}
       onBlur={() => { setText(sym(kind)); setBad(false); }}
@@ -110,7 +110,7 @@ function RuleRow({ r, metrics, labels, tracks, jobId }: { r: Rule; metrics: Metr
     else thresholdStore.updateRule(r.id, { target: { t: 'object', job: jobId, num: Number(k.slice(2)) } });
   };
   return (
-    <tr style={{ background: r.value === null ? 'var(--cvla-c-f3f3f3, #f3f3f3)' : undefined }}>
+    <tr style={{ background: r.value === null ? '#f3f3f3' : undefined }}>
       <td><select value={targetKey(r.target)} onChange={(e) => setTarget(e.target.value)} title="Đối tượng áp dụng rule">
         <option value="all">Tất cả object</option>
         {!hasClass && (r.target.t === 'class' || r.target.t === 'attr') && <option value={targetKey(r.target)}>Class: {r.target.name} (job này không có)</option>}
@@ -138,7 +138,7 @@ function RuleRow({ r, metrics, labels, tracks, jobId }: { r: Rule; metrics: Metr
       </select></td>
       <td style={{ whiteSpace: 'nowrap' }}>
         <input
-          type="number" step={m.step} value={text} placeholder="ngưỡng" style={{ width: 90, borderColor: bad ? 'var(--cvla-c-bb0000, #b00)' : undefined, background: bad ? 'var(--cvla-c-ffeeee, #fee)' : undefined }}
+          type="number" step={m.step} value={text} placeholder="ngưỡng" style={{ width: 90, borderColor: bad ? '#b00' : undefined, background: bad ? '#fee' : undefined }}
           onChange={(e) => {
             const s = e.target.value;
             setText(s);
@@ -150,7 +150,7 @@ function RuleRow({ r, metrics, labels, tracks, jobId }: { r: Rule; metrics: Metr
         />{m.unit ? ` ${m.unit}` : ''}
       </td>
       <td><button onClick={() => thresholdStore.removeRule(r.id)} title="Xoá rule này">✕</button></td>
-      {r.value === null && <td style={{ color: 'var(--cvla-c-777777, #777)', fontSize: 11, paddingLeft: 6 }}>chưa nhập ngưỡng: chưa có hiệu lực</td>}
+      {r.value === null && <td style={{ color: '#777', fontSize: 11, paddingLeft: 6 }}>chưa nhập ngưỡng: chưa có hiệu lực</td>}
     </tr>
   );
 }
@@ -166,27 +166,27 @@ function Section({ id, title, about, code, rules, labels, tracks, jobId, childre
   const changed = sectionChanged(id);
   return (
     // mặc định thu gọn (chủ dự án 2026-10-29): số rule / "đã chỉnh" vẫn hiện trên tiêu đề
-    <details style={{ border: '1px solid var(--cvla-c-ccccdd, #ccd)', borderRadius: 4, margin: '6px 0', padding: '2px 8px' }}>
+    <details style={{ border: '1px solid #ccd', borderRadius: 4, margin: '6px 0', padding: '2px 8px' }}>
       <summary style={{ cursor: 'pointer', fontWeight: 700, padding: '3px 0' }}>
         {code && <SymbolInput kind={code} />}{title}
-        <span style={{ color: shown.length ? 'var(--cvla-c-aa6600, #a60)' : 'var(--cvla-c-999999, #999)', fontWeight: 600, marginLeft: 8 }}>{shown.length ? `● ${shown.length} rule` : 'chưa có rule (không báo)'}</span>
-        {changed && <span style={{ color: 'var(--cvla-c-334455, #345)', fontWeight: 400, marginLeft: 8, fontSize: 12 }}>● tham số đã chỉnh</span>}
+        <span style={{ color: shown.length ? '#a60' : '#999', fontWeight: 600, marginLeft: 8 }}>{shown.length ? `● ${shown.length} rule` : 'chưa có rule (không báo)'}</span>
+        {changed && <span style={{ color: '#345', fontWeight: 400, marginLeft: 8, fontSize: 12 }}>● tham số đã chỉnh</span>}
       </summary>
-      <p style={{ margin: '2px 0 4px', color: 'var(--cvla-c-445566, #456)', fontSize: 12 }}>{about}</p>
+      <p style={{ margin: '2px 0 4px', color: '#456', fontSize: 12 }}>{about}</p>
       {children}
       {shown.length > 0 && (
         <table style={{ borderCollapse: 'collapse' }}>
-          <thead><tr style={{ textAlign: 'left', fontSize: 11, color: 'var(--cvla-c-666666, #666)' }}><th>Đối tượng</th><th>Thuộc tính</th><th>Quy tắc</th><th>Ngưỡng</th><th /></tr></thead>
+          <thead><tr style={{ textAlign: 'left', fontSize: 11, color: '#666' }}><th>Đối tượng</th><th>Thuộc tính</th><th>Quy tắc</th><th>Ngưỡng</th><th /></tr></thead>
           <tbody>{shown.map((r) => <RuleRow key={r.id} r={r} metrics={metrics} labels={labels} tracks={tracks} jobId={jobId} />)}</tbody>
         </table>
       )}
-      {hidden > 0 && <p style={{ margin: '2px 0', color: 'var(--cvla-c-777777, #777)', fontSize: 11 }}>{hidden} rule theo object của job khác (ẩn, giữ nguyên).</p>}
+      {hidden > 0 && <p style={{ margin: '2px 0', color: '#777', fontSize: 11 }}>{hidden} rule theo object của job khác (ẩn, giữ nguyên).</p>}
       <div style={{ margin: '4px 0' }}>
         <button onClick={() => thresholdStore.addRule({ metric: metrics[0]!.id, target: { t: 'all' }, op: metrics[0]!.ops[0]! })}>＋ Thêm rule</button>
       </div>
       {params.length > 0 && (
         <details style={{ margin: '2px 0' }}>
-          <summary style={{ cursor: 'pointer', color: 'var(--cvla-c-334455, #345)' }}>Tham số thuật toán{changed ? ' ● đã chỉnh' : ''}</summary>
+          <summary style={{ cursor: 'pointer', color: '#345' }}>Tham số thuật toán{changed ? ' ● đã chỉnh' : ''}</summary>
           <table style={{ borderCollapse: 'collapse' }}><tbody>{params.map((f) => <FieldRow key={f.key} f={f} />)}</tbody></table>
           <button disabled={!changed} onClick={() => { resetSection(id); thresholdStore.changed(); }}>↺ Đặt lại tham số mục này</button>
         </details>
@@ -215,8 +215,8 @@ export function ThresholdPanel({ jobId, labels, tracks }: { jobId: number; label
         <button onClick={() => { resetAll(); thresholdStore.changed(); }} disabled={!SECTIONS.some((s) => sectionChanged(s.id))}>↺ Tham số</button>{' '}
         <button onClick={() => symbolStore.reset()} title="Về ký hiệu mặc định (đi xa bất thường = Y)">↺ Ký hiệu lỗi</button>
       </p>
-      <p style={{ margin: '2px 0', color: 'var(--cvla-c-777777, #777)', fontSize: 11 }}>Ô chữ đậm đầu mỗi mục = ký hiệu lỗi, sửa được; lỗi chưa có mã hiện NULL (điền 1–3 ký tự nếu sau này muốn đặt mã). Tên class và attribute trong dropbox lấy từ nhãn của job này.</p>
-      <p style={{ margin: '2px 0', color: 'var(--cvla-c-445566, #456)', fontSize: 12 }}>
+      <p style={{ margin: '2px 0', color: '#777', fontSize: 11 }}>Ô chữ đậm đầu mỗi mục = ký hiệu lỗi, sửa được; lỗi chưa có mã hiện NULL (điền 1–3 ký tự nếu sau này muốn đặt mã). Tên class và attribute trong dropbox lấy từ nhãn của job này.</p>
+      <p style={{ margin: '2px 0', color: '#456', fontSize: 12 }}>
         <b>Ưu tiên</b>: nhiều rule cùng thuộc tính và cùng chiều (&gt; / &gt;= hoặc &lt; / &lt;=) cùng khớp một object thì chỉ rule cụ thể nhất có hiệu lực:
         một object &gt; class · attribute &gt; class &gt; tất cả object. Ví dụ có rule Vehicle "Dài &gt; 5.5" thì rule "Tất cả object: Dài &gt; 2" không áp cho Vehicle,
         nhưng rule "Tất cả object: Dài &lt; 0.3" vẫn áp. Object khớp rule của từ hai attribute khác nhau trở lên (vd. age = child và pose = sitting) thì xét từ rule của class.

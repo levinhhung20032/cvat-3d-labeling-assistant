@@ -43,12 +43,12 @@ export function KeysPanel({ map, setMap }: { map: Keymap; setMap: (m: Keymap) =>
         Phím tắt chỉ hoạt động khi con trỏ đang ở trong cửa sổ tool (không phải trang CVAT). Mỗi thao tác gán được nhiều phím; một phím chỉ thuộc một thao tác.
       </p>
       {dups.length > 0 && (
-        <p style={{ color: 'var(--cvla-c-bb0000, #b00)', fontWeight: 600 }}>
+        <p style={{ color: '#b00', fontWeight: 600 }}>
           ⚠ Phím đang gán trùng: {dups.map(([c, ids]) => `${prettyCombo(c)} (${ids.map(label).join(' / ')})`).join('; ')}
         </p>
       )}
       {pending && (
-        <p style={{ background: 'var(--cvla-c-fff3cd, #fff3cd)', border: '1px solid var(--cvla-c-e0b000, #e0b000)', padding: '4px 8px' }}>
+        <p style={{ background: '#fff3cd', border: '1px solid #e0b000', padding: '4px 8px' }}>
           <b>{prettyCombo(pending.combo)}</b> đang vướng:{' '}
           {pending.action && <>đã dùng cho "<b>{label(pending.action)}</b>" (thay thế sẽ gỡ khỏi thao tác đó). </>}
           {pending.reserved && <>trùng phím có sẵn ({pending.reserved}). </>}
@@ -59,19 +59,19 @@ export function KeysPanel({ map, setMap }: { map: Keymap; setMap: (m: Keymap) =>
       <table style={{ borderCollapse: 'collapse' }}>
         <tbody>
           {ACTIONS.map((a) => (
-            <tr key={a.id} style={{ borderTop: '1px solid var(--cvla-c-dddddd, #ddd)' }}>
+            <tr key={a.id} style={{ borderTop: '1px solid #ddd' }}>
               <td style={{ padding: '4px 12px 4px 0' }}>{a.label}</td>
               <td>
                 {(map[a.id] ?? []).map((c) => (
-                  <span key={c} title={conflictOf(map, a.id, c).reserved ?? undefined} style={{ display: 'inline-block', background: conflictOf(map, a.id, c).reserved ? 'var(--cvla-c-fff3cd, #fff3cd)' : 'var(--cvla-c-eeeeff, #eef)', border: '1px solid var(--cvla-c-9999cc, #99c)', borderRadius: 3, padding: '0 6px', margin: '0 4px 0 0' }}>
+                  <span key={c} title={conflictOf(map, a.id, c).reserved ?? undefined} style={{ display: 'inline-block', background: conflictOf(map, a.id, c).reserved ? '#fff3cd' : '#eef', border: '1px solid #99c', borderRadius: 3, padding: '0 6px', margin: '0 4px 0 0' }}>
                     <b>{prettyCombo(c)}</b>{' '}
                     <button title="Gỡ phím này" style={{ border: 0, background: 'transparent', cursor: 'pointer' }} onClick={() => setMap(unassign(map, a.id, c))}>×</button>
                   </span>
                 ))}
-                {(map[a.id] ?? []).length === 0 && <i style={{ color: 'var(--cvla-c-888888, #888)' }}>chưa gán </i>}
+                {(map[a.id] ?? []).length === 0 && <i style={{ color: '#888' }}>chưa gán </i>}
                 <button
                   onClick={() => { setCapturingId(capturingId === a.id ? null : a.id); setNote(''); }}
-                  style={{ fontWeight: capturingId === a.id ? 700 : 400, background: capturingId === a.id ? 'var(--cvla-c-ffe9a8, #ffe9a8)' : undefined }}
+                  style={{ fontWeight: capturingId === a.id ? 700 : 400, background: capturingId === a.id ? '#ffe9a8' : undefined }}
                 >
                   {capturingId === a.id ? '● bấm phím…' : '+ thêm phím'}
                 </button>
@@ -82,7 +82,7 @@ export function KeysPanel({ map, setMap }: { map: Keymap; setMap: (m: Keymap) =>
       </table>
       <p style={{ marginTop: 8 }}>
         <button onClick={() => { setMap(defaultKeymap()); setNote('Đã khôi phục phím mặc định.'); }}>Khôi phục mặc định</button>{' '}
-        <span style={{ color: 'var(--cvla-c-7a4b00, #7a4b00)' }}>{note}</span>
+        <span style={{ color: '#7a4b00' }}>{note}</span>
       </p>
     </>
   );

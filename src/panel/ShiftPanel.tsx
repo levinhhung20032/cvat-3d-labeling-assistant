@@ -23,7 +23,7 @@ function KpiView({ k, target }: { k: Kpi; target: number | null }) {
             ['Gợi ý', `chấp nhận ${k.accepted} · bỏ qua ${k.ignored}`],
             ['Thao tác sửa trong nháp', k.edits],
           ].map(([a, b]) => (
-            <tr key={String(a)} style={{ borderTop: '1px solid var(--cvla-c-dddddd, #ddd)' }}><td style={{ padding: '2px 14px 2px 0', color: 'var(--cvla-c-555555, #555)' }}>{a}</td><td><b>{b}</b></td></tr>
+            <tr key={String(a)} style={{ borderTop: '1px solid #ddd' }}><td style={{ padding: '2px 14px 2px 0', color: '#555' }}>{a}</td><td><b>{b}</b></td></tr>
           ))}
         </tbody>
       </table>
@@ -32,9 +32,9 @@ function KpiView({ k, target }: { k: Kpi; target: number | null }) {
           <thead><tr style={{ textAlign: 'left' }}><th>ID</th><th>Nhãn</th><th title="span + KF outside khoá − trùng">KPI</th><th title="Số frame từ lúc ID xuất hiện tới hết job, tính cả outside">từ lúc xuất hiện</th><th title="Keyframe outside đã khoá trong ca (trừ phần trùng)">KF outside khoá</th><th>upload</th><th>frame đổi</th><th>+KF</th><th>−KF</th><th>~KF</th><th>khoá</th><th>outside</th><th>mới</th><th>trở lại</th></tr></thead>
           <tbody>
             {k.objects.map((o) => (
-              <tr key={`${o.jobId}:${o.num}`} style={{ borderTop: '1px solid var(--cvla-c-eeeeee, #eee)' }}>
-                <td><b>{o.num}</b>{k.objects.some((x) => x.jobId !== o.jobId) ? <span style={{ color: 'var(--cvla-c-999999, #999)' }}> (job {o.jobId})</span> : ''}</td>
-                <td>{o.label}</td><td><b>{o.kpi}</b></td><td>{o.span}</td><td>{o.outsideLocked}{o.dup ? <span style={{ color: 'var(--cvla-c-999999, #999)' }}> (−{o.dup})</span> : ''}</td><td>{o.uploads}</td><td>{o.framesChanged}</td><td>{o.added}</td><td>{o.removed}</td><td>{o.modified}</td><td>{o.baked}</td>
+              <tr key={`${o.jobId}:${o.num}`} style={{ borderTop: '1px solid #eee' }}>
+                <td><b>{o.num}</b>{k.objects.some((x) => x.jobId !== o.jobId) ? <span style={{ color: '#999' }}> (job {o.jobId})</span> : ''}</td>
+                <td>{o.label}</td><td><b>{o.kpi}</b></td><td>{o.span}</td><td>{o.outsideLocked}{o.dup ? <span style={{ color: '#999' }}> (−{o.dup})</span> : ''}</td><td>{o.uploads}</td><td>{o.framesChanged}</td><td>{o.added}</td><td>{o.removed}</td><td>{o.modified}</td><td>{o.baked}</td>
                 <td>{o.outsideNow}</td><td>{o.outsideNew}</td><td>{o.outsideRestored}</td>
               </tr>
             ))}
@@ -42,7 +42,7 @@ function KpiView({ k, target }: { k: Kpi; target: number | null }) {
         </table>
       )}
       {k.pending.length > 0 && (
-        <div style={{ background: 'var(--cvla-c-fff3cd, #fff3cd)', padding: 4, marginTop: 4 }}>
+        <div style={{ background: '#fff3cd', padding: 4, marginTop: 4 }}>
           Đã sửa nhưng <b>chưa upload</b> (không tính vào KPI): object {k.pending.map((p) => p.split(':')[1]).join(', ')}
         </div>
       )}
@@ -75,7 +75,7 @@ function ScheduleEditor() {
         <label title="Chỉ tiêu KPI (frame) của mỗi ca sáng / chiều, hiện ở thanh tiến trình cạnh tên ca trên hàng đầu. OT không có chỉ tiêu.">Chỉ tiêu KPI mỗi ca <input type="number" min={1} max={100000} value={sch.kpiTarget} onChange={(e) => setSchedule({ kpiTarget: Number(e.target.value) })} style={{ width: 70 }} /> frame</label>
         <button onClick={() => setSchedule(DEFAULT_SCHEDULE)}>Về mặc định</button>
       </div>
-      <p style={{ margin: 0, color: 'var(--cvla-c-555555, #555)' }}>Không cần chấm công: tool tự vào / ra ca theo giờ máy. Thời gian ngoài ca sáng và ca chiều (sau 17:30, trước 8:30, nghỉ trưa) tính là <b>OT</b>; ca OT được mở khi có thao tác đầu tiên và kết thúc ở thao tác cuối.</p>
+      <p style={{ margin: 0, color: '#555' }}>Không cần chấm công: tool tự vào / ra ca theo giờ máy. Thời gian ngoài ca sáng và ca chiều (sau 17:30, trước 8:30, nghỉ trưa) tính là <b>OT</b>; ca OT được mở khi có thao tác đầu tiên và kết thúc ở thao tác cuối.</p>
     </details>
   );
 }
@@ -100,20 +100,20 @@ export function ShiftPanel() {
     const given = credits.filter((c) => c.source === s.name && c.owner !== s.name);
     const isOpen = open === s.name;
     return (
-      <div key={s.name} style={{ border: '1px solid var(--cvla-c-cccccc, #ccc)', margin: '6px 0', padding: 6 }}>
+      <div key={s.name} style={{ border: '1px solid #ccc', margin: '6px 0', padding: 6 }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', cursor: 'pointer' }} onClick={() => setOpen(isOpen ? null : s.name)}>
           <b>{s.name}</b>
-          <span style={{ color: 'var(--cvla-c-555555, #555)' }}>{new Date(s.start).toLocaleString()} · {fmtDuration(k.durationMin)} · KPI <b>{cr.kpi}</b>{ot ? '' : `/${sch.kpiTarget}`}{cr.rework ? ` · rework ${cr.rework}` : ''}{given.length ? ` · đã dồn ${given.length} ID` : ''} · {k.totals.objects} object · {k.totals.outsideNow} frame outside</span>
+          <span style={{ color: '#555' }}>{new Date(s.start).toLocaleString()} · {fmtDuration(k.durationMin)} · KPI <b>{cr.kpi}</b>{ot ? '' : `/${sch.kpiTarget}`}{cr.rework ? ` · rework ${cr.rework}` : ''}{given.length ? ` · đã dồn ${given.length} ID` : ''} · {k.totals.objects} object · {k.totals.outsideNow} frame outside</span>
           {isOpen ? '▾' : '▸'}
         </div>
         {isOpen && (
           <>
-            <p style={{ margin: '4px 0', background: 'var(--cvla-c-f1f7ee, #f1f7ee)', padding: 4 }}>
+            <p style={{ margin: '4px 0', background: '#f1f7ee', padding: 4 }}>
               <b>KPI ghi cho ca: {cr.kpi}{ot ? '' : `/${sch.kpiTarget} (${Math.round((cr.kpi / sch.kpiTarget) * 100)}%)`}</b>
               {cr.rework ? <> · trong đó rework <b>{cr.rework}</b> (sửa lại ID đã làm ở ngày trước)</> : null}
               {cr.fromOthers ? <> · gồm {cr.fromOthers} ID dồn từ OT</> : null}
               {given.length ? <> · đã dồn {given.length} ID ({given.reduce((n, c) => n + c.kpi, 0)}) sang {[...new Set(given.map((c) => c.owner))].join(', ')}</> : null}
-              <br /><span style={{ color: 'var(--cvla-c-555555, #555)', fontSize: 12 }}>Mỗi ID tính một lần mỗi ngày, cho ca đầu tiên của ngày đã làm ID đó. Bảng dưới là toàn bộ việc đã upload trong ca (chưa gộp).</span>
+              <br /><span style={{ color: '#555', fontSize: 12 }}>Mỗi ID tính một lần mỗi ngày, cho ca đầu tiên của ngày đã làm ID đó. Bảng dưới là toàn bộ việc đã upload trong ca (chưa gộp).</span>
             </p>
             {ot && <OtAllocator shift={s} />}
             <KpiView k={k} target={null} />
@@ -130,7 +130,7 @@ ${kpiText(k)}`} />{' '}
 
   return (
     <>
-      <p style={{ margin: '4px 0', color: 'var(--cvla-c-555555, #555)' }}>
+      <p style={{ margin: '4px 0', color: '#555' }}>
         KPI tính từ những gì đã <b>upload</b> lên CVAT: với mỗi ID, số frame từ lúc ID xuất hiện tới hết job (tính cả outside),
         cộng số keyframe outside đã khoá, trừ frame trùng. Mỗi ID tính <b>một lần mỗi ngày</b> cho ca đầu tiên của ngày đã làm ID đó; sửa lại ID ở ngày
         sau là <b>rework</b> (vẫn tính KPI, hiện riêng để biết). KPI ca OT dồn được sang ca sáng / chiều (kể cả ca trong 3 ngày tới).
@@ -142,7 +142,7 @@ ${kpiText(k)}`} />{' '}
         const known = new Set([...(active ? [active.name] : []), ...history.map((h) => h.name)]);
         const future = [...new Set(credits.map((c) => c.owner))].filter((n) => !known.has(n));
         return future.length ? (
-          <p style={{ margin: '4px 0', background: 'var(--cvla-c-faf7ff, #faf7ff)', padding: 4 }}>
+          <p style={{ margin: '4px 0', background: '#faf7ff', padding: 4 }}>
             Ca sắp tới đã nhận KPI dồn từ OT: {future.map((n) => { const c = creditOf(credits, n); return <span key={n} style={{ marginRight: 12 }}><b>{n}</b> {c.kpi}/{sch.kpiTarget}{c.rework ? ` (rework ${c.rework})` : ''}</span>; })}
           </p>
         ) : null;
@@ -152,9 +152,9 @@ ${kpiText(k)}`} />{' '}
           <h4 style={{ margin: '6px 0' }}>Ca đang chạy</h4>
           {row(active)}
         </>
-      ) : <p style={{ color: 'var(--cvla-c-666666, #666)' }}>Chưa có ca đang chạy (ngoài giờ ca sáng / chiều; ca OT sẽ tự mở khi bạn có thao tác đầu tiên).</p>}
+      ) : <p style={{ color: '#666' }}>Chưa có ca đang chạy (ngoài giờ ca sáng / chiều; ca OT sẽ tự mở khi bạn có thao tác đầu tiên).</p>}
       <h4 style={{ margin: '10px 0 0' }}>Lịch sử ({history.length})</h4>
-      {history.length === 0 && <p style={{ color: 'var(--cvla-c-666666, #666)' }}>Chưa có ca nào kết thúc.</p>}
+      {history.length === 0 && <p style={{ color: '#666' }}>Chưa có ca nào kết thúc.</p>}
       {history.map(row)}
     </>
   );

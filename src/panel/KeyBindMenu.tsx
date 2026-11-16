@@ -67,7 +67,7 @@ export function KeyBindMenu({ id, x, y, maxW, onClose }: { id: string; x: number
         {keys.length > 1 && (
           <button role="menuitem" disabled={capturing} onClick={() => { applyKeymap({ ...map, [id]: [] }); setNote('Đã gỡ mọi phím của thao tác này.'); }}>🗑 Gỡ tất cả phím</button>
         )}
-        {note && <div style={{ color: 'var(--cvla-c-7a4b00, #7a4b00)' }}>{note}</div>}
+        {note && <div style={{ color: '#7a4b00' }}>{note}</div>}
         <hr />
         <button role="menuitem" onClick={onClose}>Đóng</button>
       </div>

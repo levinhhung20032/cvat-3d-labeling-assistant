@@ -5,7 +5,7 @@ import type { Cuboid } from '../shared/cuboid';
 import type { CvatTrack } from '../shared/types';
 import { attrKey, ignoreStore, useIgnored } from './shiftStore';
 
-const CONF_COLOR = { cao: 'var(--cvla-c-0a7a2f, #0a7a2f)', vừa: 'var(--cvla-c-8a6d00, #8a6d00)', thấp: 'var(--cvla-c-777777, #777)' } as const;
+const CONF_COLOR = { cao: '#0a7a2f', vừa: '#8a6d00', thấp: '#777' } as const;
 
 /**
  * Thuộc tính (attribute) của object đang chọn: giá trị hiện tại, sửa tay, và gợi ý theo kích thước box
@@ -17,7 +17,7 @@ export function AttributePanel({ track, num, label, spec, frame, box, pedestrian
 }) {
   const ign = useIgnored();
   const [note, setNote] = useState('');
-  if (!spec || spec.attrs.length === 0) return <div style={{ color: 'var(--cvla-c-666666, #666)' }}>Nhãn "{label}" không có attribute.</div>;
+  if (!spec || spec.attrs.length === 0) return <div style={{ color: '#666' }}>Nhãn "{label}" không có attribute.</div>;
   const f = frame ?? 0;
   const hints = suggestAttributes({ track, label, spec, frame: f, box, pedestrians });
   const hintOf = (a: AttrSpec) => hints.find((h) => h.spec.id === a.id);
@@ -57,10 +57,10 @@ export function AttributePanel({ track, num, label, spec, frame, box, pedestrian
     <div style={{ fontSize: 12 }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', margin: '2px 0 4px' }}>
         <span>Object <b>{num}</b> ({label}){spec.attrs.some((a) => a.mutable) ? <> · frame tham chiếu <b>{frame ?? '—'}</b></> : null}</span>
-        <button disabled={!liveHints.length} onClick={acceptAll} style={{ fontWeight: 700, background: liveHints.length ? 'var(--cvla-c-c9f3ff, #c9f3ff)' : undefined }}>
+        <button disabled={!liveHints.length} onClick={acceptAll} style={{ fontWeight: 700, background: liveHints.length ? '#c9f3ff' : undefined }}>
           ✔ Chấp nhận tất cả gợi ý{liveHints.length ? ` (${liveHints.length})` : ''}
         </button>
-        {note && <span style={{ color: 'var(--cvla-c-7a4b00, #7a4b00)' }}>{note}</span>}
+        {note && <span style={{ color: '#7a4b00' }}>{note}</span>}
       </div>
       <table style={{ borderCollapse: 'collapse' }}>
         <tbody>
@@ -70,10 +70,10 @@ export function AttributePanel({ track, num, label, spec, frame, box, pedestrian
             const h = hintOf(a);
             const ignored = h ? ign.has(keyOf(h)) : false;
             return (
-              <tr key={a.id} style={{ borderTop: '1px solid var(--cvla-c-dddddd, #ddd)', verticalAlign: 'top' }}>
+              <tr key={a.id} style={{ borderTop: '1px solid #ddd', verticalAlign: 'top' }}>
                 <td style={{ padding: '3px 10px 3px 0' }}>
                   <b>{a.name}</b>
-                  <div style={{ fontSize: 10, color: 'var(--cvla-c-888888, #888)' }}>{a.mutable ? 'đổi theo frame' : 'cả track'}</div>
+                  <div style={{ fontSize: 10, color: '#888' }}>{a.mutable ? 'đổi theo frame' : 'cả track'}</div>
                 </td>
                 <td style={{ padding: '3px 10px 3px 0' }}>
                   <select value={options(a).includes(eff) ? eff : ''} onChange={(e) => setManual(a, e.target.value)}>
@@ -88,7 +88,7 @@ export function AttributePanel({ track, num, label, spec, frame, box, pedestrian
                       >⤵ đồng bộ về sau</button>
                     </div>
                   )}
-                  {cur === undefined && <div style={{ fontSize: 10, color: 'var(--cvla-c-bb0000, #b00)' }}>chưa đặt (mặc định {a.def || '—'})</div>}
+                  {cur === undefined && <div style={{ fontSize: 10, color: '#b00' }}>chưa đặt (mặc định {a.def || '—'})</div>}
                 </td>
                 <td style={{ padding: '3px 0' }}>
                   {h && !ignored && (
@@ -104,11 +104,11 @@ export function AttributePanel({ track, num, label, spec, frame, box, pedestrian
                     </div>
                   )}
                   {h && ignored && (
-                    <span style={{ color: 'var(--cvla-c-888888, #888)' }}>
+                    <span style={{ color: '#888' }}>
                       đã bỏ qua gợi ý "{h.suggested}" <button onClick={() => ignoreStore.set([keyOf(h)], false)}>hoàn lại</button>
                     </span>
                   )}
-                  {!h && <span style={{ color: 'var(--cvla-c-2a7a2a, #2a7a2a)' }}>✓ khớp với kích thước box</span>}
+                  {!h && <span style={{ color: '#2a7a2a' }}>✓ khớp với kích thước box</span>}
                 </td>
               </tr>
             );

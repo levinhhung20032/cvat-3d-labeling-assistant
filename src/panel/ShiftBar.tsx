@@ -50,7 +50,7 @@ export function ShiftBadge({ onOpen }: { onOpen: () => void }) {
       >● {text}</button>
       <span
         onClick={onOpen}
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 6, cursor: 'pointer', fontSize: 12, fontVariantNumeric: 'tabular-nums', color: reached ? 'var(--cvla-c-14532d, #14532d)' : undefined, fontWeight: reached ? 700 : 400 }}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 6, cursor: 'pointer', fontSize: 12, fontVariantNumeric: 'tabular-nums', color: reached ? '#14532d' : undefined, fontWeight: reached ? 700 : 400 }}
         title={hasTarget
           ? `KPI ca này: ${done}/${sch.kpiTarget} frame (${pct}%)${rework ? `, trong đó rework ${rework}` : ''}. Tính từ những gì đã upload; ID đã làm trong ngày không tính lặp; gồm KPI dồn từ OT. Chỉ tiêu sửa ở tab Ca / KPI.`
           : `KPI ca OT: ${done} frame${rework ? `, trong đó rework ${rework}` : ''} (OT không có chỉ tiêu; dồn sang ca khác ở tab Ca / KPI).`}
@@ -61,7 +61,7 @@ export function ShiftBadge({ onOpen }: { onOpen: () => void }) {
             <span style={{ display: 'inline-block', minWidth: '6.5em' }}>{done}/{sch.kpiTarget}{reached ? ' ✓' : ` · ${pct}%`}</span>
           </>
         ) : <span style={{ display: 'inline-block', minWidth: '3em' }}>{done}</span>}
-        {rework > 0 && <span style={{ color: 'var(--cvla-c-7c2d12, #7c2d12)' }} title="Phần rework trong KPI: sửa lại ID đã làm ở ngày trước (đã tính vào KPI)">· R {rework}</span>}
+        {rework > 0 && <span style={{ color: '#7c2d12' }} title="Phần rework trong KPI: sửa lại ID đã làm ở ngày trước (đã tính vào KPI)">· R {rework}</span>}
       </span>
     </>
   );

@@ -123,7 +123,7 @@ export function ControlLayout({ groups }: { groups: Record<string, ReactNode> })
     <GripCtx.Provider value={grip}>
      <PopCtx.Provider value={popBtn}>
       <div ref={rootRef} style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', margin: '0 0 4px' }}>
-        {popFail && <span style={{ color: 'var(--cvla-c-bb0000, #b00)', fontSize: 11 }}>Trình duyệt chặn cửa sổ rời: hãy cho phép cửa sổ bật lên cho trang này.</span>}
+        {popFail && <span style={{ color: '#b00', fontSize: 11 }}>Trình duyệt chặn cửa sổ rời: hãy cho phép cửa sổ bật lên cho trang này.</span>}
         <button onClick={() => save(DEFAULT_LAYOUT)} disabled={isDef} style={{ fontSize: 11, padding: '0 6px' }} title="Đưa các nhóm điều khiển về vị trí và kích thước mặc định">↺ Bố cục mặc định</button>
         <button onClick={() => setHidden(!hidden)} style={{ fontSize: 11, padding: '0 6px' }} aria-pressed={hidden} title={hidden ? 'Hiện lại thanh công cụ (các nhóm điều khiển)' : 'Ẩn thanh công cụ để dành chỗ cho bảng frame (cửa sổ rời vẫn giữ)'}>{hidden ? '▾ Hiện thanh công cụ' : '▴ Ẩn thanh công cụ'}</button>
       </div>
@@ -163,9 +163,9 @@ export function ControlLayout({ groups }: { groups: Record<string, ReactNode> })
                   onDragOver={(e) => onOver(e, id)} onDrop={(e) => onDrop(e, id)}
                 >
                   {popped.includes(id)
-                    ? <div style={{ border: '1px dashed var(--cvla-c-9aa4b2, #9aa4b2)', borderRadius: 4, padding: '4px 8px', height: '100%', boxSizing: 'border-box', fontSize: 12 }}>Đang ở cửa sổ riêng {backBtn(id)}</div>
+                    ? <div style={{ border: '1px dashed #9aa4b2', borderRadius: 4, padding: '4px 8px', height: '100%', boxSizing: 'border-box', fontSize: 12 }}>Đang ở cửa sổ riêng {backBtn(id)}</div>
                     : groups[id]}
-                  {drop?.id === id && <div style={{ position: 'absolute', background: 'var(--cvla-c-2563eb, #2563eb)', zIndex: 3, pointerEvents: 'none', ...DROP_BAR[drop.side] }} />}
+                  {drop?.id === id && <div style={{ position: 'absolute', background: '#2563eb', zIndex: 3, pointerEvents: 'none', ...DROP_BAR[drop.side] }} />}
                 </div>,
               ])}
             </div>

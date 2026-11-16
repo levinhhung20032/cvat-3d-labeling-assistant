@@ -50,12 +50,12 @@ export function QcPanel({ jobId, count, tracks, labels, start, stop, onOpen }: {
     setPending(null);
   };
 
-  const sec: React.CSSProperties = { margin: '10px 0 4px', padding: '4px 0', borderTop: '2px solid var(--cvla-c-1f2937, #1f2937)', fontSize: 14 };
+  const sec: React.CSSProperties = { margin: '10px 0 4px', padding: '4px 0', borderTop: '2px solid #1f2937', fontSize: 14 };
   const p = pending?.plan;
 
   return (
     <>
-      <div style={{ ...sec, borderTop: 'none', marginTop: 0 }}><b>QC note</b> <span style={{ color: 'var(--cvla-c-555555, #555)', fontSize: 12 }}>— ghi chú theo (ID, frame); xuất ra Excel và nhập lại sau</span></div>
+      <div style={{ ...sec, borderTop: 'none', marginTop: 0 }}><b>QC note</b> <span style={{ color: '#555', fontSize: 12 }}>— ghi chú theo (ID, frame); xuất ra Excel và nhập lại sau</span></div>
       <p style={{ margin: '4px 0' }}>
         <label style={{ fontWeight: 700 }}>
           <input type="checkbox" checked={mode} onChange={(e) => qcStore.setMode(e.target.checked)} /> QC mode
@@ -70,16 +70,16 @@ export function QcPanel({ jobId, count, tracks, labels, start, stop, onOpen }: {
           <input type="file" accept=".xlsx" onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ''; }} />
         </label>
       </p>
-      {msg && <p style={{ margin: '4px 0', color: msg.startsWith('Đã nhập') ? 'var(--cvla-c-006600, #060)' : 'var(--cvla-c-bb0000, #b00)' }}>{msg}</p>}
+      {msg && <p style={{ margin: '4px 0', color: msg.startsWith('Đã nhập') ? '#060' : '#b00' }}>{msg}</p>}
       {pending && p && (
-        <div style={{ border: '2px solid var(--cvla-c-1f2937, #1f2937)', background: 'var(--cvla-c-fffef6, #fffef6)', padding: 8, margin: '6px 0' }}>
+        <div style={{ border: '2px solid #1f2937', background: '#fffef6', padding: 8, margin: '6px 0' }}>
           <b>Nhập ghi chú từ {pending.name}</b>
           <div>
-            {p.added.length + p.same.length + p.conflicts.length} ghi chú trong file: <b>{p.added.length}</b> mới · <b>{p.same.length}</b> giống hệt ghi chú hiện có · <b style={{ color: p.conflicts.length ? 'var(--cvla-c-bb0000, #b00)' : undefined }}>{p.conflicts.length}</b> trùng (ID, frame) nhưng khác nội dung
+            {p.added.length + p.same.length + p.conflicts.length} ghi chú trong file: <b>{p.added.length}</b> mới · <b>{p.same.length}</b> giống hệt ghi chú hiện có · <b style={{ color: p.conflicts.length ? '#b00' : undefined }}>{p.conflicts.length}</b> trùng (ID, frame) nhưng khác nội dung
             {pending.skipped > 0 && <> · bỏ qua {pending.skipped} dòng sai định dạng</>}.
           </div>
           {pending.otherJob !== null && (
-            <div style={{ background: 'var(--cvla-c-ffdddd, #fdd)', padding: 4, margin: '4px 0' }}>
+            <div style={{ background: '#fdd', padding: 4, margin: '4px 0' }}>
               Tên file có vẻ là của <b>job {pending.otherJob}</b>, trong khi đang mở <b>job {jobId}</b>. Ghi chú sẽ được gán cho job {jobId}; chỉ nhập nếu đúng ý bạn.
             </div>
           )}
@@ -88,9 +88,9 @@ export function QcPanel({ jobId, count, tracks, labels, start, stop, onOpen }: {
               <summary style={{ cursor: 'pointer' }}>Xem {p.conflicts.length} ghi chú trùng</summary>
               <table style={{ borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead><tr style={{ textAlign: 'left' }}><th>ID</th><th>frame</th><th>hiện có</th><th>trong file</th></tr></thead>
-                <tbody>{p.conflicts.slice(0, 50).map((c) => <tr key={`${c.num}:${c.frame}`} style={{ borderTop: '1px solid var(--cvla-c-dddddd, #ddd)' }}><td><button onClick={() => onOpen(c.num, start)} style={{ padding: '0 5px', fontWeight: 700 }} title="Mở object này trong Batch Review từ frame đầu">{c.num}</button>{" "}<span style={{ color: 'var(--cvla-c-556677, #567)', fontWeight: 400 }}>{labels[c.num - 1] ?? ''}</span></td><td>{c.frame}</td><td>{c.current}</td><td>{c.incoming}</td></tr>)}</tbody>
+                <tbody>{p.conflicts.slice(0, 50).map((c) => <tr key={`${c.num}:${c.frame}`} style={{ borderTop: '1px solid #ddd' }}><td><button onClick={() => onOpen(c.num, start)} style={{ padding: '0 5px', fontWeight: 700 }} title="Mở object này trong Batch Review từ frame đầu">{c.num}</button>{" "}<span style={{ color: '#567', fontWeight: 400 }}>{labels[c.num - 1] ?? ''}</span></td><td>{c.frame}</td><td>{c.current}</td><td>{c.incoming}</td></tr>)}</tbody>
               </table>
-              {p.conflicts.length > 50 && <div style={{ color: 'var(--cvla-c-666666, #666)' }}>…và {p.conflicts.length - 50} ghi chú nữa</div>}
+              {p.conflicts.length > 50 && <div style={{ color: '#666' }}>…và {p.conflicts.length - 50} ghi chú nữa</div>}
             </details>
           )}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
@@ -100,14 +100,14 @@ export function QcPanel({ jobId, count, tracks, labels, start, stop, onOpen }: {
           </div>
         </div>
       )}
-      {list.length === 0 && <p style={{ color: 'var(--cvla-c-666666, #666)' }}>Chưa có ghi chú. Bật QC mode rồi gõ vào ô ghi chú của cột frame trong Batch Review, hoặc nhập từ file.</p>}
+      {list.length === 0 && <p style={{ color: '#666' }}>Chưa có ghi chú. Bật QC mode rồi gõ vào ô ghi chú của cột frame trong Batch Review, hoặc nhập từ file.</p>}
       {list.length > 0 && (
         <table style={{ borderCollapse: 'collapse', width: '100%' }}>
           <thead><tr style={{ textAlign: 'left' }}><th>ID</th><th>frame</th><th>note</th><th /></tr></thead>
           <tbody>
             {list.map((n) => (
-              <tr key={`${n.num}:${n.frame}`} style={{ borderTop: '1px solid var(--cvla-c-dddddd, #ddd)' }}>
-                <td><button onClick={() => onOpen(n.num, start)} style={{ padding: '0 5px', fontWeight: 700 }} title="Mở object này trong Batch Review từ frame đầu">{n.num}</button>{" "}<span style={{ color: 'var(--cvla-c-556677, #567)', fontWeight: 400 }}>{labels[n.num - 1] ?? ''}</span></td>
+              <tr key={`${n.num}:${n.frame}`} style={{ borderTop: '1px solid #ddd' }}>
+                <td><button onClick={() => onOpen(n.num, start)} style={{ padding: '0 5px', fontWeight: 700 }} title="Mở object này trong Batch Review từ frame đầu">{n.num}</button>{" "}<span style={{ color: '#567', fontWeight: 400 }}>{labels[n.num - 1] ?? ''}</span></td>
                 <td><button onClick={() => onOpen(n.num, n.frame)} title="Mở object này ở frame đó">{n.frame}</button></td>
                 <td>
                   <input
