@@ -1001,7 +1001,7 @@ Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', dange
   const loading = !!data && passView.pending > 0 && doneJob !== data.job.id;
 
   return (
-    <div ref={rootRef} className={skin === 'dark' ? 'cvla-root cvla-dark' : skin === 'gray' ? 'cvla-root cvla-gray' : 'cvla-root'} style={{ font: '13px/1.4 system-ui', padding: 10, color: '#111' }}>
+    <div ref={rootRef} className={skin === 'dark' ? 'cvla-root cvla-dark' : skin === 'gray' ? 'cvla-root cvla-gray' : 'cvla-root'} style={{ font: '13px/1.4 system-ui', padding: 10, color: 'var(--cvla-c-111111, #111)' }}>
       <style>{STYLE}</style>
       <ConfirmHost />
       {tutorial && <Tutorial onClose={() => setTutorial(false)} />}
@@ -1201,7 +1201,7 @@ Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', dange
         <div>
           <p>Đang đọc…</p>
           {stuck && (
-            <p style={{ background: '#fff3cd', padding: 6, border: '1px solid #e0b100' }}>
+            <p style={{ background: 'var(--cvla-c-fff3cd, #fff3cd)', padding: 6, border: '1px solid var(--cvla-c-e0b100, #e0b100)' }}>
               Chưa nhận được dữ liệu từ trang CVAT sau 6 giây. Chế độ panel: <b>{diag.mode === 'inpage' ? 'nhúng trong trang' : 'khung (iframe)'}</b>.{' '}
               {diag.rejected
                 ? `Đã bỏ qua ${diag.rejected} tin nhắn (lý do: ${diag.lastReason}; origin ${diag.lastOrigin || '?'}, mong đợi ${diag.expectedOrigin}).`

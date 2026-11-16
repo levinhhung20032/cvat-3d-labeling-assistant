@@ -16,7 +16,7 @@ export function ViewPanel() {
       {OPTIONS.map((o) => (
         <label key={o.id} style={{ display: 'block', padding: '4px 0' }}>
           <input type="radio" name="cvla-frame-layout" checked={layout === o.id} onChange={() => layoutStore.save(o.id)} /> <b>{o.name}</b>
-          <div style={{ marginLeft: 22, fontSize: 12, color: '#555' }}>{o.desc}</div>
+          <div style={{ marginLeft: 22, fontSize: 12, color: 'var(--cvla-c-555555, #555)' }}>{o.desc}</div>
         </label>
       ))}
       <div style={{ fontWeight: 700, margin: '14px 0 4px' }}>View 3D (cửa sổ phụ, mở bằng nút 🧊 hoặc phím Q ở Batch Review)</div>
@@ -37,7 +37,7 @@ export function ViewPanel() {
         <input type="range" min={VIEW3D_LIMITS.pointSize.min} max={VIEW3D_LIMITS.pointSize.max} step={0.5} value={v3.pointSize} onChange={(e) => view3dStore.save({ pointSize: Number(e.target.value) })} />
         <b>{v3.pointSize} px</b>
       </label>
-      <div style={{ marginTop: 8, fontSize: 12, color: '#555' }}>Chỉ đổi cách hiển thị, không đụng dữ liệu nhãn. Trang Ref luôn xếp các view nằm ngang.</div>
+      <div style={{ marginTop: 8, fontSize: 12, color: 'var(--cvla-c-555555, #555)' }}>Chỉ đổi cách hiển thị, không đụng dữ liệu nhãn. Trang Ref luôn xếp các view nằm ngang.</div>
     </div>
   );
 }

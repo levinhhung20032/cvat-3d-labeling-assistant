@@ -11,7 +11,7 @@ class Boundary extends Component<{ children: ReactNode }, { error: string | null
     if (!this.state.error) return this.props.children;
     const stale = /context invalidated/i.test(this.state.error);
     return (
-      <div style={{ font: '13px system-ui', padding: 12, color: '#b00' }}>
+      <div style={{ font: '13px system-ui', padding: 12, color: 'var(--cvla-c-bb0000, #b00)' }}>
         {stale
           ? 'Extension vừa được Reload hoặc cập nhật. Hãy tải lại tab CVAT (F5) rồi bấm lại biểu tượng extension.'
           : `Lỗi giao diện: ${this.state.error}`}

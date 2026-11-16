@@ -1,3 +1,12 @@
+/** Nhóm hiển thị ở tab Phím tắt (thứ tự trong ACTIONS đã xếp theo nhóm). */
+export const ACTION_GROUPS: ReadonlyArray<{ title: string; ids: readonly string[] }> = [
+  { title: 'Cửa sổ & điều hướng', ids: ['window.toggle', 'win.prev', 'win.next', 'win.first', 'win.last', 'win.fromStart', 'obj.prev', 'obj.next', 'obj.back', 'sel.prev', 'sel.next', 'table.nextFlag', 'ids.remap'] },
+  { title: 'Keyframe & outside', ids: ['kf.toggle', 'kf.unlockInner', 'outside.from', 'outside.window', 'outside.pick'] },
+  { title: 'Sửa box & gợi ý', ids: ['suggest.accept', 'suggest.ignore', 'ground.snap', 'size.unify', 'dyn.ownReset', 'undo', 'redo'] },
+  { title: 'Khung nhìn', ids: ['zoom.in', 'zoom.out', 'zoom.reset', 'view.center', 'focus.cvat', 'nearby.toggle', 'nearby.toggleAll', 'view3d.toggle', 'ref.toggle'] },
+];
+export const groupOf = (id: string): string | undefined => ACTION_GROUPS.find((g) => g.ids.includes(id))?.title;
+
 export interface ActionDef { id: string; label: string; defaults: string[] }
 
 export const ACTIONS: ActionDef[] = [
@@ -12,8 +21,8 @@ export const ACTIONS: ActionDef[] = [
   { id: 'obj.back', label: '↶ Về object xem trước đó (đúng cửa sổ đang xem lúc rời đi)', defaults: [] },
   { id: 'sel.prev', label: 'Chọn cột frame bên trái', defaults: [','] },
   { id: 'sel.next', label: 'Chọn cột frame bên phải', defaults: ['.'] },
-  { id: 'dyn.ownReset', label: '↺ theo class: bỏ công tắc Dynamic size riêng của object, quay về theo attribute / class', defaults: [] },
-  { id: 'size.unify', label: 'Đồng bộ size: áp kích thước frame đang chọn cho mọi keyframe (khi Dynamic size tắt)', defaults: [] },
+  { id: 'table.nextFlag', label: 'Bảng object: nhảy tới object có flag tiếp theo (chọn và cuộn tới dòng đó)', defaults: ['n'] },
+  { id: 'ids.remap', label: 'Lấy ID từ CVAT: đọc ID hiển thị hiện tại của từng object trong CVAT (sau khi tạo / xóa object ở CVAT) và cập nhật bảng object', defaults: ['shift+r'] },
   { id: 'kf.toggle', label: 'Khoá / mở khoá keyframe (frame đang trỏ chuột, không trỏ thì frame đang chọn)', defaults: ['k'] },
   { id: 'kf.unlockInner', label: 'Mở khoá keyframe ở giữa Phạm vi (giữ hai đầu mút, hoàn tác được)', defaults: ['alt+k'] },
   { id: 'outside.from', label: '① Gắn keyframe outside / đưa trở lại (frame đang trỏ chuột, không trỏ thì frame đang chọn)', defaults: ['o'] },
@@ -22,18 +31,19 @@ export const ACTIONS: ActionDef[] = [
   { id: 'suggest.accept', label: 'Chấp nhận gợi ý sửa box (frame đang trỏ chuột; không trỏ vào frame nào thì cả cửa sổ)', defaults: ['a'] },
   { id: 'suggest.ignore', label: 'Bỏ qua gợi ý (frame đang trỏ chuột; không trỏ vào frame nào thì cả cửa sổ)', defaults: ['i'] },
   { id: 'ground.snap', label: 'Ground snap: đáy box chạm mặt đường (frame đang trỏ chuột; không trỏ vào frame nào thì cả cửa sổ)', defaults: ['g'] },
-  { id: 'focus.cvat', label: 'Focus: thu nhỏ tool và zoom cận cảnh object trong CVAT', defaults: ['f'] },
+  { id: 'size.unify', label: 'Đồng bộ size: áp kích thước frame đang chọn cho mọi keyframe (khi Dynamic size tắt)', defaults: [] },
+  { id: 'dyn.ownReset', label: '↺ theo class: bỏ công tắc Dynamic size riêng của object, quay về theo attribute / class', defaults: [] },
+  { id: 'undo', label: 'Hoàn tác', defaults: ['ctrl+z'] },
+  { id: 'redo', label: 'Làm lại', defaults: ['ctrl+y', 'ctrl+shift+z'] },
   { id: 'zoom.in', label: 'Phóng to', defaults: ['+', '='] },
   { id: 'zoom.out', label: 'Thu nhỏ', defaults: ['-'] },
   { id: 'zoom.reset', label: 'Zoom về vừa object', defaults: ['0'] },
   { id: 'view.center', label: '⌖ Về giữa: đưa khung nhìn (đã dời bằng chuột phải) về giữa box', defaults: [] },
+  { id: 'focus.cvat', label: 'Focus: thu nhỏ tool và zoom cận cảnh object trong CVAT', defaults: ['f'] },
   { id: 'nearby.toggle', label: 'ID xung quanh: bật / tắt hiện box các ID gần (frame đang trỏ chuột, không trỏ thì frame đang chọn, không có thì cả cửa sổ)', defaults: ['c'] },
+  { id: 'nearby.toggleAll', label: 'ID xung quanh cho CẢ ID: bật / tắt hiện box các ID gần ở mọi frame của object (kể cả frame chưa hiện trong cửa sổ; giữ số box tối đa / chế độ từng frame)', defaults: ['alt+c'] },
   { id: 'view3d.toggle', label: 'View 3D: mở / đóng cửa sổ 3D quanh box của object ở frame đang chọn', defaults: ['q'] },
   { id: 'ref.toggle', label: 'Reflection mode: chuyển qua lại giữa Batch Review và trang Ref (chưa bật ref cho object đang chọn thì bật luôn)', defaults: ['r'] },
-  { id: 'table.nextFlag', label: 'Bảng object: nhảy tới object có flag tiếp theo (chọn và cuộn tới dòng đó)', defaults: ['n'] },
-  { id: 'ids.remap', label: 'Lấy ID từ CVAT: đọc ID hiển thị hiện tại của từng object trong CVAT (sau khi tạo / xóa object ở CVAT) và cập nhật bảng object', defaults: ['shift+r'] },
-  { id: 'undo', label: 'Hoàn tác', defaults: ['ctrl+z'] },
-  { id: 'redo', label: 'Làm lại', defaults: ['ctrl+y', 'ctrl+shift+z'] },
 ];
 
 export type Keymap = Record<string, string[]>;

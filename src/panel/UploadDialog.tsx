@@ -94,7 +94,7 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
   };
 
   const canSend = !busy && !nothing && !blocked && (!needTilt || okTilt);
-  const box: React.CSSProperties = { border: '2px solid #1f2937', background: '#fffef6', padding: 10, margin: '8px 0' };
+  const box: React.CSSProperties = { border: '2px solid var(--cvla-c-1f2937, #1f2937)', background: 'var(--cvla-c-fffef6, #fffef6)', padding: 10, margin: '8px 0' };
 
   return (
     <div ref={root} style={box}>
@@ -106,12 +106,12 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
       {nothing && !blocked && <p>Không có thay đổi nào cần gửi (mọi track đã giống CVAT{plan.others.tracks ? ', trừ các track chưa sửa còn thiếu keyframe outside' : ''}).</p>}
 
       {!storageHealth().ok && (
-        <p style={{ margin: '6px 0', background: '#ffe5e5', color: '#900', padding: 4, fontWeight: 600 }}>
+        <p style={{ margin: '6px 0', background: 'var(--cvla-c-ffe5e5, #ffe5e5)', color: 'var(--cvla-c-990000, #900)', padding: 4, fontWeight: 600 }}>
           ⚠ Tool đang không lưu được dữ liệu: upload vẫn lên CVAT nhưng KPI của lần upload này sẽ KHÔNG được ghi vào ca. Nên tải lại tab CVAT (F5) trước.
         </p>
       )}
       {plan.created.length > 0 && (
-        <p style={{ margin: '6px 0', background: '#dff5df', padding: 4 }}>
+        <p style={{ margin: '6px 0', background: 'var(--cvla-c-dff5df, #dff5df)', padding: 4 }}>
           🛠 Sẽ <b>tạo {plan.created.length} object mới</b> do tool tạo (PATCH <code>action=create</code>, nằm cuối danh sách nên ID của object cũ không đổi): {plan.createdInfo.map((c) => `#${c.index + 1} ${names.get(c.label_id) ?? '?'} (${c.shapes} keyframe)`).join(', ')}.
           Sau khi tạo, các object này được ghi vào sổ của tool và là loại DUY NHẤT tool cho phép xóa.
         </p>
@@ -125,8 +125,8 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
           </thead>
           <tbody>
             {plan.diffs.map((d) => (
-              <tr key={d.id} style={{ borderTop: '1px solid #ddd' }}>
-                <td><b>{d.index + 1}</b> <span style={{ color: '#999', fontSize: 10 }}>db {d.id}</span></td>
+              <tr key={d.id} style={{ borderTop: '1px solid var(--cvla-c-dddddd, #ddd)' }}>
+                <td><b>{d.index + 1}</b> <span style={{ color: 'var(--cvla-c-999999, #999)', fontSize: 10 }}>db {d.id}</span></td>
                 <td>{names.get(working.tracks[d.index]!.label_id) ?? '?'}</td>
                 <td>{d.added}</td><td>{d.removed}</td><td>{d.modified}</td><td>{d.attrs}</td><td>{d.baked}</td><td>{d.outsideFilled}</td><td>{d.tiltSet}</td>
               </tr>
@@ -140,7 +140,7 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
       </div>
 
       {blocked && (
-        <div style={{ background: '#fdd', border: '1px solid #b00', padding: 6, margin: '6px 0' }}>
+        <div style={{ background: 'var(--cvla-c-ffdddd, #fdd)', border: '1px solid var(--cvla-c-bb0000, #b00)', padding: 6, margin: '6px 0' }}>
           <b>Bị chặn:</b>
           <ul style={{ margin: '2px 0' }}>{plan.blockers.map((v, i) => <li key={i}>{v.message}</li>)}</ul>
         </div>
@@ -161,7 +161,7 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
         </p>
       )}
       {needTilt && (
-        <p style={{ margin: '6px 0', background: '#fff3cd', padding: 4 }}>
+        <p style={{ margin: '6px 0', background: 'var(--cvla-c-fff3cd, #fff3cd)', padding: 4 }}>
           <label>
             <input type="checkbox" checked={okTilt} onChange={(e) => setOkTilt(e.target.checked)} />{' '}
             Xác nhận ghi roll/pitch (rx/ry) ≠ 0 ở <b>{plan.tiltSet}</b> keyframe (box nghiêng theo mặt đường, tối đa ±30°). Quy ước góc là Euler XYZ như CVAT — hãy kiểm tra bằng mắt trên CVAT sau khi upload.
@@ -180,18 +180,18 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
       <div style={{ margin: '8px 0', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         <button
           disabled={!canSend} onClick={() => run(true)}
-          style={{ fontWeight: 700, background: canSend ? '#d7f7d7' : undefined }}
+          style={{ fontWeight: 700, background: canSend ? 'var(--cvla-c-d7f7d7, #d7f7d7)' : undefined }}
         >⬆ Gửi lên CVAT</button>
-        <span style={{ fontSize: 11, color: '#555' }}>Tool vẫn tự kiểm tra xung đột / ID / luật trước khi ghi và lưu nhật ký để hoàn nguyên.</span>
+        <span style={{ fontSize: 11, color: 'var(--cvla-c-555555, #555)' }}>Tool vẫn tự kiểm tra xung đột / ID / luật trước khi ghi và lưu nhật ký để hoàn nguyên.</span>
       </div>
-      <div style={{ fontSize: 11, color: '#555' }}>
+      <div style={{ fontSize: 11, color: 'var(--cvla-c-555555, #555)' }}>
         <label><input type="checkbox" checked={autoReload} onChange={(e) => setAutoReload(e.target.checked)} /> Sau khi upload thành công, <b>tự tải lại tab CVAT</b> rồi mở lại tool</label>{' '}
         (nếu CVAT đang có thay đổi chưa lưu, trình duyệt sẽ hỏi trước khi tải lại). Chưa tải lại thì <b>đừng bấm Save trong CVAT</b>, vì giao diện CVAT còn giữ bản cũ và có thể ghi đè.
       </div>
 
       {busy && <p>Đang xử lý…</p>}
       {result && (
-        <div ref={resultBox} style={{ margin: '8px 0', padding: 6, border: `1px solid ${result.ok ? '#0a0' : '#b00'}`, background: result.ok ? '#e8ffe8' : '#fdd' }}>
+        <div ref={resultBox} style={{ margin: '8px 0', padding: 6, border: `1px solid ${result.ok ? 'var(--cvla-c-00aa00, #0a0)' : 'var(--cvla-c-bb0000, #b00)'}`, background: result.ok ? 'var(--cvla-c-e8ffe8, #e8ffe8)' : 'var(--cvla-c-ffdddd, #fdd)' }}>
           <b>{result.ok ? (result.sent ? 'Thành công' : 'Chạy thử đạt') : 'Không thành công'}</b> · bước: {result.stage}
           <div>{result.message}</div>
           {result.ok && result.sent && <button onClick={onReload}>Về Batch Review ngay</button>}
@@ -210,7 +210,7 @@ export function UploadDialog({ baseline, working, job, labels, onClose, onReload
             </div>
           )}
         </div>
-      ) : <div style={{ color: '#666' }}>Chưa có lần upload nào được ghi nhật ký.</div>}
+      ) : <div style={{ color: 'var(--cvla-c-666666, #666)' }}>Chưa có lần upload nào được ghi nhật ký.</div>}
     </div>
   );
 }

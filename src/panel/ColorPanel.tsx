@@ -12,14 +12,14 @@ const HEIGHT_GRADIENT = 'linear-gradient(90deg, hsl(220 80% 55%), hsl(120 80% 55
 function PointColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
   const sw = (bg: string, on: boolean, title: string, click: () => void) => (
     <button key={title} type="button" className="cvla-keep" onClick={click} title={title} aria-pressed={on}
-      style={{ width: 20, height: 20, padding: 0, background: bg, border: on ? '2px solid #f59e0b' : '1px solid #64748b', borderRadius: 3, cursor: 'pointer', verticalAlign: 'middle' }} />
+      style={{ width: 20, height: 20, padding: 0, background: bg, border: on ? '2px solid var(--cvla-c-f59e0b, #f59e0b)' : '1px solid var(--cvla-c-64748b, #64748b)', borderRadius: 3, cursor: 'pointer', verticalAlign: 'middle' }} />
   );
   const custom = value !== '' && !POINT_SWATCHES.includes(value);
   return (
     <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
       {sw(HEIGHT_GRADIENT, value === '', 'Theo độ cao (mặc định)', () => onChange(''))}
       {POINT_SWATCHES.map((c) => sw(c, value === c, c, () => onChange(c)))}
-      <label title="Chọn màu khác" className="cvla-keep" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', border: custom ? '2px solid #f59e0b' : '1px solid #64748b', borderRadius: 3, width: 20, height: 20, overflow: 'hidden', background: custom ? value : 'conic-gradient(red, yellow, lime, cyan, blue, magenta, red)' }}>
+      <label title="Chọn màu khác" className="cvla-keep" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', border: custom ? '2px solid var(--cvla-c-f59e0b, #f59e0b)' : '1px solid var(--cvla-c-64748b, #64748b)', borderRadius: 3, width: 20, height: 20, overflow: 'hidden', background: custom ? value : 'conic-gradient(red, yellow, lime, cyan, blue, magenta, red)' }}>
         <input type="color" value={value || '#ffffff'} onChange={(e) => onChange(e.target.value)} style={{ opacity: 0, width: 20, height: 20, padding: 0, border: 0, cursor: 'pointer' }} />
       </label>
     </span>
@@ -33,7 +33,7 @@ function ColorRow({ label, hint, value, def, onChange }: { label: string; hint?:
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }} title={hint}>
       <span style={{ width: 150 }}>{label}</span>
-      <input type="color" className="cvla-keep" value={value} onChange={(e) => onChange(e.target.value.toLowerCase())} style={{ width: 36, height: 24, padding: 0, border: '1px solid #64748b', cursor: 'pointer' }} />
+      <input type="color" className="cvla-keep" value={value} onChange={(e) => onChange(e.target.value.toLowerCase())} style={{ width: 36, height: 24, padding: 0, border: '1px solid var(--cvla-c-64748b, #64748b)', cursor: 'pointer' }} />
       <input
         value={text} spellCheck={false} maxLength={7} style={{ width: 70, fontFamily: 'monospace' }}
         onChange={(e) => { setText(e.target.value); if (isHex(e.target.value)) onChange(e.target.value.toLowerCase()); }}
@@ -111,7 +111,7 @@ export function ColorPanel() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }} title="Điểm nằm bên trong box được tô màu này (ở cả ba view). Tắt thì giữ màu point thường.">
           <span style={{ width: 150 }}>Point trong box</span>
           <label><input type="checkbox" checked={draft.pointIn !== ''} onChange={(e) => set('pointIn')(e.target.checked ? '#00e5ff' : '')} /> đổi màu</label>
-          {draft.pointIn !== '' && <input type="color" className="cvla-keep" value={draft.pointIn} onChange={(e) => set('pointIn')(e.target.value.toLowerCase())} style={{ width: 36, height: 24, padding: 0, border: '1px solid #64748b', cursor: 'pointer' }} />}
+          {draft.pointIn !== '' && <input type="color" className="cvla-keep" value={draft.pointIn} onChange={(e) => set('pointIn')(e.target.value.toLowerCase())} style={{ width: 36, height: 24, padding: 0, border: '1px solid var(--cvla-c-64748b, #64748b)', cursor: 'pointer' }} />}
           {draft.pointIn !== '' && <input value={draft.pointIn} readOnly style={{ width: 70, fontFamily: 'monospace' }} />}
         </div>
         {head('View')}
@@ -130,7 +130,7 @@ export function ColorPanel() {
           <button type="button" onClick={() => colorStore.save(draft)} disabled={!dirty} style={{ fontWeight: 700, padding: '3px 12px' }} title="Áp màu nháp vào Batch Review">💾 Lưu</button>
           <button type="button" onClick={() => setDraft({ ...saved })} disabled={!dirty} title="Bỏ các thay đổi chưa lưu">Hủy thay đổi</button>
           <button type="button" onClick={() => setDraft({ ...DEFAULT_COLORS })} disabled={COLOR_KEYS.every((k) => draft[k] === DEFAULT_COLORS[k])} title="Đặt bản nháp về màu mặc định (vẫn phải bấm Lưu)">↺ Mặc định</button>
-          <span style={{ color: dirty ? '#b45309' : '#16803c' }}>{dirty ? '● có thay đổi chưa lưu' : '✓ đã lưu'}</span>
+          <span style={{ color: dirty ? 'var(--cvla-c-b45309, #b45309)' : 'var(--cvla-c-16803c, #16803c)' }}>{dirty ? '● có thay đổi chưa lưu' : '✓ đã lưu'}</span>
         </div>
       </div>
       <div>

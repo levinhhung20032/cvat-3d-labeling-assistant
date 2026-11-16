@@ -11,7 +11,7 @@ const kindLabel = (k: string) => (sym(k) === k ? k : `${sym(k)} (${k})`);
 import { useThresholdVersion } from './thresholdStore';
 
 const STATE_LABEL: Record<FlagState, string> = { open: 'còn lỗi', cleared: 'đã hết (tool)', ignore: 'bỏ qua', fixed: 'đã sửa' };
-const STATE_COLOR: Record<FlagState, string> = { open: '#b00', cleared: '#060', ignore: '#666', fixed: '#06c' };
+const STATE_COLOR: Record<FlagState, string> = { open: 'var(--cvla-c-bb0000, #b00)', cleared: 'var(--cvla-c-006600, #060)', ignore: 'var(--cvla-c-666666, #666)', fixed: 'var(--cvla-c-0066cc, #06c)' };
 const STATES = Object.keys(STATE_LABEL) as FlagState[];
 const PAGE = 60; // số ID mỗi trang
 
@@ -90,9 +90,9 @@ export function QcCompare({ jobId, tracks, labels, start, stop, onOpen }: {
   );
 
   return (
-    <div style={{ marginTop: 14, borderTop: '2px solid #1f2937', paddingTop: 6 }}>
-      <b>QC comparison</b> <span style={{ color: '#555', fontSize: 12 }}>— đối chiếu file báo cáo QC (.xlsx, sheet Matrix) với lỗi tool tự phát hiện</span>
-      <p style={{ margin: '4px 0', color: '#555' }}>
+    <div style={{ marginTop: 14, borderTop: '2px solid var(--cvla-c-1f2937, #1f2937)', paddingTop: 6 }}>
+      <b>QC comparison</b> <span style={{ color: 'var(--cvla-c-555555, #555)', fontSize: 12 }}>— đối chiếu file báo cáo QC (.xlsx, sheet Matrix) với lỗi tool tự phát hiện</span>
+      <p style={{ margin: '4px 0', color: 'var(--cvla-c-555555, #555)' }}>
         Chọn file báo cáo QC của job này; tool đọc sheet <code>Matrix</code> (ID × frame, ký hiệu S K Z H O D) ngay trên máy bạn, không gửi đi đâu.
         Mỗi flag được so với dữ liệu hiện tại (kể cả nháp chưa upload): <b>đã hết</b> nghĩa là tool không còn thấy lỗi đó. Bạn có thể đặt <b>ignore</b> (chấp nhận) hoặc <b>fixed</b> (đã sửa)
         cho từng loại, từng ID, hoặc cả lô ID đã tick. Số frame trong file được hiểu là số frame của job.
@@ -101,7 +101,7 @@ export function QcCompare({ jobId, tracks, labels, start, stop, onOpen }: {
         <label className="cvla-filebtn">⬆ Chọn file QC để đối chiếu (QC comparison){' '}<input type="file" accept=".xlsx" onChange={(e) => { void load(e.target.files?.[0]); e.target.value = ''; }} /></label>
         {imp && <button style={{ marginLeft: 8 }} onClick={() => { void askConfirm({ title: 'Bỏ file QC', message: 'Bỏ file QC đã nạp và mọi đánh dấu ignore / fixed của job này?', confirmLabel: 'Bỏ file', danger: true }).then((ok) => { if (ok) qcFlagStore.clearImport(jobId); }); }}>Bỏ file</button>}
       </p>
-      {err && <p style={{ color: '#b00' }}>{err}</p>}
+      {err && <p style={{ color: 'var(--cvla-c-bb0000, #b00)' }}>{err}</p>}
       {imp && (
         <>
           <p style={{ margin: '4px 0' }}>
@@ -126,20 +126,20 @@ export function QcCompare({ jobId, tracks, labels, start, stop, onOpen }: {
             <button onClick={() => { setFKinds(new Set(ISSUE_KINDS)); setLimit(PAGE); }} disabled={fKinds.size === ISSUE_KINDS.length} title="Hiện mọi loại lỗi">Bật tất cả</button>
             <button onClick={() => { setFKinds(new Set()); setLimit(PAGE); }} disabled={fKinds.size === 0} title="Ẩn mọi loại lỗi">Tắt tất cả</button>
             <span>ID <input value={fId} onChange={(e) => { setFId(e.target.value.replace(/\D/g, '')); setLimit(PAGE); }} size={4} style={{ width: 48 }} /></span>
-            <span style={{ color: '#555' }}>{groups.length} ID · {shown.length} flag</span>
+            <span style={{ color: 'var(--cvla-c-555555, #555)' }}>{groups.length} ID · {shown.length} flag</span>
           </p>
           {groups.length > 0 && (
-            <p style={{ margin: '4px 0', display: 'flex', flexWrap: 'wrap', gap: '4px 8px', alignItems: 'center', background: '#f1f4f8', padding: '3px 6px' }}>
+            <p style={{ margin: '4px 0', display: 'flex', flexWrap: 'wrap', gap: '4px 8px', alignItems: 'center', background: 'var(--cvla-c-f1f4f8, #f1f4f8)', padding: '3px 6px' }}>
               <label><input
                 type="checkbox" className="cvla-check"
                 checked={picked.size > 0 && groups.every(([n]) => picked.has(n))}
                 onChange={(e) => setPicked(e.target.checked ? new Set(groups.map(([n]) => n)) : new Set())}
               /> chọn tất cả ID đang hiện</label>
-              <span style={{ color: '#555' }}>Đã chọn <b>{picked.size}</b> ID ({pickedRows.length} flag):</span>
+              <span style={{ color: 'var(--cvla-c-555555, #555)' }}>Đã chọn <b>{picked.size}</b> ID ({pickedRows.length} flag):</span>
               <button disabled={!pickedRows.length} onClick={() => markRows(pickedRows, 'ignore')}>Ignore lô đã chọn</button>
               <button disabled={!pickedRows.length} onClick={() => markRows(pickedRows, 'fixed')}>Fixed lô đã chọn</button>
               <button disabled={!pickedRows.length} onClick={() => markRows(pickedRows.filter((r) => r.state === 'ignore' || r.state === 'fixed'), null)}>↺ Bỏ đánh dấu lô</button>
-              <span style={{ borderLeft: '1px solid #bbb', height: 16 }} />
+              <span style={{ borderLeft: '1px solid var(--cvla-c-bbbbbb, #bbb)', height: 16 }} />
               <button disabled={!shown.length} onClick={() => markRows(shown, 'ignore')} title="Mọi flag đang hiện, kể cả các ID ở trang sau">Ignore tất cả đang hiện ({shown.length})</button>
               <button disabled={!shown.length} onClick={() => markRows(shown, 'fixed')}>Fixed tất cả đang hiện</button>
             </p>
@@ -152,19 +152,19 @@ export function QcCompare({ jobId, tracks, labels, start, stop, onOpen }: {
                 const isOpen = open.has(num);
                 return (
                   <Fragment key={num}>
-                    <tr style={{ borderTop: '1px solid #ddd', background: isOpen ? '#f8fbff' : undefined }}>
+                    <tr style={{ borderTop: '1px solid var(--cvla-c-dddddd, #ddd)', background: isOpen ? 'var(--cvla-c-f8fbff, #f8fbff)' : undefined }}>
                       <td><input type="checkbox" className="cvla-check" checked={picked.has(num)} onChange={() => setPicked(toggleIn(picked, num))} title="Chọn để ignore / fixed theo lô" /></td>
                       <td><button onClick={() => setOpen(toggleIn(open, num))} style={{ padding: '0 5px' }} title="Xem từng loại lỗi và các đoạn frame">{isOpen ? '▾' : '▸'}</button></td>
-                      <td><button onClick={() => onOpen(num, start)} style={{ padding: '0 5px', fontWeight: 700 }} title="Mở object này trong Batch Review từ frame đầu">{num}</button>{" "}<span style={{ color: '#567', fontWeight: 400 }}>{labels[num - 1] ?? ''}</span></td>
+                      <td><button onClick={() => onOpen(num, start)} style={{ padding: '0 5px', fontWeight: 700 }} title="Mở object này trong Batch Review từ frame đầu">{num}</button>{" "}<span style={{ color: 'var(--cvla-c-556677, #567)', fontWeight: 400 }}>{labels[num - 1] ?? ''}</span></td>
                       <td>{[...byKind].map(([k, rs]) => <span key={k} style={{ marginRight: 8 }} title={ISSUE_NAMES[k]}><b>{kindLabel(k)}</b> {rs.length}</span>)}</td>
                       <td>{counts(all).map(([s, n]) => <span key={s} style={{ color: STATE_COLOR[s], marginRight: 8, fontWeight: 600 }}>{STATE_LABEL[s]} {n}</span>)}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>{actions(all)}</td>
                     </tr>
                     {isOpen && [...byKind].map(([k, rs]) => (
-                      <tr key={`${num}:${k}`} style={{ background: '#f8fbff' }}>
+                      <tr key={`${num}:${k}`} style={{ background: 'var(--cvla-c-f8fbff, #f8fbff)' }}>
                         <td /><td />
                         <td colSpan={2} style={{ paddingLeft: 16 }}>
-                          <b>{kindLabel(k)}</b> <span style={{ color: '#666' }}>{ISSUE_NAMES[k]}</span>{' '}
+                          <b>{kindLabel(k)}</b> <span style={{ color: 'var(--cvla-c-666666, #666)' }}>{ISSUE_NAMES[k]}</span>{' '}
                           {toRanges(rs.map((r) => r.f.frame)).map(([a, b]) => {
                             const inRange = rs.filter((r) => r.f.frame >= a && r.f.frame <= b);
                             const tip = inRange.map((r) => `frame ${r.f.frame}: ${STATE_LABEL[r.state]}${r.msg ? ` — ${r.msg}` : ''}`).slice(0, 12).join('\n');
@@ -183,7 +183,7 @@ export function QcCompare({ jobId, tracks, labels, start, stop, onOpen }: {
             </tbody>
           </table>
           {groups.length > limit && <p><button onClick={() => setLimit(limit + PAGE)}>Xem thêm ({groups.length - limit} ID nữa)</button></p>}
-          {groups.length === 0 && <p style={{ color: '#666' }}>Không có flag nào khớp bộ lọc.</p>}
+          {groups.length === 0 && <p style={{ color: 'var(--cvla-c-666666, #666)' }}>Không có flag nào khớp bộ lọc.</p>}
         </>
       )}
     </div>

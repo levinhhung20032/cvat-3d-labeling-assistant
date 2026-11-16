@@ -289,12 +289,12 @@ function Scene3D({ id, label, frame, cub, status, others, onClose }: View3dProps
         <span>bán kính {radius} m</span>
         {scene && <span>{scene.n.toLocaleString()} điểm ({scene.inside.toLocaleString()} trong box{scene.nEgo ? `, ${scene.nEgo.toLocaleString()} quanh ego` : ''})</span>}
         {scene && <span title="Biểu tượng ego nổi (mũi tên đỏ) chỉ hướng trước của xe; vòng trắng trên mặt đất dưới xe, đường xám nối tới tâm box. Góc dưới trái: kim đỏ = hướng ego, kim xanh = hướng box">ego cách box {scene.egoDist.toFixed(1)} m</span>}
-        <span style={{ color: '#667' }}>kéo chuột: xoay · lăn: zoom · bấm đúp: về mặc định</span>
+        <span style={{ color: 'var(--cvla-c-666677, #667)' }}>kéo chuột: xoay · lăn: zoom · bấm đúp: về mặc định</span>
         <button onClick={() => { orbit.current = defaultOrbit(radius); scheduleRef.current(); }} style={{ marginLeft: 'auto' }}>⟲ Góc nhìn mặc định</button>
         <button onClick={onClose}>Đóng (Q)</button>
       </div>
-      {err && <div style={{ color: '#b00' }}>Không dựng được view 3D: {err}</div>}
-      {!pc && !err && <div style={{ color: '#a05a00' }}>Point cloud của frame {frame} chưa tải xong; sẽ tự hiện khi tải xong.</div>}
+      {err && <div style={{ color: 'var(--cvla-c-bb0000, #b00)' }}>Không dựng được view 3D: {err}</div>}
+      {!pc && !err && <div style={{ color: 'var(--cvla-c-a05a00, #a05a00)' }}>Point cloud của frame {frame} chưa tải xong; sẽ tự hiện khi tải xong.</div>}
       <div ref={wrap} style={{ position: 'relative', flex: 1, minHeight: 0, background: colors.viewBg }}>
         <canvas ref={glCv} style={{ position: 'absolute', inset: 0 }} />
         <canvas ref={ovCv} style={{ position: 'absolute', inset: 0, cursor: 'grab', touchAction: 'none' }} />

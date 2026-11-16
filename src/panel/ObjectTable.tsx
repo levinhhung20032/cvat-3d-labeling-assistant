@@ -20,12 +20,12 @@ const SEEN_STYLE = { textDecoration: 'underline', textDecorationThickness: 2, te
 
 type SortKey = 'num' | 'assigned' | 'outside' | 'missing' | 'jumps' | 'issues' | 'drift' | 'overlap' | 'dist';
 /** Dòng đang chọn và dòng so le (giao diện tối / xám đảo màu cả trang nên màu sáng vẫn dùng được). */
-const SEL_BG = '#bcd7ff';
+const SEL_BG = 'var(--cvla-c-bcd7ff, #bcd7ff)';
 /** Ô có flag (thiếu keyframe outside, đi xa bất thường, lỗi luật, trôi box, chồng lấn, gợi ý attribute): nền cam nhạt, đè lên màu dòng (kể cả dòng đang chọn). */
-const FLAG_CELL: React.CSSProperties = { background: '#ffd9a8' };
-const ODD_BG = '#f1f4f8';
+const FLAG_CELL: React.CSSProperties = { background: 'var(--cvla-c-ffd9a8, #ffd9a8)' };
+const ODD_BG = 'var(--cvla-c-f1f4f8, #f1f4f8)';
 // Tiêu đề cột dính ngay dưới thanh đầu trang (.cvla-head) khi cuộn xuống; `top` do ObjectTable đo; nền đặc để dòng bên dưới không lộ ra.
-const HEAD_CELL: React.CSSProperties = { position: 'sticky', top: 0, zIndex: 5, background: '#fff', boxShadow: '0 1px 0 #c5ccd6' };
+const HEAD_CELL: React.CSSProperties = { position: 'sticky', top: 0, zIndex: 5, background: 'var(--cvla-c-ffffff, #fff)', boxShadow: '0 1px 0 var(--cvla-c-c5ccd6, #c5ccd6)' };
 /** Khoảng cách tâm box tới ego (gốc toạ độ, trên mặt phẳng ngang) và frame đo. */
 interface Dist { d: number; frame: number }
 
@@ -207,12 +207,12 @@ export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flags
         <label title="Object chồng lên object khác (xét chéo giữa các ID) ở ít nhất một frame"><input type="checkbox" checked={onlyOverlap} onChange={(e) => setOnlyOverlap(e.target.checked)} /> chỉ ID có chồng lấn</label>{' '}
         — {shown.length}/{rows.length} object{' '}
         <button onClick={nextFlag} disabled={flagCount === 0} title={hint('table.nextFlag', 'Nhảy tới object có flag tiếp theo (ô cảnh báo tô cam): chọn dòng đó và cuộn tới; hết danh sách thì quay vòng')}>⚑ Flag tiếp{flagCount ? ` (${flagCount} object)` : ''}</button>
-        {flagNote && <span style={{ color: '#7a4b00', marginLeft: 6 }}>{flagNote}</span>}
-        <span style={{ color: '#777', fontSize: 11, marginLeft: 8 }}>bấm 1 lần để chọn dòng, bấm đúp để mở Batch Review</span>
+        {flagNote && <span style={{ color: 'var(--cvla-c-7a4b00, #7a4b00)', marginLeft: 6 }}>{flagNote}</span>}
+        <span style={{ color: 'var(--cvla-c-777777, #777)', fontSize: 11, marginLeft: 8 }}>bấm 1 lần để chọn dòng, bấm đúp để mở Batch Review</span>
         <span style={{ marginLeft: 10 }}>
           {locked ? (
             <>
-              <b style={{ color: '#7a4b00' }} title="ID gốc đã khóa: không xóa được, chỉ chỉnh sửa. Object ngoài danh sách (🔓) xóa được.">🔒 Đã khóa {locked.length} ID gốc</b>{' '}
+              <b style={{ color: 'var(--cvla-c-7a4b00, #7a4b00)' }} title="ID gốc đã khóa: không xóa được, chỉ chỉnh sửa. Object ngoài danh sách (🔓) xóa được.">🔒 Đã khóa {locked.length} ID gốc</b>{' '}
               <button onClick={onUnlock} style={{ padding: '0 5px' }} title="Mở khóa: quay về chỉ xóa được object do tool tạo">mở khóa</button>
             </>
           ) : (
@@ -253,29 +253,29 @@ export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flags
                 const b = wrapRef.current?.getBoundingClientRect();
                 setCtx({ x: e.clientX - (b?.left ?? 0), y: e.clientY - (b?.top ?? 0), row: r, flags: flagsOf(r.num) });
               }}
-              style={{ cursor: 'pointer', userSelect: 'none', borderTop: '1px solid #ddd', background: r.num === selectedNum ? SEL_BG : r.made === 'draft' ? '#dff5df' : r.made === 'server' ? '#e3ecff' : i % 2 ? ODD_BG : undefined }}
+              style={{ cursor: 'pointer', userSelect: 'none', borderTop: '1px solid var(--cvla-c-dddddd, #ddd)', background: r.num === selectedNum ? SEL_BG : r.made === 'draft' ? 'var(--cvla-c-dff5df, #dff5df)' : r.made === 'server' ? 'var(--cvla-c-e3ecff, #e3ecff)' : i % 2 ? ODD_BG : undefined }}
             >
-              <td><b style={seen.has(r.id) ? SEEN_STYLE : undefined} title={seen.has(r.id) ? 'Đã xem trong Batch Review' : undefined}>{clientIdOf(tracks, r.num)}</b>{clientIdOf(tracks, r.num) !== r.num ? <span style={{ color: '#999', fontSize: 10 }} title="Số thứ tự trong tool (CVAT đã cấp ID khác)"> (#{r.num})</span> : null} {r.made === 'draft' ? <span title="Object do tool tạo, đang trong NHÁP (chưa có trên CVAT)" style={{ background: '#2e9d3b', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 mới</span> : r.ext ? <span title="Object có trên server nhưng NGOÀI danh sách ID gốc đã khóa: xóa được" style={{ background: '#a05a00', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🔓 ngoài list</span> : r.made === 'server' ? <span title="Object do tool tạo và đã upload; xóa được bằng tool" style={{ background: '#2f5fd0', color: '#fff', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 tool</span> : <span style={{ color: "#999", fontSize: 10 }}>{locked?.includes(r.id) ? '🔒 ' : ''}db {r.id}</span>}</td><td>{r.label}</td>
+              <td><b style={seen.has(r.id) ? SEEN_STYLE : undefined} title={seen.has(r.id) ? 'Đã xem trong Batch Review' : undefined}>{clientIdOf(tracks, r.num)}</b>{clientIdOf(tracks, r.num) !== r.num ? <span style={{ color: 'var(--cvla-c-999999, #999)', fontSize: 10 }} title="Số thứ tự trong tool (CVAT đã cấp ID khác)"> (#{r.num})</span> : null} {r.made === 'draft' ? <span title="Object do tool tạo, đang trong NHÁP (chưa có trên CVAT)" style={{ background: 'var(--cvla-c-2e9d3b, #2e9d3b)', color: 'var(--cvla-c-ffffff, #fff)', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 mới</span> : r.ext ? <span title="Object có trên server nhưng NGOÀI danh sách ID gốc đã khóa: xóa được" style={{ background: 'var(--cvla-c-a05a00, #a05a00)', color: 'var(--cvla-c-ffffff, #fff)', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🔓 ngoài list</span> : r.made === 'server' ? <span title="Object do tool tạo và đã upload; xóa được bằng tool" style={{ background: 'var(--cvla-c-2f5fd0, #2f5fd0)', color: 'var(--cvla-c-ffffff, #fff)', fontSize: 10, padding: '0 4px', borderRadius: 3 }}>🛠 tool</span> : <span style={{ color: "var(--cvla-c-999999, #999)", fontSize: 10 }}>{locked?.includes(r.id) ? '🔒 ' : ''}db {r.id}</span>}</td><td>{r.label}</td>
               {(() => {
                 const at = attrsOf.get(r.num) ?? [];
                 return (
                   <td style={{ fontSize: 11, maxWidth: 260, ...(h(r) > 0 ? FLAG_CELL : null) }} title={at.map((a) => `${a.name} = ${a.value}`).join(String.fromCharCode(10)) || 'Nhãn này không có attribute'}>
-                    {at.length ? at.map((a, j) => <span key={a.name}>{j > 0 && ', '}<span style={{ color: '#666' }}>{a.name}</span> {a.value || '—'}</span>) : <span style={{ color: '#999' }}>—</span>}
-                    {h(r) > 0 && <b style={{ color: '#c2410c', marginLeft: 4, fontSize: 13 }} title={`Có ${h(r)} gợi ý đổi attribute ở object này (mở Batch Review để xem và áp)`}>!</b>}
+                    {at.length ? at.map((a, j) => <span key={a.name}>{j > 0 && ', '}<span style={{ color: 'var(--cvla-c-666666, #666)' }}>{a.name}</span> {a.value || '—'}</span>) : <span style={{ color: 'var(--cvla-c-999999, #999)' }}>—</span>}
+                    {h(r) > 0 && <b style={{ color: 'var(--cvla-c-c2410c, #c2410c)', marginLeft: 4, fontSize: 13 }} title={`Có ${h(r)} gợi ý đổi attribute ở object này (mở Batch Review để xem và áp)`}>!</b>}
                   </td>
                 );
               })()}
               <td>{r.assigned}</td><td>{r.outside}</td>
-              <td style={{ color: r.missing ? '#b00' : undefined, fontWeight: r.missing ? 700 : 400, ...(r.missing ? FLAG_CELL : null) }}>{r.missing}</td>
-              <td style={{ color: r.jumps ? '#a05a00' : undefined, fontWeight: r.jumps ? 700 : 400, ...(r.jumps ? FLAG_CELL : null) }}>{r.jumps}</td>
-              <td style={{ color: r.issues ? '#a0006e' : undefined, fontWeight: r.issues ? 700 : 400, ...(incomplete.has(r.num) ? PENDING_STYLE : r.issues ? FLAG_CELL : null) }} title={incomplete.has(r.num) ? `${pendingTip}\n${issueTip(r.issuesByKind)}` : issueTip(r.issuesByKind)}>{r.issues}</td>
-              <td style={{ color: r.drift ? '#a0006e' : undefined, fontWeight: r.drift ? 700 : 400, ...(r.drift ? FLAG_CELL : null) }} title={r.drift ? `Toạ độ ego của box không đổi trong khi xe chạy (box đi theo xe), frame ${r.driftFrames.join(', ')}` : 'Không có trôi box'}>{r.drift}</td>
-              <td style={{ color: ov(r) ? '#b45a00' : undefined, fontWeight: ov(r) ? 700 : 400, ...(ov(r) ? FLAG_CELL : null) }} title={overlapPairs.filter((p) => p.a === r.num || p.b === r.num).map((p) => `#${p.a}–#${p.b}: frame ${p.frames.join(', ')} (tối đa ${fmtIou(p.max)})`).join('\n')}>{ov(r)}</td>
+              <td style={{ color: r.missing ? 'var(--cvla-c-bb0000, #b00)' : undefined, fontWeight: r.missing ? 700 : 400, ...(r.missing ? FLAG_CELL : null) }}>{r.missing}</td>
+              <td style={{ color: r.jumps ? 'var(--cvla-c-a05a00, #a05a00)' : undefined, fontWeight: r.jumps ? 700 : 400, ...(r.jumps ? FLAG_CELL : null) }}>{r.jumps}</td>
+              <td style={{ color: r.issues ? 'var(--cvla-c-a0006e, #a0006e)' : undefined, fontWeight: r.issues ? 700 : 400, ...(incomplete.has(r.num) ? PENDING_STYLE : r.issues ? FLAG_CELL : null) }} title={incomplete.has(r.num) ? `${pendingTip}\n${issueTip(r.issuesByKind)}` : issueTip(r.issuesByKind)}>{r.issues}</td>
+              <td style={{ color: r.drift ? 'var(--cvla-c-a0006e, #a0006e)' : undefined, fontWeight: r.drift ? 700 : 400, ...(r.drift ? FLAG_CELL : null) }} title={r.drift ? `Toạ độ ego của box không đổi trong khi xe chạy (box đi theo xe), frame ${r.driftFrames.join(', ')}` : 'Không có trôi box'}>{r.drift}</td>
+              <td style={{ color: ov(r) ? 'var(--cvla-c-b45a00, #b45a00)' : undefined, fontWeight: ov(r) ? 700 : 400, ...(ov(r) ? FLAG_CELL : null) }} title={overlapPairs.filter((p) => p.a === r.num || p.b === r.num).map((p) => `#${p.a}–#${p.b}: frame ${p.frames.join(', ')} (tối đa ${fmtIou(p.max)})`).join('\n')}>{ov(r)}</td>
               {(() => {
                 const d = dist.get(r.num);
-                return <td style={{ color: d && d.d > far ? '#999' : undefined }} title={d ? `${d.d.toFixed(2)} m tại frame ${d.frame}${d.d > far ? ` — ngoài ${far} m: không đo mặt đường` : ''}` : distMode === 'frame' ? `Không có box ở frame ${distFrame}` : 'Không có box'}>{d ? d.d.toFixed(1) : '—'}</td>;
+                return <td style={{ color: d && d.d > far ? 'var(--cvla-c-999999, #999)' : undefined }} title={d ? `${d.d.toFixed(2)} m tại frame ${d.frame}${d.d > far ? ` — ngoài ${far} m: không đo mặt đường` : ''}` : distMode === 'frame' ? `Không có box ở frame ${distFrame}` : 'Không có box'}>{d ? d.d.toFixed(1) : '—'}</td>;
               })()}
-              <td style={lateOf.has(r.num) ? { ...FLAG_CELL, color: '#7a1f1f', fontWeight: 700 } : undefined} title={lateOf.has(r.num) ? `Xuất hiện muộn từ frame ${lateOf.get(r.num)} (frame đầu job ${start} chưa có keyframe): nên thêm keyframe outside phía trước (chuột phải → Outside phía trước, giữ ID)` : undefined}>{r.first === null ? '—' : `${r.first}–${r.last}`}{lateOf.has(r.num) && <span style={{ marginLeft: 4 }}>⚠</span>}</td><td>{r.keyframes}</td>
+              <td style={lateOf.has(r.num) ? { ...FLAG_CELL, color: 'var(--cvla-c-7a1f1f, #7a1f1f)', fontWeight: 700 } : undefined} title={lateOf.has(r.num) ? `Xuất hiện muộn từ frame ${lateOf.get(r.num)} (frame đầu job ${start} chưa có keyframe): nên thêm keyframe outside phía trước (chuột phải → Outside phía trước, giữ ID)` : undefined}>{r.first === null ? '—' : `${r.first}–${r.last}`}{lateOf.has(r.num) && <span style={{ marginLeft: 4 }}>⚠</span>}</td><td>{r.keyframes}</td>
               <td>{r.made !== null && <button onDoubleClick={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onDelete(r); }} title={r.made === 'draft' ? 'Xóa object này khỏi nháp (chưa lên CVAT nên không ảnh hưởng server)' : 'Xóa object do tool tạo khỏi CVAT (xác nhận ở màn hình upload)'}>🗑</button>}</td>
             </tr>
           ))}
@@ -318,10 +318,10 @@ export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flags
               <h4>Object #{row.num} · {row.label}</h4>
               <h4>Lỗi (rê chuột vào lỗi để chọn xử lý)</h4>
               <button role="menuitem" disabled={nFlags === 0} onClick={run(() => onIgnoreAll(row.num))} title="Bỏ qua mọi flag đang báo của object này: lỗi D, ít điểm, đi xa bất thường, lỗi luật, trôi box, chồng lấn (không gồm cảnh báo lệch; hoàn lại từng mục ở Batch Review)">🚫 Bỏ qua toàn bộ flag ({nFlags})</button>
-              {errs.length === 0 && <div style={{ fontSize: 12, color: '#777', padding: '2px 4px' }}>Không có lỗi nào đang báo</div>}
+              {errs.length === 0 && <div style={{ fontSize: 12, color: 'var(--cvla-c-777777, #777)', padding: '2px 4px' }}>Không có lỗi nào đang báo</div>}
               {errs.map((er) => (
                 <div key={er.key} style={{ position: 'relative' }} onMouseEnter={() => setSub(er.key)}>
-                  <button role="menuitem" aria-haspopup="menu" aria-expanded={sub === er.key} onClick={() => setSub(er.key)} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', gap: 8, background: sub === er.key ? '#e8f0ff' : undefined }}>
+                  <button role="menuitem" aria-haspopup="menu" aria-expanded={sub === er.key} onClick={() => setSub(er.key)} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', gap: 8, background: sub === er.key ? 'var(--cvla-c-e8f0ff, #e8f0ff)' : undefined }}>
                     <span>{er.name} ({er.n})</span><span aria-hidden>▸</span>
                   </button>
                   {sub === er.key && (

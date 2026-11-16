@@ -35,11 +35,11 @@ export function DynClassTable({ jobId, labels, tracks }: { jobId: number; labels
             const nRules = attrs.reduce((n, a) => n + ruleValues(a).filter((v) => rules[attrRuleKey(l.name, a.name, v)]).length, 0);
             return (
               <Fragment key={l.id}>
-              <tr style={{ borderTop: '1px solid #ddd' }}>
+              <tr style={{ borderTop: '1px solid var(--cvla-c-dddddd, #ddd)' }}>
                 <td><b>{l.name}</b></td>
                 <td>{counts.get(l.id) ?? 0}</td>
                 <td>
-                  <label style={{ fontWeight: 600, color: on ? '#060' : '#a00' }}>
+                  <label style={{ fontWeight: 600, color: on ? 'var(--cvla-c-006600, #060)' : 'var(--cvla-c-aa0000, #a00)' }}>
                     <input type="checkbox" checked={on} onChange={(e) => toggle(l, e.target.checked)} /> {on ? 'BẬT (nội suy)' : 'TẮT (một size cho cả object)'}
                   </label>
                 </td>
@@ -48,7 +48,7 @@ export function DynClassTable({ jobId, labels, tracks }: { jobId: number; labels
                 <tr>
                   <td colSpan={3} style={{ paddingLeft: 14, paddingBottom: 4 }}>
                     <details open={nRules > 0}>
-                      <summary style={{ cursor: 'pointer', color: '#345' }}>Theo attribute{nRules > 0 ? ` (${nRules} luật)` : ''}</summary>
+                      <summary style={{ cursor: 'pointer', color: 'var(--cvla-c-334455, #345)' }}>Theo attribute{nRules > 0 ? ` (${nRules} luật)` : ''}</summary>
                       <table style={{ borderCollapse: 'collapse', margin: '2px 0' }}>
                         <tbody>
                           {attrs.map((a) => (
@@ -97,7 +97,7 @@ export function DynSizePanel({ jobId, labels, tracks }: { jobId: number; labels:
       <DynClassTable jobId={jobId} labels={labels} tracks={tracks} />
       <p style={{ margin: '6px 0' }}>
         <button onClick={() => { dynClassStore.reset(jobId, names); dynRuleStore.reset(jobId); tracks.forEach((_, i) => { try { kv.remove(`cvla-dyn:${jobId}:${i + 1}`); } catch { /* bỏ qua */ } }); }}>Đặt lại mặc định</button>{' '}
-        <span style={{ color: '#555' }}>Đổi công tắc class sẽ xóa công tắc riêng của các object thuộc class đó. Tắt dynamic size chỉ áp dụng cho lần sửa size tiếp theo (hoặc bấm "Đồng bộ size" trong Batch Review).</span>
+        <span style={{ color: 'var(--cvla-c-555555, #555)' }}>Đổi công tắc class sẽ xóa công tắc riêng của các object thuộc class đó. Tắt dynamic size chỉ áp dụng cho lần sửa size tiếp theo (hoặc bấm "Đồng bộ size" trong Batch Review).</span>
       </p>
     </>
   );
