@@ -58,10 +58,23 @@ if /i not "%ANS%"=="y" (
 )
 set "DIRTY="
 for /f %%i in ('git status --porcelain --untracked-files=no') do set "DIRTY=1"
-if defined DIRTY (
-    echo Ban dang co thay doi chua commit, KHONG tu dong pull de tranh mat code. Hay commit hoac stash roi chay lai.
+if not defined DIRTY goto :dopull
+echo.
+echo Cac file dang co thay doi chua commit:
+git status --porcelain --untracked-files=no
+echo.
+set "ANS2="
+set /p "ANS2=Ghi de ^(BO^) cac thay doi nay de cap nhat? [y/N] "
+if /i not "%ANS2%"=="y" (
+    echo Giu nguyen thay doi cua ban, bo qua cap nhat, build ban hien tai %CUR%.
     goto :noupdate
 )
+git reset --hard HEAD
+if errorlevel 1 (
+    echo Khong bo duoc thay doi. Bo qua cap nhat.
+    goto :noupdate
+)
+:dopull
 git pull --ff-only
 if errorlevel 1 (
     echo Pull that bai ^(nhanh da tach khoi GitHub^). Bo qua, build ban hien tai %CUR%.
