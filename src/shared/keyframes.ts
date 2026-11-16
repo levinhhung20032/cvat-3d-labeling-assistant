@@ -1,5 +1,6 @@
 import { upsertKeyframe } from './edit';
 import { referenceCuboid, sortedShapes, stateAt } from './interp';
+import type { Cuboid } from './cuboid';
 import type { CvatTrack } from './types';
 
 export interface TrackChange {
@@ -101,5 +102,25 @@ export function setOutsideRange(track: CvatTrack, a: number, b: number, stop: nu
     const nx = stateAt(track, hi + 1);
     if (nx.cuboid) { out = upsertKeyframe(out, hi + 1, nx.cuboid, false); frames.push(hi + 1); }
   }
+  return { track: out, frames };
+}
+
+/** Đảo ngược outside theo khoảng [a, b]: mọi frame outside trong khoảng được đưa trở lại (mỗi frame một keyframe có box).
+ *  Box lấy từ `bak` (box đã lưu trước khi đặt outside) nếu có, không thì box tham chiếu gần nhất. Frame b+1 giữ nguyên trạng thái. */
+export function restoreOutsideRange(track: CvatTrack, a: number, b: number, stop: number, bak: Record<string, Cuboid> = {}): TrackChange | null {
+  const lo = Math.min(a, b), hi = Math.max(a, b);
+  const isOut = (t: CvatTrack, f: number) => { const s = stateAt(t, f).status; return s === 'outside' || s === 'outside-key'; };
+  let out = track;
+  const frames: number[] = [];
+  const after = hi + 1 <= stop && !hasShape(track, hi + 1) && isOut(track, hi + 1) ? stateAt(track, hi + 1).cuboid : null;
+  for (let f = lo; f <= hi; f++) {
+    if (!isOut(out, f)) continue;
+    const box = bak[String(f)] ?? referenceCuboid(out, f, stop);
+    if (!box) continue;
+    out = upsertKeyframe(out, f, box, false);
+    frames.push(f);
+  }
+  if (!frames.length) return null;
+  if (after) { out = upsertKeyframe(out, hi + 1, after, true); frames.push(hi + 1); }
   return { track: out, frames };
 }

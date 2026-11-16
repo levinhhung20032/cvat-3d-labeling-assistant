@@ -90,7 +90,7 @@ describe('khoá tất cả thành KF', () => {
   });
 });
 
-import { restoreFrom, setOutsideFrom, setOutsideRange } from '../src/shared/keyframes';
+import { restoreFrom, restoreOutsideRange, setOutsideFrom, setOutsideRange } from '../src/shared/keyframes';
 import { missingOutsideKeyframes } from '../src/shared/rules';
 import { normalizeTrack } from '../src/shared/upload';
 
@@ -158,5 +158,18 @@ describe('outside', () => {
     expect(stateAt(r.track, 1).status).toBe('outside-key');
     expect(missingOutsideKeyframes(normalizeTrack(r.track, STOP).track, STOP)).toEqual([]);
   }
+  });
+});
+
+describe('đảo ngược outside theo khoảng', () => {
+  it("đưa mọi frame outside trong khoảng trở lại, giữ ID, frame sau khoảng giữ nguyên outside", () => {
+    const base = track(1, [at(0, 0), at(8, 16)]);
+    const out = setOutsideRange(base, 2, 4, 9)!.track;
+    const out2 = setOutsideFrom(out, 5)!.track; // frame 5.. cũng outside (không keyframe riêng ở 6)
+    const r = restoreOutsideRange(out2, 2, 4, 9)!;
+    for (const f of [2, 3, 4]) expect(stateAt(r.track, f).status).toBe('key');
+    expect(stateAt(r.track, 5).status).toBe('outside-key');
+    expect(r.track.id).toBe(1);
+    expect(restoreOutsideRange(base, 1, 3, 9)).toBeNull();
   });
 });

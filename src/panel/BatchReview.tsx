@@ -10,7 +10,7 @@ import {
 import { referenceCuboid, stateAt, type FrameState } from '../shared/interp';
 import { resizeKeyframes, rotateAllKeyframes, translateKeyframes, upsertKeyframe as upsertKf } from '../shared/edit';
 import {
-  removeInnerKeyframes, restoreFrom, setOutsideFrom, setOutsideRange, toggleKeyframe,
+  removeInnerKeyframes, restoreFrom, restoreOutsideRange, setOutsideFrom, setOutsideRange, toggleKeyframe,
   type TrackChange,
 } from '../shared/keyframes';
 import type { PointCloud } from '../shared/pcd';
@@ -156,8 +156,9 @@ const loadFrameSel = (key: string): Record<number, GroundKind> => {
 
 interface DragState { hit: NonNullable<Hit>; x0: number; y0: number; base: LocalBox; moved: boolean }
 
-function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, tiltOn, autoSnap, lockKind, onPreview, onCommit, onZoom, pan, onPan, reflect, pwPlane, ovCount, onPreviewOther, onCommitOther }: {
+function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, tiltOn, autoSnap, lockKind, onPreview, onCommit, onZoom, pan, onPan, reflect, pwPlane, ovCount, ovNums, onPreviewOther, onCommitOther }: {
   nbrPlane: EgoPlane | null; nbrZ: number | null; // mặt đường theo đáy box ID nhỏ (vẽ) và độ cao thế giới của nó (snap)
+  ovNums: number[]; // số thứ tự object của từng box chồng lấn / xung quanh (để hiện ID khi rê chuột)
   ovCount: number; // overlays[0 … ovCount − 1] là box của object khác đang chồng lấn (kéo được); phần còn lại (box gương ref) không kéo
   onPreviewOther: (i: number, b: LocalBox | null) => void; onCommitOther: (i: number, delta: [number, number, number], dyaw?: number, all?: boolean) => void; // dời box chồng lấn: xem trước / ghi (độ dời tâm theo hệ của khung nhìn)
   pwPlane: EgoPlane | null; // mặt đường Patchwork++ gợi ý (tím) trong hệ của khung nhìn
@@ -175,6 +176,7 @@ function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, g
   const ref = useRef<HTMLCanvasElement>(null);
   const drag = useRef<DragState | null>(null);
   const panDrag = useRef<{ x0: number; y0: number; base: Pan } | null>(null);
+  const [tip, setTip] = useState<{ n: number; x: number; y: number } | null>(null);
   const ovDrag = useRef<{ i: number; base: LocalBox; x0: number; y0: number; last: LocalBox; moved: boolean; rot: { cx: number; cy: number } | null } | null>(null);
   const k = size / (2 * half);
   const [ox, oy] = panOffset(view, pan, k);
@@ -263,6 +265,8 @@ function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, g
     }
     const d = drag.current;
     if (!d) {
+      const ti = ovAt(px, py), tn = ti >= 0 ? ovNums[ti] : undefined;
+      setTip((t) => (tn === undefined ? (t ? null : t) : t && t.n === tn && Math.abs(t.x - px - ox) < 1 && Math.abs(t.y - py - oy) < 1 ? t : { n: tn, x: px + ox, y: py + oy }));
       if (ref.current && st.cuboid) {
         const h = hitTest(view, identityBox(st.cuboid), px, py, size, half);
         ref.current.style.cursor = !e.altKey && !h && ovAt(px, py) >= 0 ? 'move' : cursorFor(view, h, e.altKey);
@@ -322,12 +326,17 @@ function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, g
   };
 
   return (
-    <canvas
-      ref={ref} width={Math.round(size * dpr)} height={Math.round(size * dpr)}
-      style={{ display: 'block', width: size, height: size, touchAction: 'none' }}
-      onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => { const od = ovDrag.current; ovDrag.current = null; drag.current = null; panDrag.current = null; onPreview(null); if (od) onPreviewOther(od.i, null); }}
-      onContextMenu={(e) => e.preventDefault()}
-    />
+    <div style={{ position: 'relative', width: size, height: size }}>
+      <canvas
+        ref={ref} width={Math.round(size * dpr)} height={Math.round(size * dpr)}
+        style={{ display: 'block', width: size, height: size, touchAction: 'none' }}
+        onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={() => setTip(null)} onPointerCancel={() => { const od = ovDrag.current; ovDrag.current = null; drag.current = null; panDrag.current = null; onPreview(null); if (od) onPreviewOther(od.i, null); }}
+        onContextMenu={(e) => e.preventDefault()}
+      />
+      {tip && !ovDrag.current && !drag.current && (
+        <div style={{ position: 'absolute', left: Math.min(tip.x + 10, size - 44), top: Math.max(0, tip.y - 20), background: '#0b3a6b', color: '#fff', fontSize: 12, fontWeight: 700, padding: '1px 6px', borderRadius: 6, pointerEvents: 'none', whiteSpace: 'nowrap' }}>ID #{tip.n}</div>
+      )}
+    </div>
   );
 }
 
@@ -359,7 +368,11 @@ const CHIP_BTN: React.CSSProperties = { padding: '0 3px', lineHeight: 1, height:
 interface FileFlag { kind: IssueKind; state: FlagState; msg?: string; det: boolean }
 const NO_FLAGS: FileFlag[] = [];
 
-function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, advise, onAdvice, pwShow = false, groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, overlayNums, onCommitOther, ignoredOverlap, onRestoreOverlap, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan, refl = null, onBelow, onRefPlane, horizontal = false, hideGroundPick = false }: {
+export interface NearbyCfg { on: boolean; max: number; mode: 'auto' | 'pick'; ids: number[] }
+const NB_DEFAULT: NearbyCfg = { on: false, max: 5, mode: 'auto', ids: [] };
+const NB_NONE = { cand: [] as { num: number; d: number }[], cfg: NB_DEFAULT };
+
+function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, advise, onAdvice, pwShow = false, groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, overlayNums, nbCount, nearby, onNearby, onCommitOther, ignoredOverlap, onRestoreOverlap, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan, refl = null, onBelow, onRefPlane, horizontal = false, hideGroundPick = false }: {
   hideGroundPick?: boolean; // tab Ref: ẩn ô chọn mặt đường (có ô riêng)
   horizontal?: boolean; // 3 view Trên | Bên | Trước xếp ngang (tab Ref, hoặc bố cục frame dọc): 3 view Trên | Bên | Trước xếp ngang
   pwShow?: boolean; // hiện mặt đường Patchwork++ gợi ý (vạch tím) ở view Bên / Trước
@@ -377,7 +390,7 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
   pIgnored: boolean; onIgnoreP: (f: number, on: boolean) => void; // bỏ qua / hoàn lại cảnh báo ít điểm (P) của frame này
   issues: FrameIssue[]; issueIgnored: (kind: string) => boolean; onIgnoreIssue: (f: number, kind: string, on: boolean) => void;
   qcOn: boolean; qcNote: string; onQcNote: (f: number, text: string) => void;
-  overlap: { other: number; ratio: number }[]; overlayCubs: Cuboid[]; overlayNums: number[]; onCommitOther: (num: number, f: number, c: Cuboid, allAfter?: boolean) => void; ignoredOverlap: number[]; onRestoreOverlap: (other: number) => void; onIgnoreOverlap: (other: number) => void; onOpenObject: (other: number) => void;
+  overlap: { other: number; ratio: number }[]; overlayCubs: Cuboid[]; overlayNums: number[]; nbCount: number; nearby: { cand: { num: number; d: number }[]; cfg: NearbyCfg }; onNearby: (f: number, c: NearbyCfg) => void; onCommitOther: (num: number, f: number, c: Cuboid, allAfter?: boolean) => void; ignoredOverlap: number[]; onRestoreOverlap: (other: number) => void; onIgnoreOverlap: (other: number) => void; onOpenObject: (other: number) => void;
   onToggleOutside: (f: number) => void; onHover: (f: number | null) => void; scene: Scene;
   motion: MotionWarning | null; motionIgnored: boolean; onIgnoreMotion: (f: number, on: boolean) => void;
   autoSnap: boolean; onSnap: (f: number, g: GroundResult | null) => void; onGround: (f: number) => void;
@@ -519,10 +532,10 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
   useEffect(() => { onRefPlane?.(f, plane && box ? plane.w - (box.cw - box.sz / 2) : null); }, [f, plane?.w, box?.cw, box?.sz]);
   const [ovPrev, setOvPrev] = useState<{ i: number; box: LocalBox } | null>(null); // box chồng lấn đang được kéo (xem trước ở cả 3 view)
   const overlays = useMemo(() => {
-    const o = refCub ? overlayCubs.map((x) => boxV(localBoxOf(refCub, x))) : [];
+    const o = refCub ? overlayCubs.map((x, i) => { const b = boxV(localBoxOf(refCub, x)); return i >= overlayCubs.length - nbCount ? { ...b, color: '#2f9bff' } : b; }) : [];
     if (ovPrev && o[ovPrev.i]) o[ovPrev.i] = { ...ovPrev.box, color: o[ovPrev.i]!.color };
     return plane && box ? [...o, { ...mirrorBox(box, plane.w), color: REF_COLOR }] : o;
-  }, [refCub, overlayCubs, M, ovPrev, plane?.w, plane ? box : null]);
+  }, [refCub, overlayCubs, nbCount, M, ovPrev, plane?.w, plane ? box : null]);
   /** Ghi vị trí mới của box chồng lấn: dời tâm theo độ dời trong hệ khung nhìn (đã quy về hệ yaw của box đang xét), giữ nguyên cỡ / góc của nó. */
   const commitOther = (i: number, delta: [number, number, number], dyaw = 0, all = false) => {
     const other = overlayCubs[i], num = overlayNums[i];
@@ -598,7 +611,7 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
       </div>
       <div style={{ position: 'relative', ...(horizontal ? { display: 'flex', gap: VIEW_GAP } : null) }}>
       {VIEWS.map((v) => (
-        <Cell key={v} nbrPlane={nbrPlane} nbrZ={nbrZ} reflect={reflect} pwPlane={pwPlane} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap && lockKind !== null} lockKind={lockKind} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c, all, lb) => onCommit(f, c, all, lb)} onZoom={onZoom} pan={pan} onPan={onPan} ovCount={overlayCubs.length} onPreviewOther={(i, b) => setOvPrev(b ? { i, box: b } : null)} onCommitOther={commitOther} />
+        <Cell key={v} nbrPlane={nbrPlane} nbrZ={nbrZ} reflect={reflect} pwPlane={pwPlane} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap && lockKind !== null} lockKind={lockKind} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c, all, lb) => onCommit(f, c, all, lb)} onZoom={onZoom} pan={pan} onPan={onPan} ovCount={overlayCubs.length} ovNums={overlayNums} onPreviewOther={(i, b) => setOvPrev(b ? { i, box: b } : null)} onCommitOther={commitOther} />
       ))}
       </div>
       {reflect && plane && (
@@ -643,6 +656,27 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
           onClick={(e) => e.stopPropagation()} onChange={(e) => onQcNote(f, e.target.value)}
           style={{ width: '100%', boxSizing: 'border-box', fontSize: 11, background: '#fffbe0', border: 0, borderBottom: '1px solid #e0b000' }}
         />
+      )}
+      {nearby.cand.length > 0 && (
+        <div style={{ background: '#e3f0ff', color: '#0b3a6b', fontSize: 11, padding: '1px 4px' }} onClick={(e) => e.stopPropagation()} title="Hiện thêm box của các ID xung quanh (xanh dương nét đứt) trong frame này. Chỉ áp cho frame này. Phím tắt: C.">
+          <label><input type="checkbox" checked={nearby.cfg.on} onChange={(e) => onNearby(f, { ...nearby.cfg, on: e.target.checked })} /> ID xung quanh</label>
+          {nearby.cfg.on && (
+            <>
+              {' '}tối đa <input type="number" min={1} max={30} value={nearby.cfg.max} onChange={(e) => onNearby(f, { ...nearby.cfg, max: Math.max(1, Math.min(30, Math.round(Number(e.target.value)) || 1)) })} style={{ width: 38, fontSize: 11 }} />
+              <div style={{ paddingLeft: 14 }}>
+                <label><input type="radio" checked={nearby.cfg.mode === 'auto'} onChange={() => onNearby(f, { ...nearby.cfg, mode: 'auto' })} /> ổn (gần nhất)</label>{' '}
+                <label><input type="radio" checked={nearby.cfg.mode === 'pick'} onChange={() => onNearby(f, { ...nearby.cfg, mode: 'pick' })} /> chọn ID</label>
+                {nearby.cfg.mode === 'pick' && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0 8px', maxHeight: 70, overflowY: 'auto' }}>
+                    {nearby.cand.map((c) => (
+                      <label key={c.num} title={`cách ${c.d.toFixed(1)} m`}><input type="checkbox" checked={nearby.cfg.ids.includes(c.num)} onChange={(e) => onNearby(f, { ...nearby.cfg, ids: e.target.checked ? [...nearby.cfg.ids, c.num] : nearby.cfg.ids.filter((x) => x !== c.num) })} />#{c.num}</label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       )}
       {ignoredOverlap.map((o) => (
         <div key={`ig${o}`} style={{ background: '#e5e7eb', color: '#4b5563', fontSize: 11, padding: '1px 4px' }} title="Cặp này đã được bỏ qua ở mọi frame nên không báo lỗi O; ghi chú này cho biết ở frame này hai object vẫn đang chồng nhau.">
@@ -987,7 +1021,45 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
     }
     return { cubs, nums };
   }, [ovAt, framesKey, ann]);
-  const ovCubs = ovData.cubs, ovNums = ovData.nums;
+  // ID xung quanh: cài đặt riêng từng frame (bật/tắt, số box tối đa, tự động gần nhất hoặc chọn từng ID)
+  const [nbCfg, setNbCfg] = useState<Map<number, NearbyCfg>>(new Map());
+  useEffect(() => setNbCfg(new Map()), [num]);
+  const onNearby = useCallback((f: number, c: NearbyCfg) => setNbCfg((m) => new Map(m).set(f, c)), []);
+  const nbCand = useMemo(() => {
+    const m = new Map<number, { num: number; d: number }[]>();
+    if (!track) return m;
+    for (const f of frames) {
+      const me = stateAt(track, f).cuboid;
+      if (!me) continue;
+      const l: { num: number; d: number }[] = [];
+      ann.tracks.forEach((t, i) => {
+        if (i + 1 === num) return;
+        const c = stateAt(t, f).cuboid;
+        if (c) l.push({ num: i + 1, d: Math.hypot(c.x - me.x, c.y - me.y) });
+      });
+      m.set(f, l.sort((a, b) => a.d - b.d));
+    }
+    return m;
+  }, [framesKey, ann, track, num]);
+  const nbPicked = useMemo(() => new Map<number, number[]>(), [ovData, nbCand, nbCfg, ann]);
+  const ovCubs = useMemo(() => {
+    const out = new Map(ovData.cubs);
+    for (const [f, cand] of nbCand) {
+      const cfg = nbCfg.get(f);
+      if (!cfg?.on) continue;
+      const have = new Set(ovData.nums.get(f) ?? []);
+      const pick = (cfg.mode === 'auto' ? cand : cand.filter((c) => cfg.ids.includes(c.num))).filter((c) => !have.has(c.num)).slice(0, cfg.max);
+      const add = pick.map((c) => stateAt(ann.tracks[c.num - 1]!, f).cuboid!);
+      if (add.length) out.set(f, [...(out.get(f) ?? []), ...add]);
+      nbPicked.set(f, pick.map((c) => c.num));
+    }
+    return out;
+  }, [ovData, nbCand, nbCfg, ann]);
+  const ovNums = useMemo(() => {
+    const out = new Map(ovData.nums);
+    for (const [f, n] of nbPicked) if (n.length) out.set(f, [...(out.get(f) ?? []), ...n]);
+    return out;
+  }, [ovData, ovCubs]);
   // Cặp đã bỏ qua: ghi chú ở từng frame mà hai object vẫn chồng nhau (frame → số thứ tự object kia)
   const ovIgnAt = useMemo(() => {
     const m = new Map<number, number[]>();
@@ -1021,7 +1093,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
   const rowsV = layout === 'v'; // frame xếp dọc: mỗi frame một hàng, 3 view nằm ngang
   const fitW = rowsV ? Math.floor((vp.w - 60 - 2 * VIEW_GAP) / 3) : Math.floor((vp.w - 24 - (cols6 - 1) * prefs.gap) / cols6 - 6);
   const fitH = rowsV ? CELL_MAX : Math.floor((vp.h - 190) / 3);
-  const size = prefs.auto ? Math.min(CELL_MAX, Math.max(CELL_MIN, Math.min(fitW, fitH))) : prefs.size;
+  const size = prefs.size;
 
   const baseHalf = useMemo(() => {
     if (!track) return 5;
@@ -1216,6 +1288,17 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
   };
   // Chế độ 3: chọn khoảng bằng chuột. Bật rồi bấm tiêu đề cột đầu và cột cuối (có thể ở hai cửa sổ khác nhau: đổi cửa sổ rồi bấm tiếp); Esc để hủy.
   const [pick, setPick] = useState<{ first: number | null } | null>(null);
+  /** Khoảng [a, b]: frame đầu khoảng đang thường → đặt outside cả khoảng; frame đầu đang outside → đưa cả khoảng trở lại có box. */
+  const rangeOutside = (a: number, b: number) => {
+    if (!track) return;
+    const s0 = stateAt(track, Math.min(a, b)).status;
+    if (s0 === 'outside' || s0 === 'outside-key') {
+      apply(restoreOutsideRange(track, a, b, stop, readBak()), `Đã đưa ${'{n}'} frame trong ${a}–${b} trở lại (có box). Hoàn tác được.`, 'Không có frame outside nào trong khoảng này để đưa trở lại.');
+      return;
+    }
+    saveBak(Array.from({ length: Math.abs(b - a) + 1 }, (_, i) => Math.min(a, b) + i));
+    apply(setOutsideRange(track, a, b, stop), `Đã đặt outside ${'{n}'} frame trong ${a}–${b}. Hoàn tác được.`, 'Không có frame nào trong khoảng này đổi được.');
+  };
   const onPickSelect = (f: number) => {
     if (!pick) { setSelFrame(f); return; }
     setSelFrame(f);
@@ -1224,8 +1307,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
     setPick(null);
     setRangeFrom(String(a)); setRangeTo(String(b));
     if (track) {
-      saveBak(Array.from({ length: b - a + 1 }, (_, i) => a + i));
-      apply(setOutsideRange(track, a, b, stop), `Đã đặt outside ${'{n}'} frame trong ${a}–${b}. Hoàn tác được.`, 'Không có frame nào trong khoảng này đổi được.');
+      rangeOutside(a, b);
     }
   };
   useEffect(() => {
@@ -1238,8 +1320,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
   /** ② Current window: outside cho mọi frame có box trong cửa sổ đang hiển thị. */
   const outsideRange = () => {
     const r: [number, number] | null = frames.length ? [frames[0]!, frames[frames.length - 1]!] : null;
-    if (r && track) saveBak(Array.from({ length: Math.abs(r[1] - r[0]) + 1 }, (_, i) => Math.min(r[0], r[1]) + i));
-    if (r && track) apply(setOutsideRange(track, r[0], r[1], stop), `Đã đặt outside ${'{n}'} frame trong ${r[0]}–${r[1]}. Hoàn tác được.`, 'Không có frame nào trong khoảng này đổi được.');
+    if (r) rangeOutside(r[0], r[1]);
   };
   /** Áp kích thước của frame đang chọn (hoặc frame có box đầu tiên trong cửa sổ) cho mọi keyframe; auto = vừa tắt Dynamic size. */
   const unifySize = (auto = false) => {
@@ -1305,7 +1386,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
     const c0 = st.cuboid;
     if (sf[0] === 'measured' && !confirmSnap(localize(pc!, c0, 16, f), c0.sx, c0.sy, c0.sz, { cu: 0, cv: 0, cw: 0, range: Math.hypot(c0.x, c0.y) }, g)) { snapWhy.current = 'đo lại tại chỗ cho ra mặt đường khác (hai lần đo không khớp)'; return false; }
     // Mặt dốc: nghiêng box song song mặt đường (roll / pitch) nếu bật và dốc đủ rõ; không thì chỉ dời z.
-    if (prefs.tilt && g.method === 'plane' && g.plane && g.dzTilt !== undefined && (g.slopeDeg ?? 0) >= 1) {
+    if (g.method === 'plane' && g.plane && g.dzTilt !== undefined && (g.slopeDeg ?? 0) >= 1) {
       const t = tiltFromPlane(g.plane.a, g.plane.b, st.cuboid.yaw);
       const same = Math.abs(t.rx - st.cuboid.rx) < 0.002 && Math.abs(t.ry - st.cuboid.ry) < 0.002 && Math.abs(g.dzTilt) < 0.005;
       if (same) { snapWhy.current = 'box đã song song mặt đường'; return false; }
@@ -1425,6 +1506,17 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
     () => onAction((id) => {
       const cs = cols.map((c) => c.f);
       switch (id) {
+        case 'nearby.toggle': {
+          const tgt = hoverRef.current ?? selFrame;
+          const list = tgt !== null ? [tgt] : cs;
+          setNbCfg((m) => {
+            const n = new Map(m);
+            const on = !list.every((f) => (m.get(f) ?? NB_DEFAULT).on); // có frame đang tắt → bật hết; đã bật hết → tắt hết
+            for (const f of list) n.set(f, { ...(m.get(f) ?? NB_DEFAULT), on });
+            return n;
+          });
+          break;
+        }
         case 'view3d.toggle': if (!refView) toggle3dRef.current(); break;
         case 'win.next': setK((x) => Math.min(nWin - 1, x + 1)); break;
         case 'win.prev': setK((x) => Math.max(0, x - 1)); break;
@@ -1506,7 +1598,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
       onSuggest={(f, s) => setSugs((m) => (m.get(f) === s ? m : new Map(m).set(f, s)))} onAccept={accept}
       onFit={(f, r) => setFits((m) => (m.get(f) === r ? m : new Map(m).set(f, r)))} onSelect={() => onPickSelect(c.f)}
       onLoaded={(f) => setLoaded((s) => new Set(s).add(f))}
-      onCommit={commit} onZoom={zoomBy} onToggleKf={toggleKf} overlap={ovAt.get(c.f) ?? []} overlayCubs={ovCubs.get(c.f) ?? EMPTY_CUBS} overlayNums={ovNums.get(c.f) ?? EMPTY_NUMS} onCommitOther={commitOther} ignoredOverlap={ovIgnAt.get(c.f) ?? EMPTY_NUMS} onRestoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], false); setNote(`Đã hoàn lại cặp #${Math.min(num, o)}–#${Math.max(num, o)}: báo lại chồng lấn ở mọi frame.`); }} onIgnoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], true); setNote(`Đã bỏ qua cặp #${Math.min(num, o)}–#${Math.max(num, o)} (mọi frame).`); }} onOpenObject={setSelectedNum} tiltOn={prefs.tilt} onFocusFrame={onFocusFrame} fileFlags={(fileFlags.get(c.f) ?? NO_FLAGS).filter((x) => !x.det)} onMarkFlag={markFlagAsk} issues={issueMap.get(c.f) ?? NO_ISSUES} issueIgnored={(k) => ign.has(issueKey(job.id, num, c.f, k))} onIgnoreIssue={ignoreIssueAsk} qcOn={qcOn} qcNote={qcNotes[qcKey(job.id, num, c.f)] ?? ''} onQcNote={(f, t) => qcStore.set(job.id, num, f, t)} onToggleOutside={toggleOutside} onHover={(f) => { hoverRef.current = f; onHoverFrame(f); }} scene={scene}
+      onCommit={commit} onZoom={zoomBy} onToggleKf={toggleKf} overlap={ovAt.get(c.f) ?? []} overlayCubs={ovCubs.get(c.f) ?? EMPTY_CUBS} overlayNums={ovNums.get(c.f) ?? EMPTY_NUMS} nbCount={(nbPicked.get(c.f) ?? EMPTY_NUMS).length} nearby={nbCand.has(c.f) ? { cand: nbCand.get(c.f)!, cfg: nbCfg.get(c.f) ?? NB_DEFAULT } : NB_NONE} onNearby={onNearby} onCommitOther={commitOther} ignoredOverlap={ovIgnAt.get(c.f) ?? EMPTY_NUMS} onRestoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], false); setNote(`Đã hoàn lại cặp #${Math.min(num, o)}–#${Math.max(num, o)}: báo lại chồng lấn ở mọi frame.`); }} onIgnoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], true); setNote(`Đã bỏ qua cặp #${Math.min(num, o)}–#${Math.max(num, o)} (mọi frame).`); }} onOpenObject={setSelectedNum} tiltOn={true} onFocusFrame={onFocusFrame} fileFlags={(fileFlags.get(c.f) ?? NO_FLAGS).filter((x) => !x.det)} onMarkFlag={markFlagAsk} issues={issueMap.get(c.f) ?? NO_ISSUES} issueIgnored={(k) => ign.has(issueKey(job.id, num, c.f, k))} onIgnoreIssue={ignoreIssueAsk} qcOn={qcOn} qcNote={qcNotes[qcKey(job.id, num, c.f)] ?? ''} onQcNote={(f, t) => qcStore.set(job.id, num, f, t)} onToggleOutside={toggleOutside} onHover={(f) => { hoverRef.current = f; onHoverFrame(f); }} scene={scene}
       refl={extra.refl ?? null} onBelow={extra.onBelow} onRefPlane={extra.onRefPlane}
     />
   );
@@ -1802,8 +1894,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
           </span>
           <span>
             Cỡ ô{' '}
-            <label><input type="checkbox" checked={prefs.auto} onChange={(e) => updatePrefs({ ...prefs, auto: e.target.checked })} /> tự khớp màn hình</label>{' '}
-            <Slider width={90} min={CELL_MIN} max={CELL_MAX} step={10} value={size} def={200} unit="px" disabled={prefs.auto} onChange={(v) => updatePrefs({ ...prefs, auto: false, size: v })} />
+            <Slider width={90} min={CELL_MIN} max={CELL_MAX} step={10} value={size} def={200} unit="px" onChange={(v) => updatePrefs({ ...prefs, size: v })} />
           </span>
           <span title="Khoảng cách giữa các cột frame (4–80 px)">
             Khoảng cách{' '}
@@ -1813,15 +1904,12 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
             Lát cắt +{' '}
             <Slider width={90} min={0} max={3} step={0.1} value={prefs.slabMargin} def={0.5} unit="m" decimals={1} onChange={(v) => updatePrefs({ ...prefs, slabMargin: v })} />
           </span>
-          </div>
-          <div style={DISPLAY_LINE}>
           <span title="Kiểu vẽ point cloud ở mọi ô: cỡ điểm, độ đậm (thấp thì điểm mờ, chỗ điểm dày vẫn đậm) và màu (theo độ cao, hoặc một màu chọn từ bảng màu). Điểm lọt ra ngoài box vẫn tô hồng, điểm ref vẫn tím.">
             Điểm: cỡ{' '}
             <Slider width={90} min={0.5} max={4} step={0.1} value={prefs.ptSize} def={1} unit="×" decimals={1} onChange={(v) => updatePrefs({ ...prefs, ptSize: v })} />{' '}
             độ đậm{' '}
             <Slider width={90} min={10} max={100} step={5} value={Math.round(prefs.ptAlpha * 100)} def={100} unit="%" onChange={(v) => updatePrefs({ ...prefs, ptAlpha: v / 100 })} />
           </span>
-          <label title="Cho box nghiêng (roll / pitch): giữ Alt rồi kéo ở view Bên (pitch) / view Trước (roll), và Ground snap nghiêng box song song mặt đường dốc. Tắt: Alt+kéo ở các view này chỉ xoay yaw và Ground snap chỉ dời z."><input type="checkbox" checked={prefs.tilt} onChange={(e) => updatePrefs({ ...prefs, tilt: e.target.checked })} /> nghiêng theo mặt đường</label>
           </div>
           </Group>
         ),
