@@ -45,7 +45,8 @@ import { madeStore, useMadeIds } from './madeStore';
 import { deletableIds, lockStore, useLockedIds } from './lockStore';
 import { defaultDyn, dynClassStore, useDynClasses, useDynRules } from './dynClassStore';
 import { resolveDyn } from '../shared/dynrule';
-import { ATTRS_OF, SIZE_SYNC, trackIssues } from '../shared/qcrules';
+import { ATTRS_OF, SIZE_SYNC, SURROUND, trackIssues } from '../shared/qcrules';
+import { DEFAULT_SURROUND, surroundBottom, type BoxLite } from '../shared/surround';
 import { ShiftPanel } from './ShiftPanel';
 import { attrKey, ignoreStore, issueKey, motionKey, overlapKey, shiftStore, useIgnored, useShifts } from './shiftStore';
 import { getAttr, parseLabelSpecs } from '../shared/attributes';
@@ -469,6 +470,20 @@ export function App() {
       return !(own ?? resolveDyn(track, specs.get(track.label_id), dynMap[label] ?? defaultDyn(label), dynRules).dyn);
     };
   }, [data?.job.id, data?.labels, dynMap, dynRules]);
+  // Lỗi Z1: đáy các box xung quanh (cùng frame) của object đang xét; gom box theo frame một lần cho mỗi lần `work` đổi.
+  useMemo(() => {
+    if (!work) { SURROUND.fn = null; return; }
+    const byFrame = new Map<number, (BoxLite & { num: number })[]>();
+    SURROUND.fn = (num, f, c) => {
+      let list = byFrame.get(f);
+      if (!list) {
+        list = [];
+        work.tracks.forEach((t, i) => { const b = stateAt(t, f).cuboid; if (b) list!.push({ num: i + 1, x: b.x, y: b.y, z: b.z, sz: b.sz }); });
+        byFrame.set(f, list);
+      }
+      return surroundBottom(c, list.filter((o) => o.num !== num), DEFAULT_SURROUND)?.bottom ?? null;
+    };
+  }, [work]);
   useEffect(() => { if (data) thresholdStore.changed(); }, [dynMap, dynRules]);
   // Số gợi ý thuộc tính theo object (tính ở frame có box đầu tiên), không tính gợi ý đã bỏ qua.
   const attrHints = useMemo(() => {
@@ -760,8 +775,8 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
   const rows = useMemo(
     () => (data && work
       ? buildRows(work, data.labels, data.job.start_frame, data.job.stop_frame, (num, f) => ignAll.has(motionKey(data.job.id, num, f)), (num, f, k) => ignAll.has(issueKey(data.job.id, num, f, k)), new Set(madeIds), deletable.external).map((r) => {
-        const dr = drift.get(r.num) ?? [], sn = sparseAll.get(r.num) ?? 0, mo = passView.midOut.get(r.num)?.length ?? 0;
-        return { ...r, drift: dr.length, driftFrames: dr.map((x) => x.f), issues: r.issues + sn, issuesByKind: { ...r.issuesByKind, ...(sn ? { P: sn } : {}), ...(mo ? { W: mo } : {}) } };
+        const dr = drift.get(r.num) ?? [], sn = sparseAll.get(r.num) ?? 0;
+        return { ...r, drift: dr.length, driftFrames: dr.map((x) => x.f), issues: r.issues + sn, issuesByKind: { ...r.issuesByKind, ...(sn ? { P: sn } : {}) } };
       })
       : []),
     [data, work, ignAll, madeIds, deletable, drift, sparseAll, passView, thrVer],

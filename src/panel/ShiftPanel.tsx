@@ -3,7 +3,7 @@ import { askConfirm } from './confirmStore';
 import { computeKpi, fmtDuration, kpiText, type Kpi, type Shift } from '../shared/shift';
 import { DEFAULT_SCHEDULE } from '../shared/schedule';
 import { setSchedule, shiftStore, useCredits, useSchedule, useShifts } from './shiftStore';
-import { creditOf } from '../shared/kpiCredit';
+import { creditOf, workDay } from '../shared/kpiCredit';
 import { OtAllocator } from './OtAllocator';
 
 function KpiView({ k, target }: { k: Kpi; target: number | null }) {
@@ -80,6 +80,44 @@ function ScheduleEditor() {
   );
 }
 
+/** Dòng KPI cả ngày (ca sáng + ca chiều, gồm KPI dồn từ OT) và các ID đã làm trong ngày đó. Mỗi ngày một dòng. */
+function DaySummary({ shifts }: { shifts: Shift[] }) {
+  const sch = useSchedule();
+  const credits = useCredits();
+  const days = [...new Set(shifts.filter((s) => s.slot !== 'OT').map((s) => workDay(s, sch)))].sort().reverse();
+  if (!days.length) return null;
+  const today = workDay({ start: new Date().toISOString(), slot: 'OT' }, sch);
+  return (
+    <>
+      <h4 style={{ margin: '6px 0' }}>KPI cả ngày (sáng + chiều)</h4>
+      {days.map((d) => {
+        const names = shifts.filter((s) => s.slot !== 'OT' && workDay(s, sch) === d).map((s) => s.name);
+        const ids = credits.filter((c) => names.includes(c.owner)).sort((a, b) => (a.firstTime < b.firstTime ? -1 : 1));
+        const total = ids.reduce((n, c) => n + c.kpi, 0), rework = ids.filter((c) => c.rework).reduce((n, c) => n + c.kpi, 0);
+        const target = sch.kpiTarget * 2;
+        const multiJob = new Set(ids.map((c) => c.jobId)).size > 1;
+        const text = `KPI cả ngày ${d}: ${total}/${target}${rework ? ` (rework ${rework})` : ''} · ID: ${ids.map((c) => `${c.num}${multiJob ? ` (job ${c.jobId})` : ''}=${c.kpi}`).join(', ') || 'chưa có'}`;
+        return (
+          <div key={d} style={{ border: '1px solid #b9d3f0', background: '#f3f8fe', margin: '6px 0', padding: 6 }}>
+            <div>
+              <b>{d}{d === today ? ' (hôm nay)' : ''}</b> · {names.join(' + ')} · KPI cả ngày <b>{total}/{target} ({Math.round((total / target) * 100)}%)</b>
+              {rework ? ` · trong đó rework ${rework}` : ''} · {ids.length} ID
+            </div>
+            <div style={{ fontSize: 12, margin: '3px 0' }}>
+              {ids.length ? ids.map((c) => (
+                <span key={c.key} style={{ display: 'inline-block', marginRight: 10 }} title={`${c.label} · ca ${c.owner}${c.rework ? ' · rework' : ''}`}>
+                  <b>{c.num}</b>{multiJob ? <span style={{ color: '#999' }}> (job {c.jobId})</span> : null} {c.label} <b>{c.kpi}</b>{c.rework ? ' ↺' : ''}
+                </span>
+              )) : <span style={{ color: '#666' }}>Chưa upload ID nào trong ngày.</span>}
+            </div>
+            <Copy text={text} />
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 /** Tab "Ca / KPI": ca đang chạy (tính trực tiếp) và lịch sử các ca đã kết thúc. */
 export function ShiftPanel() {
   const { active, history } = useShifts();
@@ -147,6 +185,7 @@ ${kpiText(k)}`} />{' '}
           </p>
         ) : null;
       })()}
+      <DaySummary shifts={[...(active ? [active] : []), ...history]} />
       {active ? (
         <>
           <h4 style={{ margin: '6px 0' }}>Ca đang chạy</h4>

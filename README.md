@@ -21,7 +21,7 @@ Extension cho trình duyệt **Edge / Chrome** (và bản thử cho Firefox) gi�
 | **Bảng object** | Danh sách object của job kèm số frame, cảnh báo, khoảng cách tới xe, attribute (dấu **!** cạnh attribute = object có gợi ý đổi attribute); lọc và sắp xếp; dòng tên cột luôn hiện khi cuộn xuống. |
 | **Batch Review** | Xem một object qua nhiều frame cùng lúc, 3 hình chiếu (Trên / Bên / Trước). Kéo thả để dời, đổi kích thước, xoay box; zoom bằng con lăn, giữ chuột phải kéo để dời khung nhìn. |
 | **Keyframe & outside** | Khoá / mở khoá keyframe, đánh dấu outside (box được lưu lại để trả về đúng chỗ cũ). |
-| **Cảnh báo & gợi ý** | Box lệch khỏi cụm điểm (có box gợi ý, bấm A để nhận), trôi box, đi xa bất thường, chồng lấn, đáy box lơ lửng / chìm so với mặt đường, ít điểm, outside quá lâu (có nút tách ID). |
+| **Cảnh báo & gợi ý** | Box lệch khỏi cụm điểm (có box gợi ý, bấm A để nhận), trôi box, đi xa / đổi độ cao bất thường, đáy box lệch so với box xung quanh (Z1), chồng lấn, đáy box lơ lửng / chìm so với mặt đường, ít điểm, outside quá lâu (có nút tách ID). |
 | **Mặt đường** | Mỗi frame chọn đúng 1 nguồn mặt đường cho Ground snap / lock: **local** (đo riêng quanh object), **ego** (z = 0) hoặc **patchwork++**; công tắc *hiện cả 3* để so sánh; hệ thống gợi ý nguồn (xem [mục dưới](#mặt-đường-local--ego--patchwork)). |
 | **Threshold** | Bạn tự đặt các rule cảnh báo; xuất / nạp toàn bộ cài đặt ra file `setting.json`. |
 | **Dynamic size** | Chọn class nào được đổi kích thước theo từng frame, class nào dùng một kích thước cho cả object. |
@@ -73,7 +73,7 @@ Tool **không kèm sẵn con số ngưỡng nào**. Mỗi loại lỗi là một
 
 - **Đối tượng:** tất cả, một class (danh sách lấy từ nhãn của job đang mở), hoặc một object cụ thể.
 - **Quy tắc:** `>`, `>=`, `<`, `<=`, `=`, `!=`. Một số thuộc tính chỉ cho các quy tắc hợp lý (ví dụ IoU chỉ có `>`, `>=`).
-- **Mã lỗi:** S (kích thước không đồng bộ), K (kích thước), Z (độ cao), H (đổi hướng), D (quá xa), O (chồng lấn), T (trôi box), Y (đi xa bất thường), và lệch / ít điểm, đáy lơ lửng / chìm, outside liên tục. Chữ ký hiệu ở đầu mỗi mục **sửa được**; lỗi chưa có mã (trôi box, đáy lơ lửng / chìm, outside liên tục) hiện **NULL**, điền 1–3 ký tự nếu muốn đặt mã (để trống là NULL).
+- **Mã lỗi:** S (kích thước không đồng bộ), K (kích thước), Z (độ cao), Z1 (đáy box lệch so với các box xung quanh cùng frame), H (đổi hướng), D (quá xa), O (chồng lấn), T (trôi box), Y (đi xa hoặc đổi độ cao bất thường), và lệch / ít điểm, đáy lơ lửng / chìm, outside liên tục. Chữ ký hiệu ở đầu mỗi mục **sửa được**; lỗi chưa có mã (trôi box, đáy lơ lửng / chìm, outside liên tục) hiện **NULL**, điền 1–3 ký tự nếu muốn đặt mã (để trống là NULL).
 - **S** chỉ xét object có Dynamic size đang **tắt** (xem tab Dynamic size).
 - **Xuất setting.json / Nạp setting.json…** lưu hoặc nạp toàn bộ cài đặt (rule, ký hiệu, Dynamic size). Đây là file riêng của bạn, **đừng đưa lên GitHub công khai** (đã nằm trong `.gitignore`).
 

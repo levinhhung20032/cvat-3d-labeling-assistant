@@ -18,7 +18,7 @@ import { findLateStart } from '../shared/splitId';
 /** ID đã xem trong Batch Review: gạch chân. */
 const SEEN_STYLE = { textDecoration: 'underline', textDecorationThickness: 2, textUnderlineOffset: 2 } as const;
 
-type SortKey = 'num' | 'assigned' | 'outside' | 'missing' | 'jumps' | 'issues' | 'drift' | 'overlap' | 'dist';
+type SortKey = 'num' | 'assigned' | 'outside' | 'missing' | 'jumps' | 'issues' | 'z1' | 'drift' | 'overlap' | 'dist';
 /** Dòng đang chọn và dòng so le (giao diện tối / xám đảo màu cả trang nên màu sáng vẫn dùng được). */
 const SEL_BG = '#bcd7ff';
 /** Ô có flag (thiếu keyframe outside, đi xa bất thường, lỗi luật, trôi box, chồng lấn, gợi ý attribute): nền cam nhạt, đè lên màu dòng (kể cả dòng đang chọn). */
@@ -29,7 +29,9 @@ const HEAD_CELL: React.CSSProperties = { position: 'sticky', top: 0, zIndex: 5, 
 /** Khoảng cách tâm box tới ego (gốc toạ độ, trên mặt phẳng ngang) và frame đo. */
 interface Dist { d: number; frame: number }
 
-const KIND_NAMES: Record<string, string> = { ...ISSUE_NAMES, W: 'Ít điểm ở giữa (frame ít điểm nằm giữa hai frame ổn, box nội suy; không tính là P)', P: 'Ít điểm trong box (theo ngưỡng ở tab Threshold, chỉ các frame đã tải point cloud)', T: 'Trôi box', M: 'Đi xa bất thường' };
+const z1Of = (r: { issuesByKind: Record<string, number> }) => r.issuesByKind.Z1 ?? 0;
+const qcOf = (r: { issues: number; issuesByKind: Record<string, number> }) => r.issues - z1Of(r);
+const KIND_NAMES: Record<string, string> = { ...ISSUE_NAMES, P: 'Ít điểm trong box (theo ngưỡng ở tab Threshold, chỉ các frame đã tải point cloud)', T: 'Trôi box', M: 'Đi xa / đổi độ cao bất thường' };
 /** Tooltip cột luật QC: số frame lỗi theo từng mã. */
 const issueTip = (by: Record<string, number>) => {
   const lines = Object.entries(by).filter(([, n]) => n > 0).map(([k, n]) => `${symLabel(k)} — ${KIND_NAMES[k] ?? k}: ${n} frame`);
@@ -138,7 +140,7 @@ export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flags
   const labels = useMemo(() => [...new Set(rows.map((r) => r.label))], [rows]);
   const shown = useMemo(() => {
     const r = rows.filter((x) => (!label || x.label === label) && (!onlyMissing || x.missing > 0) && (!onlyJumps || x.jumps > 0) && (!onlyMade || x.made !== null) && (!onlyHints || h(x) > 0) && (!onlyOverlap || ov(x) > 0));
-    return r.sort((a, b) => (sort === 'num' ? a.num - b.num : sort === 'dist' ? byDist(a, b) : sort === 'overlap' ? ov(b) - ov(a) : b[sort] - a[sort]));
+    return r.sort((a, b) => (sort === 'num' ? a.num - b.num : sort === 'dist' ? byDist(a, b) : sort === 'overlap' ? ov(b) - ov(a) : sort === 'z1' ? z1Of(b) - z1Of(a) : sort === 'issues' ? qcOf(b) - qcOf(a) : b[sort] - a[sort]));
   }, [rows, hints, overlapFrames, label, sort, onlyMissing, onlyJumps, onlyHints, onlyOverlap, onlyMade, dist, distAsc]);
   // Flag: object có ít nhất một ô được tô (cột thiếu KF outside, đi xa, luật QC, trôi box, chồng lấn, và gợi ý attribute `!`).
   const flagged = (r: ObjectRow) => r.missing > 0 || r.jumps > 0 || r.issues > 0 || r.drift > 0 || ov(r) > 0 || h(r) > 0;
@@ -242,7 +244,7 @@ export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flags
       </div>
       <table ref={tableRef} style={{ borderCollapse: 'collapse', width: '100%' }}>
         <thead>
-          <tr>{th('num', 'ID')}<th style={{ ...headCell, textAlign: 'left' }}>Nhãn</th><th style={{ ...headCell, textAlign: 'left' }} title="Attribute của object; attribute đổi theo frame hiện các giá trị lần lượt (a → b)">Attribute</th>{th('assigned', 'Được gán')}{th('outside', 'Outside')}{th('missing', 'Outside thiếu KF')}{th('jumps', '⚠ đi xa')}{th('issues', incomplete.size ? '⚠ luật QC ⏳' : '⚠ luật QC', incomplete.size ? `${incomplete.size} object chưa đủ dữ liệu (viền vàng). ${pendingTip}` : undefined)}{th('drift', '⚠ trôi box')}{th('overlap', '⚠ chồng lấn')}{th('dist', '📏 cách ego (m)', distMode === 'frame' ? `Khoảng cách tới ego tại frame ${distFrame}; — = không có box ở frame đó (luôn xếp cuối)` : 'Khoảng cách gần nhất tới ego trên cả track')}<th style={{ ...headCell, textAlign: 'left' }}>Khoảng frame</th><th style={headCell}>KF</th><th style={headCell} /></tr>
+          <tr>{th('num', 'ID')}<th style={{ ...headCell, textAlign: 'left' }}>Nhãn</th><th style={{ ...headCell, textAlign: 'left' }} title="Attribute của object; attribute đổi theo frame hiện các giá trị lần lượt (a → b)">Attribute</th>{th('assigned', 'Được gán')}{th('outside', 'Outside')}{th('missing', 'Outside thiếu KF')}{th('jumps', '⚠ đi xa')}{th('issues', incomplete.size ? '⚠ luật QC ⏳' : '⚠ luật QC', incomplete.size ? `${incomplete.size} object chưa đủ dữ liệu (viền vàng). ${pendingTip}` : undefined)}{th('z1', `⚠ ${symLabel('Z1')}`, 'Đáy box lệch so với các box xung quanh (cùng frame), ngưỡng ở tab Threshold')}{th('drift', '⚠ trôi box')}{th('overlap', '⚠ chồng lấn')}{th('dist', '📏 cách ego (m)', distMode === 'frame' ? `Khoảng cách tới ego tại frame ${distFrame}; — = không có box ở frame đó (luôn xếp cuối)` : 'Khoảng cách gần nhất tới ego trên cả track')}<th style={{ ...headCell, textAlign: 'left' }}>Khoảng frame</th><th style={headCell}>KF</th><th style={headCell} /></tr>
         </thead>
         <tbody>
           {shown.map((r, i) => (
@@ -268,7 +270,8 @@ export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flags
               <td>{r.assigned}</td><td>{r.outside}</td>
               <td style={{ color: r.missing ? '#b00' : undefined, fontWeight: r.missing ? 700 : 400, ...(r.missing ? FLAG_CELL : null) }}>{r.missing}</td>
               <td style={{ color: r.jumps ? '#a05a00' : undefined, fontWeight: r.jumps ? 700 : 400, ...(r.jumps ? FLAG_CELL : null) }}>{r.jumps}</td>
-              <td style={{ color: r.issues ? '#a0006e' : undefined, fontWeight: r.issues ? 700 : 400, ...(incomplete.has(r.num) ? PENDING_STYLE : r.issues ? FLAG_CELL : null) }} title={incomplete.has(r.num) ? `${pendingTip}\n${issueTip(r.issuesByKind)}` : issueTip(r.issuesByKind)}>{r.issues}</td>
+              <td style={{ color: qcOf(r) ? '#a0006e' : undefined, fontWeight: qcOf(r) ? 700 : 400, ...(incomplete.has(r.num) ? PENDING_STYLE : qcOf(r) ? FLAG_CELL : null) }} title={incomplete.has(r.num) ? `${pendingTip}\n${issueTip(r.issuesByKind)}` : issueTip(r.issuesByKind)}>{qcOf(r)}</td>
+              <td style={{ color: z1Of(r) ? '#a0006e' : undefined, fontWeight: z1Of(r) ? 700 : 400, ...(z1Of(r) ? FLAG_CELL : null) }} title={z1Of(r) ? `${symLabel('Z1')} — ${KIND_NAMES.Z1}: ${z1Of(r)} frame` : 'Không có lỗi đáy box'}>{z1Of(r)}</td>
               <td style={{ color: r.drift ? '#a0006e' : undefined, fontWeight: r.drift ? 700 : 400, ...(r.drift ? FLAG_CELL : null) }} title={r.drift ? `Toạ độ ego của box không đổi trong khi xe chạy (box đi theo xe), frame ${r.driftFrames.join(', ')}` : 'Không có trôi box'}>{r.drift}</td>
               <td style={{ color: ov(r) ? '#b45a00' : undefined, fontWeight: ov(r) ? 700 : 400, ...(ov(r) ? FLAG_CELL : null) }} title={overlapPairs.filter((p) => p.a === r.num || p.b === r.num).map((p) => `#${p.a}–#${p.b}: frame ${p.frames.join(', ')} (tối đa ${fmtIou(p.max)})`).join('\n')}>{ov(r)}</td>
               {(() => {

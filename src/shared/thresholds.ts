@@ -2,6 +2,7 @@ import { DEFAULT_DRIFT } from './drift';
 import { DEFAULT_FIT } from './fit';
 import { DEFAULT_GROUND } from './ground';
 import { DEFAULT_MOTION } from './motion';
+import { DEFAULT_SURROUND } from './surround';
 import { allowedKey, DEFAULT_OVERLAP } from './overlap';
 import { RULESET } from './qcrules';
 import { BIG, type Rule, type SectionCode } from './alertRules';
@@ -20,11 +21,12 @@ export const SECTIONS: { id: SectionId; title: string; about: string; code?: Sym
   { id: 'S', code: 'S', title: 'Scale không đồng bộ', about: 'Size không đồng bộ: object TẮT Dynamic size phải cùng một kích thước ở mọi frame. Frame có dài, rộng hoặc cao khác kích thước chung của object (trung vị các frame) quá dung sai thì báo. Rule: chọn đối tượng và dung sai.' },
   { id: 'K', code: 'K', title: 'Kích thước ngoài ngưỡng', about: 'Dài × rộng × cao của box. Rule đặt cho tất cả, một class, class · attribute = giá trị (vd. Vehicle · type = truck) hoặc một object: ví dụ Dài > ngưỡng thì báo.' },
   { id: 'Z', code: 'Z', title: 'Độ cao tâm box', about: 'z của tâm box (m, gốc ở mặt đất dưới xe).' },
+  { id: 'Z1', code: 'Z1', title: 'Đáy box lệch so với box xung quanh', about: 'Đáy box (z − cao/2) ở độ cao bất thường so với đáy trung vị các box khác quanh nó ở cùng frame. Rule: lệch hơn ngưỡng thì báo. Tham số: bán kính và số box xung quanh tối thiểu.' },
   { id: 'H', code: 'H', title: 'Đổi hướng đột ngột', about: 'Yaw đổi giữa hai frame liền nhau.' },
   { id: 'D', code: 'D', title: 'Quá xa', about: 'Khoảng cách 3D từ tâm box tới gốc toạ độ.' },
   { id: 'O', code: 'O', title: 'Chồng lấn', about: 'Hai box có phần giao nhìn từ trên: báo khi IoU vượt ngưỡng của class (0 = báo mọi cặp có phần giao). Tham số: phần giao nhỏ hơn mức tối thiểu thì bỏ qua.' },
-  { id: 'T', code: 'T', title: 'Trôi box (mặc định không có mã)', about: 'Box giữ nguyên toạ độ ego trong khi xe chạy (box đi theo xe). Rule: giữ nguyên từ ngần này frame thì báo.' },
-  { id: 'M', code: 'M', title: 'Đi xa bất thường', about: 'Vị trí lệch so với dự đoán từ chuyển động các frame trước. Rule theo class hoặc tất cả.' },
+  { id: 'T', code: 'T', title: 'Trôi box', about: 'Box giữ nguyên toạ độ ego trong khi xe chạy (box đi theo xe). Rule: giữ nguyên từ ngần này frame thì báo.' },
+  { id: 'M', code: 'M', title: 'Đi xa / đổi độ cao bất thường', about: 'Vị trí (hoặc độ cao z) lệch so với dự đoán từ chuyển động các frame trước. Rule theo class hoặc tất cả.' },
   { id: 'F', code: 'P', title: 'Lệch / ít điểm', about: 'Box lệch khỏi cụm điểm (nhiều điểm sát ngoài box) hoặc có ít điểm bên trong. Đổi mục này làm tính lại số liệu nền của mọi frame.' },
   { id: 'G', code: 'G', title: 'Đáy lơ lửng / chìm', about: 'Đáy box so với mặt đường đo riêng cho từng object. Đổi mục này làm tính lại số liệu nền của mọi frame.' },
   { id: 'X', code: 'X', title: 'Outside liên tục (tách ID)', about: 'Outside liên tục từ ngần này frame rồi có box lại thì gợi ý tách ID.' },
@@ -57,6 +59,8 @@ export const FIELDS: Field[] = [
   field('T.movers', 'T', 'Số object đang nhích tối thiểu', { min: 1, max: 50, step: 1, int: true, help: 'Ít hơn thì không đủ cơ sở để tin xe đang chạy' }, () => DEFAULT_DRIFT.minMovers, (v) => { DEFAULT_DRIFT.minMovers = v; }),
   field('T.supMin', 'T', 'Bỏ báo khi trong box còn ≥', { unit: 'điểm', min: 1, max: 1000, step: 1, int: true, help: 'Box còn đủ điểm (và đủ tỉ lệ so với frame neo) = vật chạy cùng vận tốc với xe' }, () => DEFAULT_DRIFT.supportMin, (v) => { DEFAULT_DRIFT.supportMin = v; }),
   field('T.supRatio', 'T', '… và ≥ tỉ lệ điểm ở frame neo', { min: 0, max: 1, step: 0.05 }, () => DEFAULT_DRIFT.supportRatio, (v) => { DEFAULT_DRIFT.supportRatio = v; }),
+  field('Z1.radius', 'Z1', 'Bán kính tìm box xung quanh', { unit: 'm', min: 1, max: 100, step: 0.5, help: 'Tâm các box khác (cùng frame) trong mặt phẳng ngang cách box đang xét không quá bán kính này' }, () => DEFAULT_SURROUND.radius, (v) => { DEFAULT_SURROUND.radius = v; }),
+  field('Z1.min', 'Z1', 'Số box xung quanh tối thiểu', { min: 1, max: 50, step: 1, int: true, help: 'Ít hơn thì không đủ cơ sở để so, không báo' }, () => DEFAULT_SURROUND.minBoxes, (v) => { DEFAULT_SURROUND.minBoxes = v; }),
   field('M.rel', 'M', 'Cho phép thêm theo quãng đường dự kiến', { unit: '×', min: 0, max: 3, step: 0.05, help: 'Tỉ lệ so với quãng đường dự kiến (vận tốc tương đối đổi dần)' }, () => DEFAULT_MOTION.rel, (v) => { DEFAULT_MOTION.rel = v; }),
   field('F.margin', 'F', 'Vùng xét quanh box', { unit: 'm', min: 0.1, max: 3, step: 0.05 }, () => DEFAULT_FIT.margin, (v) => { DEFAULT_FIT.margin = v; }),
   field('F.ratio', 'F', 'Tỉ lệ điểm ngoài / (trong + ngoài) tối thiểu', { min: 0, max: 1, step: 0.05 }, () => DEFAULT_FIT.ratio, (v) => { DEFAULT_FIT.ratio = v; }),
@@ -140,6 +144,8 @@ export function compileRules(rules: readonly Rule[]): void {
   DEFAULT_OVERLAP.defaultAllowed = 1;
   DEFAULT_MOTION.base = {};
   DEFAULT_MOTION.defaultBase = BIG;
+  DEFAULT_MOTION.zBase = {};
+  DEFAULT_MOTION.zDefault = BIG;
   DEFAULT_DRIFT.minHold = BIG;
   DEFAULT_FIT.minShell = BIG;
   DEFAULT_FIT.minInside = 0;
@@ -155,6 +161,9 @@ export function compileRules(rules: readonly Rule[]): void {
       if (r.metric === 'iou') {
         if (r.target.t === 'all') { DEFAULT_OVERLAP.defaultAllowed = strict(DEFAULT_OVERLAP.defaultAllowed, r.value); }
         else { const k = classKeyOf(r.target.name); DEFAULT_OVERLAP.allowed[k] = strict(DEFAULT_OVERLAP.allowed[k] ?? 1, r.value); }
+      } else if (r.metric === 'motionDz') {
+        if (r.target.t === 'all') DEFAULT_MOTION.zDefault = strict(DEFAULT_MOTION.zDefault, r.value);
+        else { const k = r.target.name.trim().toLowerCase(); DEFAULT_MOTION.zBase[k] = strict(DEFAULT_MOTION.zBase[k] ?? BIG, r.value); }
       } else if (r.metric === 'motionDev') {
         if (r.target.t === 'all') DEFAULT_MOTION.defaultBase = strict(DEFAULT_MOTION.defaultBase, r.value);
         else { const k = r.target.name.trim().toLowerCase(); DEFAULT_MOTION.base[k] = strict(DEFAULT_MOTION.base[k] ?? BIG, r.value); }
@@ -168,8 +177,9 @@ export function compileRules(rules: readonly Rule[]): void {
     else if (r.metric === 'ptsInside') DEFAULT_FIT.minInside = Math.max(DEFAULT_FIT.minInside, downInt(r.op, r.value));
     else if (r.metric === 'floatGap') DEFAULT_GROUND.floatTol = strict(DEFAULT_GROUND.floatTol, r.value);
     else if (r.metric === 'sinkGap') DEFAULT_GROUND.sinkTol = strict(DEFAULT_GROUND.sinkTol, r.value);
-    else if (r.metric === 'outsideGap') splitConfig.minFrames = strict(splitConfig.minFrames, Math.max(2, upInt(r.op, r.value)));
+    else if (r.metric === 'outsideGap') splitConfig.minFrames = strict(splitConfig.minFrames, Math.max(1, upInt(r.op, r.value)));
   }
+  if (splitConfig.minFrames === BIG) splitConfig.minFrames = 1; // chưa có luật outsideGap: mặc định như luật >= 1
   // Mức "tất cả" của IoU / đi xa áp cho mọi nhóm chưa có rule riêng: nhóm đã có rule riêng thì giữ rule riêng (đặt ở vòng class).
 }
 

@@ -30,7 +30,7 @@ describe('mặc định: không rule thì không báo', () => {
     expect(DEFAULT_DRIFT.minHold).toBe(BIG);
     expect(DEFAULT_FIT.minInside).toBe(0);
     expect(DEFAULT_GROUND.floatTol).toBe(BIG);
-    expect(splitConfig.minFrames).toBe(BIG);
+    expect(splitConfig.minFrames).toBe(1); // chưa có luật outsideGap: như luật >= 1
   });
 });
 
@@ -241,5 +241,14 @@ describe('file setting.json và class của job', () => {
     expect(m.attrRules).toEqual({ 'Vehicle|x=1': 'static', 'Bus|door=open': 'static' });
     expect(dynForJob(m, ['bus']).classes).toEqual({ bus: false });
     expect(dynForJob(m, ['bus']).attrRules).toEqual({ 'bus|door=open': 'static' });
+  });
+});
+
+describe('luật outsideGap', () => {
+  it('cho phép ngưỡng 1 (>= 1)', () => {
+    installRules([rule('outsideGap', '>=', 1)], 1);
+    expect(splitConfig.minFrames).toBe(1);
+    installRules([rule('outsideGap', '>', 3)], 1);
+    expect(splitConfig.minFrames).toBe(4);
   });
 });

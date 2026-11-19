@@ -600,7 +600,7 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
         {ignoredOverlap.map((o) => <span key={`ig${o}`} style={{ ...CHIP, background: '#e5e7eb', color: '#4b5563' }} title={`Cặp chồng lấn với #${o} ở frame này đã được bỏ qua (không báo lỗi). Hoàn lại ở dòng ghi chú bên dưới cột.`}>⊘ O #{o} bỏ qua</span>)}
         {overlap.map((o) => <span key={o.other} style={{ ...CHIP, background: '#ffd9a8', color: '#5a2d00' }} title={`Chồng với #${o.other} (IoU ${fmtIou(o.ratio)}). Kéo box cam nét đứt trong view để dời object #${o.other} ở frame này (giữ Shift để kéo ở vùng chồng lên box đang xét).`}>⚠ O #{o.other}</span>)}
         {fileFlags.filter((ff) => ff.state === 'open').map((ff) => <span key={ff.kind} style={{ ...CHIP, background: '#ffd6d6', color: '#600' }} title="Flag từ file QC mà tool không tự phát hiện">QC {ff.kind}</span>)}
-        {shownMotion && <span style={{ ...CHIP, background: '#ffe9c7', color: '#6b3a00' }} title={shownMotion.message}>⚠ {sym('M')} đi xa</span>}
+        {shownMotion && <span style={{ ...CHIP, background: '#ffe9c7', color: '#6b3a00' }} title={shownMotion.message}>⚠ {sym('M')} {shownMotion.vertical && !shownMotion.horizontal ? 'đổi độ cao' : 'đi xa'}</span>}
         {kind === 'measured' && snap?.warn && <span style={{ ...CHIP, background: '#eaf6d8', color: '#2d5a00' }} title={groundTip(snap)}>⏬ {groundAction(snap)}</span>}
         {advice && (advice.kind !== kind || advice.conflict) && (
           <span style={{ ...CHIP, background: advice.conflict ? '#fff0c2' : '#e6f0ff', color: '#233' }} title={advice.detail}>
@@ -1132,12 +1132,8 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
     for (const d of drift.get(num) ?? []) {
       m.set(d.f, [...(m.get(d.f) ?? []), { kind: 'T', message: `trôi box: toạ độ theo ego không đổi trong khi xe đã đi ${d.dist.toFixed(1)} m (box đi theo xe thay vì ở lại chỗ vật đứng yên); bỏ qua nếu vật thật sự chạy cùng vận tốc với xe` }]);
     }
-    // Outside ở giữa (mã T): frame ít điểm nằm giữa hai frame không ít điểm → nên đặt outside
-    for (const f of midOut.get(num) ?? []) {
-      m.set(f, [...(m.get(f) ?? []), { kind: 'W', message: 'ít điểm ở giữa: frame này ít điểm nhưng các frame ổn nằm cả hai phía (box nội suy). Chuột phải vào chip ít điểm (P) để bỏ qua' }]);
-    }
     return m;
-  }, [track, row?.label, start, stop, drift, midOut, num, thrVer]);
+  }, [track, row?.label, start, stop, drift, num, thrVer]);
   // Flag từ file QC đã nạp cho object này, theo frame; "đã hết" = tool không còn thấy lỗi (ở dữ liệu hiện tại, kể cả nháp).
   const qcImports = useQcImports();
   const flagMarks = useFlagMarks();

@@ -16,11 +16,11 @@ export type TargetKind = 'all' | 'class' | 'attr' | 'object';
 export type Target = { t: 'all' } | { t: 'class'; name: string } | { t: 'attr'; name: string; attr: string; value: string } | { t: 'object'; job: number; num: number };
 
 /** Mã mục lỗi (khoá nội bộ). Ký hiệu hiển thị chỉnh được (symbols.ts): M hiện là Y, F hiện là P. */
-export type SectionCode = 'S' | 'K' | 'Z' | 'H' | 'D' | 'O' | 'T' | 'M' | 'F' | 'G' | 'X';
+export type SectionCode = 'S' | 'K' | 'Z' | 'Z1' | 'H' | 'D' | 'O' | 'T' | 'M' | 'F' | 'G' | 'X';
 
 export type MetricId =
-  | 'sizeDev' | 'length' | 'width' | 'height' | 'z' | 'yawJump' | 'distance'
-  | 'iou' | 'holdFrames' | 'motionDev' | 'ptsInside' | 'ptsOutside' | 'floatGap' | 'sinkGap' | 'outsideGap';
+  | 'sizeDev' | 'length' | 'width' | 'height' | 'z' | 'botDev' | 'yawJump' | 'distance'
+  | 'iou' | 'holdFrames' | 'motionDev' | 'motionDz' | 'ptsInside' | 'ptsOutside' | 'floatGap' | 'sinkGap' | 'outsideGap';
 
 export interface MetricDef {
   id: MetricId;
@@ -48,16 +48,18 @@ export const METRICS: MetricDef[] = [
   { id: 'width', section: 'K', label: 'Rộng (W)', unit: 'm', ops: ALL_OPS, targets: BOX, min: 0, max: BIG, step: 0.05, box: true },
   { id: 'height', section: 'K', label: 'Cao (H)', unit: 'm', ops: ALL_OPS, targets: BOX, min: 0, max: BIG, step: 0.05, box: true },
   { id: 'z', section: 'Z', label: 'z của tâm box', unit: 'm', ops: ALL_OPS, targets: BOX, min: -BIG, max: BIG, step: 0.1, box: true },
+  { id: 'botDev', section: 'Z1', label: 'Đáy box lệch so với đáy các box xung quanh (cùng frame)', unit: 'm', ops: OVER_OPS, targets: BOX, min: 0, max: BIG, step: 0.05, box: true, help: 'Độ lệch tuyệt đối giữa đáy box (z − cao/2) và đáy trung vị của các box khác trong bán kính ở tab Threshold. Cần đủ số box xung quanh tối thiểu, không đủ thì không xét.' },
   { id: 'yawJump', section: 'H', label: 'Yaw đổi so với frame trước', unit: '°', ops: ALL_OPS, targets: BOX, min: 0, max: BIG, step: 1, box: true },
   { id: 'distance', section: 'D', label: 'Khoảng cách 3D tới gốc toạ độ', unit: 'm', ops: ALL_OPS, targets: BOX, min: 0, max: BIG, step: 1, box: true },
   { id: 'iou', section: 'O', label: 'IoU hình chiếu từ trên của hai box', unit: '', ops: OVER_OPS, targets: AC, min: 0, max: 1, step: 0.05, help: '0 = báo mọi cặp có phần giao. Cặp khác nhóm lấy mức chặt hơn.' },
   { id: 'holdFrames', section: 'T', label: 'Số frame liên tiếp box giữ nguyên toạ độ ego', unit: 'frame', ops: OVER_OPS, targets: A, min: 2, max: BIG, step: 1, int: true },
   { id: 'motionDev', section: 'M', label: 'Lệch vị trí so với dự đoán từ các frame trước', unit: 'm', ops: OVER_OPS, targets: AC, min: 0.05, max: BIG, step: 0.05 },
+  { id: 'motionDz', section: 'M', label: 'Lệch độ cao (z tâm) so với dự đoán từ các frame trước', unit: 'm', ops: OVER_OPS, targets: AC, min: 0.05, max: BIG, step: 0.05, help: 'Y cũng báo khi độ cao của box đổi bất thường: z tâm box lệch quá ngưỡng (mỗi frame bỏ trống nới thêm) so với z dự đoán từ chuyển động các frame trước.' },
   { id: 'ptsInside', section: 'F', label: 'Số điểm trong box', unit: 'điểm', ops: UNDER_OPS, targets: A, min: 0, max: 1000, step: 1, int: true, help: 'Ít điểm: báo khi số điểm trong box thấp hơn ngưỡng.' },
   { id: 'ptsOutside', section: 'F', label: 'Số điểm sát ngoài box (báo lệch)', unit: 'điểm', ops: OVER_OPS, targets: A, min: 1, max: BIG, step: 1, int: true },
   { id: 'floatGap', section: 'G', label: 'Đáy box CAO hơn mặt đường', unit: 'm', ops: OVER_OPS, targets: A, min: 0, max: BIG, step: 0.01 },
   { id: 'sinkGap', section: 'G', label: 'Đáy box THẤP hơn mặt đường', unit: 'm', ops: OVER_OPS, targets: A, min: 0, max: BIG, step: 0.01 },
-  { id: 'outsideGap', section: 'X', label: 'Số frame outside liên tục rồi có box lại', unit: 'frame', ops: OVER_OPS, targets: A, min: 2, max: BIG, step: 1, int: true },
+  { id: 'outsideGap', section: 'X', label: 'Số frame outside liên tục rồi có box lại', unit: 'frame', ops: OVER_OPS, targets: A, min: 1, max: BIG, step: 1, int: true },
 ];
 export const METRIC_BY_ID = new Map(METRICS.map((m) => [m.id, m]));
 export const metricsOf = (s: SectionCode) => METRICS.filter((m) => m.section === s);

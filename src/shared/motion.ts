@@ -6,6 +6,9 @@ export interface MotionConfig {
   /** Ngưỡng sai lệch tối thiểu (m) so với vị trí dự đoán, theo tên nhãn (chữ thường). */
   base: Record<string, number>;
   defaultBase: number;
+  /** Ngưỡng lệch ĐỘ CAO (z tâm box, m/frame) so với dự đoán, theo tên nhãn (chữ thường); mặc định rất lớn = không báo (cần rule `motionDz`). */
+  zBase: Record<string, number>;
+  zDefault: number;
   /** Cho phép sai lệch thêm theo tỉ lệ so với quãng đường dự kiến (vận tốc tương đối thay đổi dần). */
   rel: number;
   history: number; // số bước (frame có box) liền trước dùng để ước lượng vận tốc
@@ -15,14 +18,19 @@ export interface MotionConfig {
 export const DEFAULT_MOTION: MotionConfig = {
   base: { vehicles: 1.0, vehicle: 1.0, 'two-wheels': 0.8, pedestrian: 0.6, animal: 0.8, obstacle: 0.5 },
   defaultBase: 1.0,
+  zBase: {},
+  zDefault: 1e6,
   rel: 0.35,
   history: 3,
   lookback: 8,
 };
 
 export interface MotionWarning {
-  residual: number; // m: khoảng lệch so với vị trí dự đoán
+  residual: number; // m: khoảng lệch (ngang) so với vị trí dự đoán
   threshold: number; // m
+  horizontal: boolean; // đi xa bất thường (ngang)
+  vertical: boolean; // đổi độ cao bất thường (z tâm box lệch so với dự đoán)
+  dz: number; // m: z thực tế trừ z dự đoán (có dấu)
   step: number; // m/frame: bước thực tế
   typical: number; // m/frame: bước thường thấy ở các frame trước
   frames: number; // số frame trước dùng để dự đoán
@@ -37,6 +45,7 @@ export interface MotionWarning {
  * hoặc ít hơn 2 frame lịch sử thì không xét. Nếu giữa có khoảng outside (gap > 1) ngưỡng nới theo gap.
  * Chỉ báo khi vật đi XA HƠN thường lệ (bước thực tế > bước thường thấy); box đứng yên / chậm lại bất thường
  * là một vấn đề khác nên không báo ở đây.
+ * Ngoài ra báo "đổi độ cao bất thường" khi z của tâm box lệch quá ngưỡng `zBase` (m / frame) so với z dự đoán cũng bằng vận tốc đều.
  */
 export function motionJump(track: CvatTrack, f: number, label: string, cfg: MotionConfig = DEFAULT_MOTION): MotionWarning | null {
   const cur = stateAt(track, f).cuboid;
@@ -72,13 +81,17 @@ export function motionJump(track: CvatTrack, f: number, label: string, cfg: Moti
     }
   }
   const residual = Math.hypot(cur.x - pred.x, cur.y - pred.y);
-  const base = cfg.base[label.trim().toLowerCase()] ?? cfg.defaultBase;
+  const key = label.trim().toLowerCase();
+  const base = cfg.base[key] ?? cfg.defaultBase;
   const threshold = Math.max(base, cfg.rel * typical) * gap;
-  if (residual <= threshold) return null;
   const step = Math.hypot(cur.x - ref.x, cur.y - ref.y) / gap;
-  if (step <= typical) return null;
-  return {
-    residual, threshold, step, typical, frames: hist.length, pred,
-    message: `đi xa bất thường: lệch ${residual.toFixed(2)} m so với vị trí dự đoán từ ${hist.length} frame trước (bước ${step.toFixed(2)} m/frame, thường ~${typical.toFixed(2)})`,
-  };
+  const horizontal = residual > threshold && step > typical;
+  const dz = cur.z - pred.z;
+  const zThreshold = (cfg.zBase[key] ?? cfg.zDefault) * gap;
+  const vertical = Math.abs(dz) > zThreshold;
+  if (!horizontal && !vertical) return null;
+  const parts: string[] = [];
+  if (horizontal) parts.push(`đi xa bất thường: lệch ${residual.toFixed(2)} m so với vị trí dự đoán từ ${hist.length} frame trước (bước ${step.toFixed(2)} m/frame, thường ~${typical.toFixed(2)})`);
+  if (vertical) parts.push(`đổi độ cao bất thường: z lệch ${dz >= 0 ? '+' : '−'}${Math.abs(dz).toFixed(2)} m so với dự đoán từ ${hist.length} frame trước (> ${zThreshold.toFixed(2)} m)`);
+  return { residual, threshold, step, typical, frames: hist.length, pred, horizontal, vertical, dz, message: parts.join('; ') };
 }

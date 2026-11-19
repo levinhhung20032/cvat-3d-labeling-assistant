@@ -78,6 +78,7 @@ if (dev) {
   const m = JSON.parse(readFileSync('public/manifest.json', 'utf8'));
   m.name = `${m.name} (DEV)`;
   m.version_name = `${m.version}-dev.${Date.now().toString(36)}`;
+  m.permissions = [...m.permissions, 'alarms']; // móc DEV tự reload cần alarm để đánh thức service worker
   m.action.default_title = '[DEV] ' + m.action.default_title;
   writeFileSync(`${out}/manifest.json`, JSON.stringify(m, null, 2));
 } else {

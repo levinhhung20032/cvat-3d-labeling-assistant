@@ -14,7 +14,7 @@ const save = () => { try { if (Object.keys(map).length) kv.set(KEY, JSON.stringi
 /** Ký hiệu hiện ra của một loại lỗi (mã nội bộ S K Z H D O T M P). */
 export const sym = (kind: string): string => symbolOf(map, kind);
 /** Như `sym` nhưng loại lỗi chưa có mã (NULL: trôi box, đáy lơ lửng / chìm, outside liên tục) hiện bằng chữ thay vì để trống. */
-const NULL_NAMES: Record<string, string> = { T: 'trôi box', G: 'đáy lơ lửng / chìm', X: 'outside liên tục' };
+const NULL_NAMES: Record<string, string> = { G: 'đáy lơ lửng / chìm' };
 export const symLabel = (kind: string): string => sym(kind) || NULL_NAMES[kind] || kind;
 
 export const symbolStore = {

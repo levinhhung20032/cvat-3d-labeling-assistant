@@ -8,11 +8,12 @@ import type { CvatTrack } from './types';
  * S = scale không đồng bộ, K = kích thước ngoài ngưỡng, Z = z ngoài ngưỡng, H = đổi hướng đột ngột,
  * O = chồng lấn (tính ở overlap.ts), D = quá xa.
  */
-export type IssueKind = 'S' | 'K' | 'Z' | 'H' | 'O' | 'D';
+export type IssueKind = 'S' | 'K' | 'Z' | 'Z1' | 'H' | 'O' | 'D';
 export const ISSUE_NAMES: Record<IssueKind, string> = {
-  S: 'Scale không đồng bộ', K: 'Kích thước ngoài ngưỡng', Z: 'Z ngoài ngưỡng', H: 'Đổi hướng đột ngột', O: 'Chồng lấn', D: 'Quá xa',
+  S: 'Scale không đồng bộ', K: 'Kích thước ngoài ngưỡng', Z: 'Z ngoài ngưỡng', Z1: 'Đáy box lệch so với box xung quanh', H: 'Đổi hướng đột ngột', O: 'Chồng lấn', D: 'Quá xa',
 };
-export const ISSUE_KINDS = Object.keys(ISSUE_NAMES) as IssueKind[];
+/** Loại lỗi có trong file QC của dự án (Z1 là lỗi riêng của tool, không có trong file). */
+export const ISSUE_KINDS = (Object.keys(ISSUE_NAMES) as IssueKind[]).filter((k) => k !== 'Z1');
 
 export type ClassKey = 'vehicle' | 'two_wheel' | 'pedestrian';
 export type Range = [number, number];
@@ -32,6 +33,11 @@ export const SIZE_SYNC: { fn: ((track: CvatTrack, label: string, num?: number) =
  * chưa đặt thì rule theo attribute không khớp object nào.
  */
 export const ATTRS_OF: { fn: ((track: CvatTrack, frame: number) => Record<string, string>) | null } = { fn: null };
+/**
+ * Đáy các box KHÁC cùng frame quanh một box (cho lỗi Z1): panel đặt hàm theo toàn bộ object của job; chưa đặt thì không xét Z1.
+ * Trả về đáy trung vị (z − cao/2) của các box xung quanh, null nếu không đủ box. `num` là số thứ tự object đang xét (loại khỏi mốc).
+ */
+export const SURROUND: { fn: ((num: number, f: number, c: Cuboid) => number | null) | null } = { fn: null };
 export interface QcRuleConfig {
   size: Record<ClassKey, ClassSize>;
   sizeEps: number;
@@ -69,8 +75,8 @@ export function classKey(label: string): ClassKey | null {
   return null;
 }
 
-/** 'T' = trôi box (vật đứng yên mà box nhích; tính chéo giữa các frame ở drift.ts, không nằm trong file QC; không có ký hiệu hiển thị). 'W' = outside ở giữa (hiện chữ T): frame ít điểm nằm giữa hai frame không ít điểm. */
-export type ExtraKind = 'T' | 'W';
+/** 'T' = trôi box (vật đứng yên mà box nhích; tính chéo giữa các frame ở drift.ts, không nằm trong file QC; không có ký hiệu hiển thị). */
+export type ExtraKind = 'T';
 export interface FrameIssue { kind: IssueKind | ExtraKind; message: string }
 
 const wrapDeg = (r: number) => {
@@ -110,6 +116,10 @@ export function trackIssues(track: CvatTrack, label: string, frames: number[], c
       const p = boxes.get(f - 1);
       if (p) v.yawJump = Math.abs(wrapDeg(c.yaw - p.yaw));
       if (ref) v.sizeDev = Math.max(Math.abs(c.sx - ref.sx), Math.abs(c.sy - ref.sy), Math.abs(c.sz - ref.sz));
+      if (num !== undefined && SURROUND.fn && RULESET.rules.some((r) => r.metric === 'botDev')) {
+        const nb = SURROUND.fn(num, f, c);
+        if (nb !== null) v.botDev = Math.abs(c.z - c.sz / 2 - nb);
+      }
       const attrs = needAttrs ? ATTRS_OF.fn!(track, f) : undefined;
       for (const h of ruleHits(RULESET.rules, { job: RULESET.job, label, num, attrs }, v)) add(f, h.code as IssueKind, h.message);
       continue;

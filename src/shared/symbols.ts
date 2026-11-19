@@ -1,13 +1,13 @@
 /**
  * Ký hiệu hiển thị của các loại lỗi (chỉnh được ở tab Threshold). Mã nội bộ (khoá bỏ qua, so với file QC…) không đổi; chỉ chữ hiện ra đổi.
- * M = "đi xa bất thường" hiện là Y; P = ít điểm trong box; W (hiện chữ T) = outside ở giữa: frame ít điểm nằm giữa hai frame không ít điểm.
- * Trôi box (T), đáy lơ lửng / chìm (G), outside liên tục (X) mặc định CHƯA có ký hiệu (NULL = rỗng, chỉ cảnh báo bằng chữ); người dùng có thể điền 1–3 ký tự khi cần, để trống là NULL.
+ * M = "đi xa bất thường" hiện là Y; P = ít điểm trong box; X (outside liên tục) hiện chữ T.
+ * Trôi box (T, hiện mã Dr) có ký hiệu Dr. Đáy lơ lửng / chìm (G) mặc định CHƯA có ký hiệu (NULL = rỗng, chỉ cảnh báo bằng chữ); người dùng có thể điền 1–3 ký tự khi cần, để trống là NULL.
  */
-export const SYMBOL_KINDS = ['S', 'K', 'Z', 'H', 'D', 'O', 'W', 'M', 'P', 'T', 'G', 'X'] as const;
+export const SYMBOL_KINDS = ['S', 'K', 'Z', 'Z1', 'H', 'D', 'O', 'M', 'P', 'T', 'G', 'X'] as const;
 export type SymbolKind = (typeof SYMBOL_KINDS)[number];
-export const SYMBOL_DEFAULTS: Record<SymbolKind, string> = { S: 'S', K: 'K', Z: 'Z', H: 'H', D: 'D', O: 'O', W: 'T', M: 'Y', P: 'P', T: '', G: '', X: '' };
+export const SYMBOL_DEFAULTS: Record<SymbolKind, string> = { S: 'S', K: 'K', Z: 'Z', Z1: 'Z1', H: 'H', D: 'D', O: 'O', M: 'Y', P: 'P', T: 'Dr', G: '' , X: 'T' };
 /** Loại lỗi được phép để trống (NULL = chưa có ký hiệu). */
-export const NULLABLE_KINDS: readonly SymbolKind[] = ['T', 'G', 'X'];
+export const NULLABLE_KINDS: readonly SymbolKind[] = ['G'];
 
 export type SymbolMap = Partial<Record<SymbolKind, string>>;
 export const symbolOf = (m: SymbolMap, kind: string): string => (m as Record<string, string | undefined>)[kind] ?? (SYMBOL_DEFAULTS as Record<string, string>)[kind] ?? kind;
