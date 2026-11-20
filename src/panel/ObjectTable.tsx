@@ -41,9 +41,10 @@ const issueTip = (by: Record<string, number>) => {
 /** Cờ cảnh báo của một object (tính khi mở menu chuột phải): frame đi xa (lỗi D), frame ít điểm, và cờ sớm nhất (kind: motion / sparse / drift / overlap hoặc mã lỗi luật). */
 export interface ObjFlags { far: number[]; motion: number[]; sparse: number[]; mid: number[]; rules: [string, number[]][]; drift: number[]; overlapWith: number[]; first: { frame: number; kind: string } | null; pending: boolean }
 
-export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flagsOf, onIgnoreKind, onIgnoreAll, onOutside, onAcceptHints, onIgnoreMotion, onIgnoreMid, onOpenAt, rows, hints, overlapFrames, overlapPairs, onOpen, onSelect, selectedNum, onDelete, incomplete, tracks, labels: jobLabels, start, stop, cvatFrame }: {
+export function ObjectTable({ jobId, onRelocate, onJoin, locked, onLock, onUnlock, flagsOf, onIgnoreKind, onIgnoreAll, onOutside, onAcceptHints, onIgnoreMotion, onIgnoreMid, onOpenAt, rows, hints, overlapFrames, overlapPairs, onOpen, onSelect, selectedNum, onDelete, incomplete, tracks, labels: jobLabels, start, stop, cvatFrame }: {
   jobId: number;
   locked: readonly number[] | null; onLock: () => void; onUnlock: () => void; // khóa danh sách ID gốc (không xóa được)
+  onJoin: (numB: number, numA: number) => void; // nối ID: chép box của object num vào object khác, outside object num
   onRelocate: (num: number) => void; // thêm outside phía trước cho object xuất hiện muộn (giữ ID)
   flagsOf: (num: number) => ObjFlags; // menu chuột phải: cờ cảnh báo của object
   onOutside: (num: number, kind: 'far' | 'sparse') => void; // outside toàn bộ frame đi xa (lỗi D) / ít điểm của object
@@ -68,7 +69,8 @@ export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flags
   const wrapRef = useRef<HTMLDivElement>(null);
   const [ctx, setCtx] = useState<{ x: number; y: number; row: ObjectRow; flags: ObjFlags } | null>(null);
   const [sub, setSub] = useState<string | null>(null); // mục lỗi đang mở menu con (hover)
-  useEffect(() => { setSub(null); }, [ctx]);
+  const [joinTo, setJoinTo] = useState('');
+  useEffect(() => { setSub(null); setJoinTo(''); }, [ctx]);
   useEffect(() => {
     if (!ctx) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setCtx(null); };
@@ -336,6 +338,11 @@ export function ObjectTable({ jobId, onRelocate, locked, onLock, onUnlock, flags
               ))}
               <button role="menuitem" disabled={!first} onClick={run(() => first && onOpenAt(row.num, first.frame))} title="Mở Batch Review của object, cửa sổ bắt đầu ở frame có cờ cảnh báo sớm nhất (lỗi luật gồm D, đi xa bất thường, ít điểm, trôi box, chồng lấn)">⚑ Nhảy tới cờ cảnh báo đầu tiên{first ? ` (frame ${first.frame}: ${kindText})` : ' (không có)'}</button>
               <button role="menuitem" disabled={!lateOf.has(row.num)} onClick={run(() => onRelocate(row.num))} title={lateOf.has(row.num) ? `Object xuất hiện từ frame ${lateOf.get(row.num)}: giữ ID, thêm keyframe outside ở mọi frame trước đó. Có hộp xác nhận, chỉ nằm trong nháp.` : 'Chỉ dùng được cho object xuất hiện muộn (chưa có keyframe nào từ frame đầu job)'}>⇢ Outside phía trước (xuất hiện muộn, giữ ID)</button>
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center', padding: '2px 4px', fontSize: 12 }} title={`Nối ID: #${row.num} và object kia là cùng một vật. Chép toàn bộ box của #${row.num} (từ frame ${row.first ?? '?'}) vào object kia, rồi outside toàn bộ #${row.num}. Có hộp xác nhận, chỉ nằm trong nháp.`}>
+                ⇄ Nối #{row.num} vào #
+                <input type="number" min={1} value={joinTo} onChange={(e) => setJoinTo(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && Number(joinTo) > 0) run(() => onJoin(row.num, Number(joinTo)))(); }} style={{ width: 56 }} />
+                <button disabled={!(Number(joinTo) > 0) || Number(joinTo) === row.num || row.first === null} onClick={run(() => onJoin(row.num, Number(joinTo)))}>Nối</button>
+              </div>
               <hr />
               <button role="menuitem" onClick={run(() => onOpen(row.num, row.first))}>▶ Mở Batch Review (từ frame đầu)</button>
               <button role="menuitem" onClick={run(() => onSelect(row.num))} title="Chọn object này (CVAT chọn theo nếu đang bật đồng bộ)">◎ Chọn object trong tool và CVAT</button>

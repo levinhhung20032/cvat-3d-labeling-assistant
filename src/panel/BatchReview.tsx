@@ -10,7 +10,7 @@ import {
 import { referenceCuboid, stateAt, type FrameState } from '../shared/interp';
 import { resizeKeyframes, rotateAllKeyframes, translateKeyframes, upsertKeyframe as upsertKf } from '../shared/edit';
 import {
-  removeInnerKeyframes, restoreFrom, restoreOutsideRange, setOutsideFrom, setOutsideRange, toggleKeyframe,
+  removeInnerKeyframes, removeOutsideKeyframes, restoreFrom, restoreOutsideRange, setOutsideFrom, setOutsideRange, toggleKeyframe,
   type TrackChange,
 } from '../shared/keyframes';
 import type { PointCloud } from '../shared/pcd';
@@ -1412,19 +1412,17 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
       ? `Ground snap: đã hạ/nâng đáy box chạm mặt đường ở frame ${done.join(', ')}. Hoàn tác được.`
       : `Không có gì để snap${hoverRef.current !== null || selFrame !== null ? ` ở frame ${hoverRef.current ?? selFrame}` : ''} (đã nằm trên mặt đường, thiếu điểm mặt đường, mặt đường mơ hồ như có vỉa hè, hoặc lệch quá 1 m)${list.length === 1 && snapWhy.current ? `. Lý do: ${snapWhy.current}` : ''}.`);
   };
-  // Outside dài (≥ SPLIT_OUTSIDE_FRAMES frame) rồi có box lại: gợi ý tách ID, có hộp xác nhận (xem trước) trước khi áp.
+  // Outside dài (≥ SPLIT_OUTSIDE_FRAMES frame) rồi có box lại: gợi ý bỏ outside + gỡ keyframe cả đoạn, có hộp xác nhận trước khi áp.
   // thrVer: ngưỡng (rule "outsideGap" ở Cài đặt → Threshold) đổi thì tính lại; thiếu nó thì gợi ý không hiện / không mất tới khi object đổi
   const outGaps = useMemo(() => (track ? findLongOutsideGaps(track, start, stop) : []), [track, start, stop, thrVer]);
-  const splitAt = async (g: OutsideGap) => {
+  const clearGap = async (g: OutsideGap) => {
     if (!track) return;
-    const msg = `Tách ID object #${num}?\n\n`
-      + `• Outside ${g.len} frame (${g.from}–${g.to}), có box lại từ frame ${g.resume}.\n`
-      + `• Phần từ frame ${g.resume} trở đi thành object MỚI (cuối danh sách, chưa có trên CVAT tới khi upload).\n`
-      + `• Object #${num} giữ ID, giữ phần trước, và outside có keyframe từ frame ${g.resume} tới frame ${stop}.\n\n`
-      + 'Không xóa ID nào. Chỉ nằm trong nháp tới khi bạn upload.';
-    if (!await askConfirm({ title: `Tách ID object #${num}`, message: msg.slice(msg.indexOf('\n\n') + 2), confirmLabel: 'Tách ID' })) return;
-    const n = onSplit(num - 1, g.resume);
-    setNote(n === null ? 'Không tách được: frame này không phải keyframe có box ngay sau đoạn outside.' : `Đã tách: object mới #${n} (từ frame ${g.resume}); #${num} outside từ frame ${g.resume}. Nằm trong nháp, chưa upload.`);
+    if (!await askConfirm({
+      title: `Bỏ outside · object #${num}`,
+      message: `• Bỏ outside ${g.len} frame (${g.from}–${g.to}) và gỡ keyframe của các frame đó (như bấm O rồi K).\n• Các frame này trở về nội suy giữa box trước frame ${g.from} và box từ frame ${g.resume}.\n\nGiữ nguyên ID. Chỉ nằm trong nháp tới khi bạn upload, hoàn tác được.`,
+      confirmLabel: 'Bỏ outside',
+    })) return;
+    apply(removeOutsideKeyframes(track, g.from, g.to), `Đã bỏ outside và gỡ keyframe ${'{n}'} frame (${g.from}–${g.to}) của #${num}. Nằm trong nháp, chưa upload.`, 'Không gỡ được keyframe outside nào trong đoạn này.');
   };
   const lateStart = useMemo(() => (track ? findLateStart(track, start, stop) : null), [track, start, stop]);
   const relocateLate = async () => {
@@ -1834,13 +1832,13 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
             </span>
           )}
           {outGaps.map((g) => (
-            <span key={g.from} style={{ color: '#7a1f1f', fontWeight: 600 }} title={`Outside liên tục ${g.len} frame (${g.from}–${g.to}) rồi có box lại từ frame ${g.resume}. Từ ${SPLIT_OUTSIDE_FRAMES} frame trở lên nên tách ID (guideline).`}>
+            <span key={g.from} style={{ color: '#7a1f1f', fontWeight: 600 }} title={`Outside liên tục ${g.len} frame (${g.from}–${g.to}) rồi có box lại từ frame ${g.resume}. Từ ${SPLIT_OUTSIDE_FRAMES} frame trở lên nên bỏ outside cả đoạn.`}>
               ⚠ outside {g.len} frame ({g.from}–{g.to}){' '}
               <button
-                onClick={() => splitAt(g)}
+                onClick={() => clearGap(g)}
                 style={{ padding: '0 4px', fontWeight: 600 }}
-                title={`Tách ID: phần từ frame ${g.resume} thành object MỚI (nằm cuối danh sách, chưa lên CVAT cho tới khi upload); object #${num} giữ phần trước và outside có keyframe tới cuối job. Có hộp xác nhận, hoàn tác bằng cách không upload nháp.`}
-              >✂ tách ID từ frame {g.resume}</button>
+                title={`Bỏ outside cả ${g.len} frame (${g.from}–${g.to}) và gỡ keyframe của chúng (như O rồi K): các frame trở về nội suy, giữ ID. Có hộp xác nhận, hoàn tác được.`}
+              >⛔ bỏ outside + gỡ key {g.from}–{g.to}</button>
             </span>
           ))}
           {trackSummary.far.length > 0 && (

@@ -56,7 +56,7 @@ const STEPS: { title: string; body: ReactNode }[] = [
           <li><b>🔒 / 🔓</b> khoá hoặc mở khoá frame đang chọn thành keyframe; <b>🔓 KF giữa</b> mở khoá các keyframe ở giữa phạm vi.</li>
           <li><b>Outside</b> có 3 chế độ: từ frame đang chọn, cả cửa sổ hiện tại, hoặc chọn khoảng. Muốn bỏ một object thì đặt outside, không xoá.</li>
           <li><b>Mọi frame outside đều phải có keyframe</b>; thiếu thì không upload được.</li>
-          <li>Outside liên tục từ 6 frame trở lên: tool gợi ý <b>✂ tách ID</b> (object mới nằm cuối danh sách).</li>
+          <li>Outside liên tục từ 6 frame trở lên: tool gợi ý <b>⛔ bỏ outside + gỡ key</b> cả đoạn (như bấm O rồi K, giữ ID).</li>
         </ul>
       </>
     ),

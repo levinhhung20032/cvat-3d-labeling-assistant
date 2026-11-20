@@ -39,6 +39,7 @@ import { middleSparse } from '../shared/midOutside';
 import { fitReportAt } from '../shared/fit';
 import { loadPass, savePass, sigOf, type PassEntry } from './passStore';
 import { DEFAULT_GROUND } from '../shared/ground';
+import { joinTracks } from '../shared/joinId';
 import { findLateStart, outsideBeforeAppear, splitTrack } from '../shared/splitId';
 import { DeleteDialog } from './DeleteDialog';
 import { madeStore, useMadeIds } from './madeStore';
@@ -82,6 +83,7 @@ type Action =
   | { t: 'restore'; work: CvatAnnotations; edited: Set<string> } // khôi phục bản nháp đã lưu
   | { t: 'addTrack'; track: CvatTrack } // object MỚI do tool tạo (chưa có id), thêm vào cuối
   | { t: 'removeTrack'; idx: number } // xóa object do tool tạo trong nháp (chỉ track chưa có id)
+  | { t: 'join'; idxA: number; a: CvatTrack; idxB: number; b: CvatTrack; framesA: number[]; framesB: number[] } // nối ID: A nhận box của B, B outside
   | { t: 'split'; idx: number; oldTrack: CvatTrack; newTrack: CvatTrack; frames: number[] } // tách ID: track cũ (update) + object mới ở cuối (create)
   | { t: 'undo' | 'redo' | 'reset'; baseline?: CvatAnnotations };
 
@@ -124,6 +126,11 @@ function reducer(s: Draft, a: Action): Draft {
       const keys = [...a.frames.map((f) => `${a.idx + 1}:${f}`), ...a.newTrack.shapes.map((x) => `${newIdx + 1}:${x.frame}`)];
       // thêm object làm đổi chỉ số track nên lịch sử hoàn tác cũ không còn dùng được (như addTrack)
       return { work: { ...s.work, tracks: [...replaceTrack(s.work, a.idx, a.oldTrack).tracks, a.newTrack] }, edited: new Set([...s.edited, ...keys]), undo: [], redo: [] };
+    }
+    case 'join': {
+      if (!s.work || !s.work.tracks[a.idxA] || !s.work.tracks[a.idxB]) return s;
+      const keys = [...a.framesA.map((f) => `${a.idxA + 1}:${f}`), ...a.framesB.map((f) => `${a.idxB + 1}:${f}`)];
+      return { work: replaceTrack(replaceTrack(s.work, a.idxA, a.a), a.idxB, a.b), edited: new Set([...s.edited, ...keys]), undo: [], redo: [] };
     }
     case 'removeTrack': {
       const t = s.work?.tracks[a.idx];
@@ -963,6 +970,30 @@ Mất khoảng 1–5 phút (hàng trăm MB); số liệu đã tính vẫn giữ.
     shiftStore.edit(data.job.id, num);
     setToast(`Object #${num}: đã thêm ${r.frames.length} keyframe outside (frame ${a}–${late.first - 1}), giữ ID. Nằm trong nháp, chưa upload.`);
   };
+  /** Nối ID: B (num) và A (target) cùng một vật. Box của B chép vào A từ frame B xuất hiện, B outside toàn bộ. */
+  const joinInto = async (numB: number, numA: number) => {
+    if (!data || !work) return;
+    const B = work.tracks[numB - 1], A = work.tracks[numA - 1];
+    if (!B || !A || numA === numB) { setToast(`Không có object #${numA} để nối (khác #${numB}).`); return; }
+    const r = joinTracks(A, B, data.job.stop_frame);
+    if (!r) { setToast(`Object #${numB} không có box nào để nối.`); return; }
+    const warn = A.label_id !== B.label_id ? '\n⚠ Hai object khác nhãn: A giữ nhãn của mình.' : '';
+    if (!await askConfirm({
+      title: `Nối ID #${numB} → #${numA}`,
+      message: `• Chép toàn bộ box của #${numB} từ frame ${r.from} vào #${numA} (keyframe cũ của #${numA} từ frame ${r.from} trở đi bị thay).\n• Đặt outside toàn bộ #${numB} (frame ${r.from}–${data.job.stop_frame}).\n\nKhông xóa ID nào. Chỉ nằm trong nháp tới khi bạn upload.${warn}`,
+      confirmLabel: 'Nối ID',
+    })) return;
+    const bakKey = `cvla-bak:${data.job.id}:${numB}`;
+    try {
+      const m = JSON.parse(kv.get(bakKey) ?? '{}') as Record<string, unknown>;
+      for (const f of r.framesB) { const c = stateAt(B, f).cuboid; if (c) m[String(f)] = c; }
+      kv.set(bakKey, JSON.stringify(m));
+    } catch { /* bỏ qua */ }
+    dispatch({ t: 'join', idxA: numA - 1, a: r.a, idxB: numB - 1, b: r.b, framesA: r.framesA, framesB: r.framesB });
+    shiftStore.edit(data.job.id, numA);
+    shiftStore.edit(data.job.id, numB);
+    setToast(`Đã nối #${numB} vào #${numA} từ frame ${r.from}; #${numB} outside. Nằm trong nháp, chưa upload.`);
+  };
   const lockBaseline = async () => {
     if (!data) return;
     const ids = data.ann.tracks.map((t) => t.id).filter((x): x is number => typeof x === 'number' && !madeIds.includes(x)); // object do tool tạo không phải ID gốc
@@ -1232,7 +1263,7 @@ Tải lại sẽ bỏ nháp.`, confirmLabel: 'Bỏ nháp và tải lại', dange
       )}
       {data && work && tab === 'objects' && (
         <ObjectTable
-          jobId={data.job.id} locked={lockedIds} onLock={lockBaseline} onUnlock={unlockBaseline} onRelocate={(n) => { void relocateLate(n); }} onDelete={deleteMade} flagsOf={objectFlags} onOutside={(n, k) => { void outsideFlagged(n, k); }} onAcceptHints={acceptHints} onIgnoreMotion={ignoreMotionAll} onIgnoreKind={ignoreKind} onIgnoreAll={(n) => { ignoreAllFlags(n); }} onIgnoreMid={ignoreMid} onOpenAt={openAtFrame} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs} incomplete={passView.incomplete}
+          jobId={data.job.id} locked={lockedIds} onLock={lockBaseline} onUnlock={unlockBaseline} onRelocate={(n) => { void relocateLate(n); }} onJoin={(b, a) => { void joinInto(b, a); }} onDelete={deleteMade} flagsOf={objectFlags} onOutside={(n, k) => { void outsideFlagged(n, k); }} onAcceptHints={acceptHints} onIgnoreMotion={ignoreMotionAll} onIgnoreKind={ignoreKind} onIgnoreAll={(n) => { ignoreAllFlags(n); }} onIgnoreMid={ignoreMid} onOpenAt={openAtFrame} rows={rows} hints={attrHints} overlapFrames={overlapFrames} overlapPairs={overlapPairs} incomplete={passView.incomplete}
           tracks={work.tracks} labels={data.labels} start={data.job.start_frame} stop={data.job.stop_frame} cvatFrame={focus?.frame ?? null}
           selectedNum={selectedNum} onSelect={selectFromTool}
           onOpen={(num) => {

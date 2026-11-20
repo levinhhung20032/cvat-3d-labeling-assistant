@@ -21,7 +21,7 @@ Extension cho trình duyệt **Edge / Chrome** (và bản thử cho Firefox) gi�
 | **Bảng object** | Danh sách object của job kèm số frame, cảnh báo, khoảng cách tới xe, attribute (dấu **!** cạnh attribute = object có gợi ý đổi attribute); lọc và sắp xếp; dòng tên cột luôn hiện khi cuộn xuống. |
 | **Batch Review** | Xem một object qua nhiều frame cùng lúc, 3 hình chiếu (Trên / Bên / Trước). Kéo thả để dời, đổi kích thước, xoay box; zoom bằng con lăn, giữ chuột phải kéo để dời khung nhìn. |
 | **Keyframe & outside** | Khoá / mở khoá keyframe, đánh dấu outside (box được lưu lại để trả về đúng chỗ cũ). |
-| **Cảnh báo & gợi ý** | Box lệch khỏi cụm điểm (có box gợi ý, bấm A để nhận), trôi box, đi xa / đổi độ cao bất thường, đáy box lệch so với box xung quanh (Z1), chồng lấn, đáy box lơ lửng / chìm so với mặt đường, ít điểm, outside quá lâu (có nút tách ID). |
+| **Cảnh báo & gợi ý** | Box lệch khỏi cụm điểm (có box gợi ý, bấm A để nhận), trôi box, đi xa / đổi độ cao bất thường, đáy box lệch so với box xung quanh (Z1), chồng lấn, đáy box lơ lửng / chìm so với mặt đường, ít điểm, outside liên tục quá lâu (có nút bỏ outside + gỡ keyframe cả đoạn). |
 | **Mặt đường** | Mỗi frame chọn đúng 1 nguồn mặt đường cho Ground snap / lock: **local** (đo riêng quanh object), **ego** (z = 0) hoặc **patchwork++**; công tắc *hiện cả 3* để so sánh; hệ thống gợi ý nguồn (xem [mục dưới](#mặt-đường-local--ego--patchwork)). |
 | **Threshold** | Bạn tự đặt các rule cảnh báo; xuất / nạp toàn bộ cài đặt ra file `setting.json`. |
 | **Dynamic size** | Chọn class nào được đổi kích thước theo từng frame, class nào dùng một kích thước cho cả object. |

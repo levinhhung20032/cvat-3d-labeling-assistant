@@ -154,3 +154,23 @@ export function retainShifts(shifts: readonly Shift[], now: Date, sch: Schedule,
   const keptNames = new Set(kept.map((s) => s.name));
   return shifts.filter((s) => keptNames.has(s.name) || Object.values(s.assign ?? {}).some((to) => keptNames.has(to)));
 }
+
+/** Số thứ tự ID → "1-3,5,7-8" (gộp dải liên tiếp, tăng dần, bỏ trùng). */
+export function fmtIdRanges(nums: readonly number[]): string {
+  const a = [...new Set(nums)].sort((x, y) => x - y);
+  const out: string[] = [];
+  for (let i = 0; i < a.length;) {
+    let j = i;
+    while (j + 1 < a.length && a[j + 1] === a[j]! + 1) j++;
+    out.push(j > i ? `${a[i]}-${a[j]}` : `${a[i]}`);
+    i = j + 1;
+  }
+  return out.join(',');
+}
+
+/** Các ID đã làm theo dạng "Job 12 / ID 1-3,5; Job 13 / ID 2" (mỗi job một đoạn, tăng dần). */
+export function fmtJobIds(ids: readonly Pick<IdCredit, 'jobId' | 'num'>[]): string {
+  const byJob = new Map<number, number[]>();
+  for (const c of ids) byJob.set(c.jobId, [...(byJob.get(c.jobId) ?? []), c.num]);
+  return [...byJob].sort((a, b) => a[0] - b[0]).map(([j, n]) => `Job ${j} / ID ${fmtIdRanges(n)}`).join('; ');
+}

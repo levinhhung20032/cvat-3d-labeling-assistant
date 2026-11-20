@@ -124,3 +124,21 @@ export function restoreOutsideRange(track: CvatTrack, a: number, b: number, stop
   if (after) { out = upsertKeyframe(out, hi + 1, after, true); frames.push(hi + 1); }
   return { track: out, frames };
 }
+
+/**
+ * Bỏ outside cả đoạn [a, b] rồi gỡ luôn keyframe của các frame đó (giống bấm O để tắt outside, sau đó K để gỡ key):
+ * các frame trong đoạn trở về nội suy giữa box trước và box sau. Chỉ xoá keyframe outside; không đụng keyframe có box
+ * và keyframe đầu tiên của track.
+ */
+export function removeOutsideKeyframes(track: CvatTrack, a: number, b: number): TrackChange | null {
+  const lo = Math.min(a, b), hi = Math.max(a, b);
+  const shapes = sortedShapes(track);
+  const removed: number[] = [];
+  const kept = shapes.filter((s, i) => {
+    const drop = s.outside && s.frame >= lo && s.frame <= hi && i > 0;
+    if (drop) removed.push(s.frame);
+    return !drop;
+  });
+  if (!removed.length) return null;
+  return { track: { ...track, shapes: kept }, frames: removed };
+}

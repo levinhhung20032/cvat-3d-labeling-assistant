@@ -83,3 +83,14 @@ describe('chỉ giữ hôm nay + 3 ngày đi làm gần nhất', () => {
     expect(retainShifts(all, new Date(2026, 9, 28, 2), sch).map((s) => s.name)).toEqual(['Oct20OT', 'Oct21AM', 'Oct25AM', 'Oct26AM', 'Oct27AM']);
   });
 });
+
+import { fmtIdRanges, fmtJobIds } from '../src/shared/kpiCredit';
+describe('hiển thị ID đã làm', () => {
+  it('gộp dải liên tiếp', () => {
+    expect(fmtIdRanges([5, 1, 2, 3, 7, 8, 3])).toBe('1-3,5,7-8');
+    expect(fmtIdRanges([])).toBe('');
+  });
+  it('theo job', () => {
+    expect(fmtJobIds([{ jobId: 12, num: 2 }, { jobId: 9, num: 1 }, { jobId: 12, num: 1 }])).toBe('Job 9 / ID 1; Job 12 / ID 1-2');
+  });
+});
