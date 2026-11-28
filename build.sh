@@ -73,28 +73,12 @@ else
             if [[ ! "$ans" =~ ^[Yy] ]]; then
                 echo "Skipping update, building the current version $cur."
             else
-                proceed=1
-                changed="$(git status --porcelain --untracked-files=no)"
-                if [ -n "$changed" ]; then
-                    echo
-                    echo "These files have local (uncommitted) changes:"
-                    printf '%s\n' "$changed" | sed 's/^/   /'
-                    echo
-                    read -r -p "Overwrite (DISCARD) these changes and update? [y/N] " ans2 || ans2=""
-                    if [[ "$ans2" =~ ^[Yy] ]]; then
-                        git reset --hard HEAD || proceed=0
-                    else
-                        proceed=0
-                        echo "Keeping your changes, skipping update, building the current version $cur."
-                    fi
-                fi
-                if [ "$proceed" = "1" ]; then
-                    if git pull --ff-only; then
-                        cur="$(version)"
-                        echo "Updated to: $cur"
-                    else
-                        echo "Pull failed (branch diverged from GitHub). Skipping, building the current version $cur."
-                    fi
+                # Force update: discard whatever differs locally (edits, mode/CRLF noise, diverged commits) and match GitHub.
+                if git reset --hard '@{u}'; then
+                    cur="$(version)"
+                    echo "Updated to: $cur"
+                else
+                    echo "Update failed. Skipping, building the current version $cur."
                 fi
             fi
         fi
