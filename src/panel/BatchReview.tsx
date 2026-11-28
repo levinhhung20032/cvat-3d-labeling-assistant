@@ -157,7 +157,7 @@ const loadFrameSel = (key: string): Record<number, GroundKind> => {
 interface DragState { hit: NonNullable<Hit>; x0: number; y0: number; base: LocalBox; moved: boolean }
 
 function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, tiltOn, autoSnap, lockKind, onPreview, onCommit, onZoom, pan, onPan, reflect, pwPlane, ovCount, ovNums, onPreviewOther, onCommitOther, onSyncGround }: {
-  onSyncGround: (i: number) => void; // chuột phải vào box xung quanh: đồng bộ mặt đường (đáy box đang xét = đáy box đó)
+  onSyncGround: (i: number) => void; // bấm đúp vào box xung quanh: đồng bộ mặt đường (đáy box đang xét = đáy box đó)
   nbrPlane: EgoPlane | null; nbrZ: number | null; // mặt đường theo đáy box ID nhỏ (vẽ) và độ cao thế giới của nó (snap)
   ovNums: number[]; // số thứ tự object của từng box chồng lấn / xung quanh (để hiện ID khi rê chuột)
   ovCount: number; // overlays[0 … ovCount − 1] là box của object khác đang chồng lấn (kéo được); phần còn lại (box gương ref) không kéo
@@ -332,12 +332,12 @@ function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, g
         ref={ref} width={Math.round(size * dpr)} height={Math.round(size * dpr)}
         style={{ display: 'block', width: size, height: size, touchAction: 'none' }}
         onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={() => setTip(null)} onPointerCancel={() => { const od = ovDrag.current; ovDrag.current = null; drag.current = null; panDrag.current = null; onPreview(null); if (od) onPreviewOther(od.i, null); }}
-        onContextMenu={(e) => {
-          e.preventDefault();
+        onContextMenu={(e) => e.preventDefault()}
+        onDoubleClick={(e) => {
           if (drag.current || ovDrag.current || panDrag.current) return;
           const [px, py] = pos(e);
           const oi = ovAt(px, py);
-          if (oi >= 0 && ovNums[oi] !== undefined) onSyncGround(oi);
+          if (oi >= 0 && ovNums[oi] !== undefined) { e.stopPropagation(); onSyncGround(oi); }
         }}
       />
       {tip && !ovDrag.current && !drag.current && (
@@ -551,7 +551,7 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
     const cos = Math.cos(refCub.yaw), sin = Math.sin(refCub.yaw);
     onCommitOther(num, f, { ...other, x: other.x + du * cos - dv * sin, y: other.y + du * sin + dv * cos, z: other.z + dw, yaw: other.yaw + dyaw }, all && dyaw !== 0);
   }; // ref tắt: không phụ thuộc box (box tạo mới mỗi lần vẽ)
-  /** Chuột phải vào box xung quanh (đang hiện ID): dời box đang xét theo z để đáy trùng đáy box đó (cùng mặt đường). */
+  /** Bấm đúp vào box xung quanh (đang hiện ID): dời box đang xét theo z để đáy trùng đáy box đó (cùng mặt đường). */
   const syncGround = (i: number) => {
     const o = overlayCubs[i], n = overlayNums[i], c = st.cuboid;
     if (!o || n === undefined || !c) return;
@@ -563,15 +563,13 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
   return (
     <div
       onClick={onSelect}
-      // Bấm đúp vào cột: thu nhỏ tool và đưa camera 3D của CVAT tới object ở frame này (không áp dụng khi bấm vào nút / ô nhập)
-      onDoubleClick={(e) => { if ((e.target as HTMLElement).closest('button, input, textarea, select')) return; onFocusFrame(f); }}
       // Phím khoá KF / outside / ground snap / chấp nhận / bỏ qua gợi ý tác dụng lên cột đang trỏ chuột; viền xanh cho biết cột nào sẽ nhận phím.
       onMouseEnter={(e) => { onHover(f); e.currentTarget.style.boxShadow = '0 0 0 3px #2563eb'; }}
       onMouseLeave={(e) => { onHover(null); e.currentTarget.style.boxShadow = ''; }}
       style={{ border: `3px solid ${color}`, outline: selected ? '2px solid #111' : 'none', width: horizontal ? size * 3 + 2 * VIEW_GAP : size, flex: 'none' }}
     >
       <div style={{ background: color, color: '#fff', padding: '1px 4px', fontSize: Math.max(11, Math.min(14, size / 14)), display: 'flex', alignItems: 'center', gap: 4 }}>
-        <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={`frame ${f} · ${STATUS_TEXT[st.status]}`}>
+        <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={`frame ${f} · ${STATUS_TEXT[st.status]} · bấm đúp: thu nhỏ tool và đưa camera 3D của CVAT tới object ở frame này`} onDoubleClick={() => onFocusFrame(f)}>
         {bad || shownMotion || overlap.length ? '⚠ ' : ''}frame {f} · {STATUS_TEXT[st.status]}{edited ? ' · ✎' : ''}{qcNote ? ' · 📝' : ''}{st.cuboid ? ` · yaw ${yawVsEgoDeg(st.cuboid.yaw).toFixed(1)}°` : ''}{st.cuboid && (st.cuboid.rx !== 0 || st.cuboid.ry !== 0) ? ` · ∠${(st.cuboid.rx * 57.2958).toFixed(1)}°/${(st.cuboid.ry * 57.2958).toFixed(1)}°` : ''}
         </span>
         <span style={{ flex: 'none', display: 'flex', gap: 2 }}>
