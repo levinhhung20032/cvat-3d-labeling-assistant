@@ -76,7 +76,7 @@ if (!dev) {
 if (dev) {
   // Bản DEV là extension khác hẳn: tên, nhãn phiên bản và tiêu đề riêng (ID extension khác vì nạp từ thư mục khác).
   const m = JSON.parse(readFileSync('public/manifest.json', 'utf8'));
-  m.name = `${m.name} (DEV)`;
+  m.name = `[DEV] ${m.name}`;
   m.version_name = `${m.version}-dev.${Date.now().toString(36)}`;
   m.permissions = [...m.permissions, 'alarms']; // móc DEV tự reload cần alarm để đánh thức service worker
   m.action.default_title = '[DEV] ' + m.action.default_title;
@@ -84,8 +84,8 @@ if (dev) {
 } else {
   cpSync(firefox ? 'public/manifest.firefox.json' : 'public/manifest.json', `${out}/manifest.json`);
 }
-// Icon extension (PNG 16/32/48/128; icon.svg là bản gốc để vẽ lại)
-for (const n of [16, 32, 48, 128]) cpSync(`public/icons/icon-${n}.png`, `${out}/icons/icon-${n}.png`);
+// Icon extension (PNG 16/32/48/128; icon.svg là bản gốc để vẽ lại; bản DEV dùng public/icons-dev có dải cam "DEV")
+for (const n of [16, 32, 48, 128]) cpSync(`public/${dev ? 'icons-dev' : 'icons'}/icon-${n}.png`, `${out}/icons/icon-${n}.png`);
 // Giấy phép của mã bên thứ ba đóng gói kèm (Patchwork++, BSD-2: bản phân phối phải kèm thông báo bản quyền)
 cpSync('public/THIRD_PARTY_NOTICES.txt', `${out}/THIRD_PARTY_NOTICES.txt`);
 // Mã build (thời điểm build): bản chạy thử cục bộ dùng để biết dist vừa được build lại

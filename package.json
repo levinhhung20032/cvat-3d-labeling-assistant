@@ -1,6 +1,6 @@
 {
   "name": "cvat-3d-labeling-assistant",
-  "version": "1.6.7",
+  "version": "1.6.8",
   "private": true,
   "type": "module",
   "scripts": {

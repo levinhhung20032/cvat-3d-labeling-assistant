@@ -156,7 +156,8 @@ const loadFrameSel = (key: string): Record<number, GroundKind> => {
 
 interface DragState { hit: NonNullable<Hit>; x0: number; y0: number; base: LocalBox; moved: boolean }
 
-function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, tiltOn, autoSnap, lockKind, onPreview, onCommit, onZoom, pan, onPan, reflect, pwPlane, ovCount, ovNums, onPreviewOther, onCommitOther }: {
+function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, tiltOn, autoSnap, lockKind, onPreview, onCommit, onZoom, pan, onPan, reflect, pwPlane, ovCount, ovNums, onPreviewOther, onCommitOther, onSyncGround }: {
+  onSyncGround: (i: number) => void; // chuột phải vào box xung quanh: đồng bộ mặt đường (đáy box đang xét = đáy box đó)
   nbrPlane: EgoPlane | null; nbrZ: number | null; // mặt đường theo đáy box ID nhỏ (vẽ) và độ cao thế giới của nó (snap)
   ovNums: number[]; // số thứ tự object của từng box chồng lấn / xung quanh (để hiện ID khi rê chuột)
   ovCount: number; // overlays[0 … ovCount − 1] là box của object khác đang chồng lấn (kéo được); phần còn lại (box gương ref) không kéo
@@ -201,7 +202,7 @@ function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, g
   }, []);
 
   // Toạ độ chuột quy về khung nhìn CHƯA dời, để chọn cạnh / kéo / xoay box không phải biết tới việc dời.
-  const pos = (e: React.PointerEvent) => {
+  const pos = (e: React.MouseEvent) => {
     const r = ref.current!.getBoundingClientRect();
     return [e.clientX - r.left - ox, e.clientY - r.top - oy] as const;
   };
@@ -331,7 +332,13 @@ function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, g
         ref={ref} width={Math.round(size * dpr)} height={Math.round(size * dpr)}
         style={{ display: 'block', width: size, height: size, touchAction: 'none' }}
         onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={() => setTip(null)} onPointerCancel={() => { const od = ovDrag.current; ovDrag.current = null; drag.current = null; panDrag.current = null; onPreview(null); if (od) onPreviewOther(od.i, null); }}
-        onContextMenu={(e) => e.preventDefault()}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          if (drag.current || ovDrag.current || panDrag.current) return;
+          const [px, py] = pos(e);
+          const oi = ovAt(px, py);
+          if (oi >= 0 && ovNums[oi] !== undefined) onSyncGround(oi);
+        }}
       />
       {tip && !ovDrag.current && !drag.current && (
         <div style={{ position: 'absolute', left: Math.min(tip.x + 10, size - 44), top: Math.max(0, tip.y - 20), background: '#0b3a6b', color: '#fff', fontSize: 12, fontWeight: 700, padding: '1px 6px', borderRadius: 6, pointerEvents: 'none', whiteSpace: 'nowrap' }}>ID #{tip.n}</div>
@@ -544,6 +551,14 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
     const cos = Math.cos(refCub.yaw), sin = Math.sin(refCub.yaw);
     onCommitOther(num, f, { ...other, x: other.x + du * cos - dv * sin, y: other.y + du * sin + dv * cos, z: other.z + dw, yaw: other.yaw + dyaw }, all && dyaw !== 0);
   }; // ref tắt: không phụ thuộc box (box tạo mới mỗi lần vẽ)
+  /** Chuột phải vào box xung quanh (đang hiện ID): dời box đang xét theo z để đáy trùng đáy box đó (cùng mặt đường). */
+  const syncGround = (i: number) => {
+    const o = overlayCubs[i], n = overlayNums[i], c = st.cuboid;
+    if (!o || n === undefined || !c) return;
+    const dz = (o.z - o.sz / 2) - (c.z - c.sz / 2);
+    if (Math.abs(dz) < 1e-4) return;
+    onCommit(f, { ...c, z: c.z + dz });
+  };
   const color = statusColor(st.status);
   return (
     <div
@@ -611,7 +626,7 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
       </div>
       <div style={{ position: 'relative', ...(horizontal ? { display: 'flex', gap: VIEW_GAP } : null) }}>
       {VIEWS.map((v) => (
-        <Cell key={v} nbrPlane={nbrPlane} nbrZ={nbrZ} reflect={reflect} pwPlane={pwPlane} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap && lockKind !== null} lockKind={lockKind} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c, all, lb) => onCommit(f, c, all, lb)} onZoom={onZoom} pan={pan} onPan={onPan} ovCount={overlayCubs.length} ovNums={overlayNums} onPreviewOther={(i, b) => setOvPrev(b ? { i, box: b } : null)} onCommitOther={commitOther} />
+        <Cell key={v} nbrPlane={nbrPlane} nbrZ={nbrZ} reflect={reflect} pwPlane={pwPlane} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap && lockKind !== null} lockKind={lockKind} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c, all, lb) => onCommit(f, c, all, lb)} onZoom={onZoom} pan={pan} onPan={onPan} ovCount={overlayCubs.length} ovNums={overlayNums} onPreviewOther={(i, b) => setOvPrev(b ? { i, box: b } : null)} onCommitOther={commitOther} onSyncGround={syncGround} />
       ))}
       </div>
       {reflect && plane && (
