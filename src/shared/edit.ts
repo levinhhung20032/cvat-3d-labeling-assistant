@@ -212,11 +212,11 @@ export function upsertKeyframe(track: CvatTrack, frame: number, cub: Cuboid, out
 
 const wrapPi = (a: number): number => { let d = a; while (d > Math.PI) d -= 2 * Math.PI; while (d <= -Math.PI) d += 2 * Math.PI; return d; };
 
-/** Cộng cùng một độ xoay (yaw / roll / pitch, rad) vào các keyframe có box từ frame `fromFrame` trở đi (mặc định mọi keyframe), quanh tâm từng box; keyframe outside không đổi. Không đổi ID. */
-export function rotateAllKeyframes(track: CvatTrack, dyaw: number, drx = 0, dry = 0, fromFrame = -Infinity): { track: CvatTrack; frames: number[] } {
+/** Cộng cùng một độ xoay (yaw / roll / pitch, rad) vào các keyframe có box trong khoảng frame [`fromFrame`, `toFrame`] (mặc định từ `fromFrame` trở đi; đi ngược về trước: fromFrame = -Infinity, toFrame = frame − 1) (mặc định mọi keyframe), quanh tâm từng box; keyframe outside không đổi. Không đổi ID. */
+export function rotateAllKeyframes(track: CvatTrack, dyaw: number, drx = 0, dry = 0, fromFrame = -Infinity, toFrame = Infinity): { track: CvatTrack; frames: number[] } {
   const frames: number[] = [];
   const shapes = track.shapes.map((sh) => {
-    if (sh.outside || sh.type !== 'cuboid' || sh.frame < fromFrame) return sh;
+    if (sh.outside || sh.type !== 'cuboid' || sh.frame < fromFrame || sh.frame > toFrame) return sh;
     const c = parseCuboid(sh.points);
     frames.push(sh.frame);
     return { ...sh, points: serializeCuboid({ ...c, yaw: wrapPi(c.yaw + dyaw), rx: c.rx + drx, ry: c.ry + dry }, sh.points) };
@@ -224,11 +224,11 @@ export function rotateAllKeyframes(track: CvatTrack, dyaw: number, drx = 0, dry 
   return { track: { ...track, shapes }, frames };
 }
 
-/** Dời cùng một độ lệch (dx, dy, dz, mét, toạ độ ego) mọi keyframe có box từ frame `fromFrame` trở đi; keyframe outside không đổi. Không đổi ID. */
-export function translateKeyframes(track: CvatTrack, dx: number, dy: number, dz: number, fromFrame: number): { track: CvatTrack; frames: number[] } {
+/** Dời cùng một độ lệch (dx, dy, dz, mét, toạ độ ego) mọi keyframe có box trong khoảng frame [`fromFrame`, `toFrame`] (mặc định từ `fromFrame` trở đi; đi ngược về trước: fromFrame = -Infinity, toFrame = frame − 1); keyframe outside không đổi. Không đổi ID. */
+export function translateKeyframes(track: CvatTrack, dx: number, dy: number, dz: number, fromFrame: number, toFrame = Infinity): { track: CvatTrack; frames: number[] } {
   const frames: number[] = [];
   const shapes = track.shapes.map((sh) => {
-    if (sh.outside || sh.type !== 'cuboid' || sh.frame < fromFrame) return sh;
+    if (sh.outside || sh.type !== 'cuboid' || sh.frame < fromFrame || sh.frame > toFrame) return sh;
     const c = parseCuboid(sh.points);
     frames.push(sh.frame);
     return { ...sh, points: serializeCuboid({ ...c, x: c.x + dx, y: c.y + dy, z: c.z + dz }, sh.points) };
@@ -240,10 +240,10 @@ export function translateKeyframes(track: CvatTrack, dx: number, dy: number, dz:
  * Ctrl+kéo cạnh / góc: áp cùng một phép đổi kích thước (tâm dời theo trục riêng của từng box + kích thước mới `b.sx/sy/sz`) cho mọi keyframe có box từ frame
  * `fromFrame` trở đi; keyframe outside không đổi. `b` là hộp vừa kéo trong hệ yaw của frame đang kéo (dyaw = 0). Không đổi ID.
  */
-export function resizeKeyframes(track: CvatTrack, b: LocalBox, fromFrame: number): { track: CvatTrack; frames: number[] } {
+export function resizeKeyframes(track: CvatTrack, b: LocalBox, fromFrame: number, toFrame = Infinity): { track: CvatTrack; frames: number[] } {
   const frames: number[] = [];
   const shapes = track.shapes.map((sh) => {
-    if (sh.outside || sh.type !== 'cuboid' || sh.frame < fromFrame) return sh;
+    if (sh.outside || sh.type !== 'cuboid' || sh.frame < fromFrame || sh.frame > toFrame) return sh;
     const c = parseCuboid(sh.points);
     frames.push(sh.frame);
     return { ...sh, points: serializeCuboid(applyLocalBox(c, { ...b, dyaw: 0, droll: 0, dpitch: 0 }), sh.points) };

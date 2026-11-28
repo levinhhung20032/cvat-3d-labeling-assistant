@@ -157,11 +157,11 @@ const loadFrameSel = (key: string): Record<number, GroundKind> => {
 interface DragState { hit: NonNullable<Hit>; x0: number; y0: number; base: LocalBox; moved: boolean }
 
 function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, ghost, ground, groundMarks, contactW, egoPlane, mark, scene, overlays, tiltOn, autoSnap, lockKind, onPreview, onCommit, onZoom, pan, onPan, reflect, pwPlane, ovCount, ovNums, onPreviewOther, onCommitOther, onSyncGround }: {
-  onSyncGround: (i: number) => void; // bấm đúp vào box xung quanh: đồng bộ mặt đường (đáy box đang xét = đáy box đó)
+  onSyncGround: (i: number, all: boolean, back: boolean) => void; // bấm đúp vào box xung quanh: đồng bộ mặt đường (Ctrl: cả các frame phía sau) (đáy box đang xét = đáy box đó)
   nbrPlane: EgoPlane | null; nbrZ: number | null; // mặt đường theo đáy box ID nhỏ (vẽ) và độ cao thế giới của nó (snap)
   ovNums: number[]; // số thứ tự object của từng box chồng lấn / xung quanh (để hiện ID khi rê chuột)
   ovCount: number; // overlays[0 … ovCount − 1] là box của object khác đang chồng lấn (kéo được); phần còn lại (box gương ref) không kéo
-  onPreviewOther: (i: number, b: LocalBox | null) => void; onCommitOther: (i: number, delta: [number, number, number], dyaw?: number, all?: boolean) => void; // dời box chồng lấn: xem trước / ghi (độ dời tâm theo hệ của khung nhìn)
+  onPreviewOther: (i: number, b: LocalBox | null) => void; onCommitOther: (i: number, delta: [number, number, number], dyaw?: number, all?: boolean, back?: boolean) => void; // dời box chồng lấn: xem trước / ghi (độ dời tâm theo hệ của khung nhìn)
   pwPlane: EgoPlane | null; // mặt đường Patchwork++ gợi ý (tím) trong hệ của khung nhìn
   lockKind: GroundKind | null; // nguồn mặt đường của lock (frame chọn đúng 1 nguồn); null: không lock
   reflect: { pts: Local | null; plane: number } | null; // ref mode (chỉ ở tab Ref)
@@ -171,7 +171,7 @@ function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, g
   ground: number | null; autoSnap: boolean;
   groundMarks: GroundSector[]; contactW: number | null; // mặt đường đo được ở từng cung quanh box + lớp tiếp xúc dưới gầm (để vẽ)
   ghost: LocalBox | null; misfit: boolean; view: View; size: number; loc: Local | null; st: FrameState; half: number; box: LocalBox | null;
-  onPreview: (b: LocalBox | null) => void; onCommit: (c: Cuboid, all?: 'rot' | 'move' | 'size', lb?: LocalBox) => void; onZoom: (factor: number) => void;
+  onPreview: (b: LocalBox | null) => void; onCommit: (c: Cuboid, all?: 'rot' | 'move' | 'size', lb?: LocalBox, back?: boolean) => void; onZoom: (factor: number) => void;
   pan: Pan; onPan: (p: Pan) => void; // dời khung nhìn (giữ chuột phải kéo), dùng chung mọi view / frame
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -235,7 +235,7 @@ function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, g
     let hit = hitTest(view, base, px, py, size, half);
     // Box chồng lấn: kéo ở phần chỉ thuộc box đó (ngoài box đang xét), hoặc giữ Shift để kéo nó ngay cả ở vùng chồng lên box đang xét.
     const oi = ovAt(px, py);
-    if (oi >= 0 && (e.shiftKey || !hit)) {
+    if (oi >= 0 && ((e.shiftKey && !e.ctrlKey) || !hit)) {
       ref.current!.setPointerCapture(e.pointerId);
       // Giữ Alt: xoay box chồng lấn (view Trên: quanh tâm của nó, hướng về phía con trỏ; view Bên / Trước: theo độ dời ngang) thay vì dời.
       const ob = overlays[oi]!;
@@ -300,7 +300,7 @@ function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, g
     const od = ovDrag.current;
     if (od) {
       ovDrag.current = null;
-      if (od.moved) onCommitOther(od.i, [od.last.cu - od.base.cu, od.last.cv - od.base.cv, od.last.cw - od.base.cw], od.last.dyaw - od.base.dyaw, !!od.rot && e.ctrlKey);
+      if (od.moved) onCommitOther(od.i, [od.last.cu - od.base.cu, od.last.cv - od.base.cv, od.last.cw - od.base.cw], od.last.dyaw - od.base.dyaw, !!od.rot && e.ctrlKey, e.ctrlKey && e.shiftKey);
       onPreviewOther(od.i, null);
       return;
     }
@@ -320,8 +320,8 @@ function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, g
       const rotated = d.hit.mode === 'rotate' || (d.hit.mode === 'move' && e.altKey);
       const moved = d.hit.mode === 'move' && !e.altKey && e.ctrlKey;
       const resized = (d.hit.mode === 'edge' || d.hit.mode === 'corner') && e.ctrlKey;
-      // Giữ Ctrl khi kéo = áp cho frame này và mọi frame phía sau: Ctrl+Alt+kéo xoay · Ctrl+kéo (dời) dời cùng độ lệch · Ctrl+kéo cạnh / góc đổi kích thước
-      onCommit(applyLocalBox(st.cuboid, b), rotated && e.ctrlKey && e.altKey ? 'rot' : moved ? 'move' : resized ? 'size' : undefined, resized ? b : undefined);
+      // Giữ Ctrl khi kéo = áp cho frame này và mọi frame phía sau (Ctrl+Shift: mọi frame phía trước): Ctrl+Alt+kéo xoay · Ctrl+kéo (dời) dời cùng độ lệch · Ctrl+kéo cạnh / góc đổi kích thước
+      onCommit(applyLocalBox(st.cuboid, b), rotated && e.ctrlKey && e.altKey ? 'rot' : moved ? 'move' : resized ? 'size' : undefined, resized ? b : undefined, e.ctrlKey && e.shiftKey);
     }
     onPreview(null);
   };
@@ -337,7 +337,7 @@ function Cell({ nbrPlane, nbrZ, frame, view, size, loc, st, half, box, misfit, g
           if (drag.current || ovDrag.current || panDrag.current) return;
           const [px, py] = pos(e);
           const oi = ovAt(px, py);
-          if (oi >= 0 && ovNums[oi] !== undefined) { e.stopPropagation(); onSyncGround(oi); }
+          if (oi >= 0 && ovNums[oi] !== undefined) { e.stopPropagation(); onSyncGround(oi, e.ctrlKey, e.shiftKey); }
         }}
       />
       {tip && !ovDrag.current && !drag.current && (
@@ -379,7 +379,7 @@ export interface NearbyCfg { on: boolean; max: number; mode: 'auto' | 'pick'; id
 const NB_DEFAULT: NearbyCfg = { on: false, max: 5, mode: 'auto', ids: [] };
 const NB_NONE = { cand: [] as { num: number; d: number }[], cfg: NB_DEFAULT };
 
-function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, advise, onAdvice, pwShow = false, groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, overlayNums, nbCount, nearby, onNearby, onCommitOther, ignoredOverlap, onRestoreOverlap, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan, refl = null, onBelow, onRefPlane, horizontal = false, hideGroundPick = false }: {
+function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, advise, onAdvice, pwShow = false, groundOv, groundOn, egoOn, suggestOn, f, size, st, refCub, half, locHalf, selected, edited, warn, fixed, ignored, autoSnap, onSnap, onGround, motion, motionIgnored, onIgnoreMotion, onIgnore, onFit, onSuggest, onAccept, onSelect, onLoaded, onCommit, onZoom, onToggleKf, onToggleOutside, onHover, scene, overlap, overlayCubs, overlayNums, nbCount, nearby, onNearby, onCommitOther, onSyncGroundAll, ignoredOverlap, onRestoreOverlap, onIgnoreOverlap, onOpenObject, qcOn, qcNote, onQcNote, tiltOn, issues, issueIgnored, onIgnoreIssue, fileFlags, onMarkFlag, onFocusFrame, pan, onPan, refl = null, onBelow, onRefPlane, horizontal = false, hideGroundPick = false }: {
   hideGroundPick?: boolean; // tab Ref: ẩn ô chọn mặt đường (có ô riêng)
   horizontal?: boolean; // 3 view Trên | Bên | Trước xếp ngang (tab Ref, hoặc bố cục frame dọc): 3 view Trên | Bên | Trước xếp ngang
   pwShow?: boolean; // hiện mặt đường Patchwork++ gợi ý (vạch tím) ở view Bên / Trước
@@ -397,7 +397,7 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
   pIgnored: boolean; onIgnoreP: (f: number, on: boolean) => void; // bỏ qua / hoàn lại cảnh báo ít điểm (P) của frame này
   issues: FrameIssue[]; issueIgnored: (kind: string) => boolean; onIgnoreIssue: (f: number, kind: string, on: boolean) => void;
   qcOn: boolean; qcNote: string; onQcNote: (f: number, text: string) => void;
-  overlap: { other: number; ratio: number }[]; overlayCubs: Cuboid[]; overlayNums: number[]; nbCount: number; nearby: { cand: { num: number; d: number }[]; cfg: NearbyCfg }; onNearby: (f: number, c: NearbyCfg) => void; onCommitOther: (num: number, f: number, c: Cuboid, allAfter?: boolean) => void; ignoredOverlap: number[]; onRestoreOverlap: (other: number) => void; onIgnoreOverlap: (other: number) => void; onOpenObject: (other: number) => void;
+  overlap: { other: number; ratio: number }[]; overlayCubs: Cuboid[]; overlayNums: number[]; nbCount: number; nearby: { cand: { num: number; d: number }[]; cfg: NearbyCfg }; onNearby: (f: number, c: NearbyCfg) => void; onCommitOther: (num: number, f: number, c: Cuboid, allAfter?: boolean, back?: boolean) => void; onSyncGroundAll: (other: number, f: number, back?: boolean) => void; ignoredOverlap: number[]; onRestoreOverlap: (other: number) => void; onIgnoreOverlap: (other: number) => void; onOpenObject: (other: number) => void;
   onToggleOutside: (f: number) => void; onHover: (f: number | null) => void; scene: Scene;
   motion: MotionWarning | null; motionIgnored: boolean; onIgnoreMotion: (f: number, on: boolean) => void;
   autoSnap: boolean; onSnap: (f: number, g: GroundResult | null) => void; onGround: (f: number) => void;
@@ -409,7 +409,7 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
   onToggleKf: (f: number) => void;
   nbrZ: number | null; // độ cao thế giới của mặt đường theo đáy box ID nhỏ trong 5 m ở frame này (null: không có box nào)
   f: number; size: number; st: FrameState; refCub: Cuboid | null; half: number; locHalf: number; selected: boolean; edited: boolean;
-  onSelect: () => void; onLoaded: (f: number) => void; onCommit: (f: number, c: Cuboid, all?: 'rot' | 'move' | 'size', lb?: LocalBox) => void; onZoom: (factor: number) => void;
+  onSelect: () => void; onLoaded: (f: number) => void; onCommit: (f: number, c: Cuboid, all?: 'rot' | 'move' | 'size', lb?: LocalBox, back?: boolean) => void; onZoom: (factor: number) => void;
 }) {
   useSymbols(); // ký hiệu lỗi đổi thì vẽ lại
   useColors(); // màu viền frame đổi (tab Màu sắc) thì vẽ lại
@@ -544,17 +544,18 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
     return plane && box ? [...o, { ...mirrorBox(box, plane.w), color: REF_COLOR }] : o;
   }, [refCub, overlayCubs, nbCount, M, ovPrev, plane?.w, plane ? box : null]);
   /** Ghi vị trí mới của box chồng lấn: dời tâm theo độ dời trong hệ khung nhìn (đã quy về hệ yaw của box đang xét), giữ nguyên cỡ / góc của nó. */
-  const commitOther = (i: number, delta: [number, number, number], dyaw = 0, all = false) => {
+  const commitOther = (i: number, delta: [number, number, number], dyaw = 0, all = false, back = false) => {
     const other = overlayCubs[i], num = overlayNums[i];
     if (!refCub || !other || num === undefined) return;
     const [du, dv, dw] = M ? apply(transpose(M), delta) : delta;
     const cos = Math.cos(refCub.yaw), sin = Math.sin(refCub.yaw);
-    onCommitOther(num, f, { ...other, x: other.x + du * cos - dv * sin, y: other.y + du * sin + dv * cos, z: other.z + dw, yaw: other.yaw + dyaw }, all && dyaw !== 0);
+    onCommitOther(num, f, { ...other, x: other.x + du * cos - dv * sin, y: other.y + du * sin + dv * cos, z: other.z + dw, yaw: other.yaw + dyaw }, all && dyaw !== 0, back);
   }; // ref tắt: không phụ thuộc box (box tạo mới mỗi lần vẽ)
   /** Bấm đúp vào box xung quanh (đang hiện ID): dời box đang xét theo z để đáy trùng đáy box đó (cùng mặt đường). */
-  const syncGround = (i: number) => {
+  const syncGround = (i: number, all = false, back = false) => {
     const o = overlayCubs[i], n = overlayNums[i], c = st.cuboid;
     if (!o || n === undefined || !c) return;
+    if (all) { onSyncGroundAll(n, f, back); return; } // Ctrl: cả các frame phía sau; Ctrl+Shift: các frame phía trước
     const dz = (o.z - o.sz / 2) - (c.z - c.sz / 2);
     if (Math.abs(dz) < 1e-4) return;
     onCommit(f, { ...c, z: c.z + dz });
@@ -624,7 +625,7 @@ function Column({ nbrZ, midSparse, onIgnoreP, pIgnored, kind, onKind, showAll, a
       </div>
       <div style={{ position: 'relative', ...(horizontal ? { display: 'flex', gap: VIEW_GAP } : null) }}>
       {VIEWS.map((v) => (
-        <Cell key={v} nbrPlane={nbrPlane} nbrZ={nbrZ} reflect={reflect} pwPlane={pwPlane} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap && lockKind !== null} lockKind={lockKind} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c, all, lb) => onCommit(f, c, all, lb)} onZoom={onZoom} pan={pan} onPan={onPan} ovCount={overlayCubs.length} ovNums={overlayNums} onPreviewOther={(i, b) => setOvPrev(b ? { i, box: b } : null)} onCommitOther={commitOther} onSyncGround={syncGround} />
+        <Cell key={v} nbrPlane={nbrPlane} nbrZ={nbrZ} reflect={reflect} pwPlane={pwPlane} frame={M} egoPlane={egoPlane} scene={scene} overlays={overlays} tiltOn={tiltOn} mark={mark} ground={M ? null : snap?.groundW ?? null} groundMarks={M ? NO_MARKS : snap?.marks ?? NO_MARKS} contactW={M ? null : snap?.contactW ?? null} autoSnap={autoSnap && lockKind !== null} lockKind={lockKind} ghost={boxV(sug?.box ?? null)} misfit={bad?.level === 'misfit'} view={v} size={size} loc={M ? locView : loc} st={st} half={half} box={box} onPreview={setPreview} onCommit={(c, all, lb, back) => onCommit(f, c, all, lb, back)} onZoom={onZoom} pan={pan} onPan={onPan} ovCount={overlayCubs.length} ovNums={overlayNums} onPreviewOther={(i, b) => setOvPrev(b ? { i, box: b } : null)} onCommitOther={commitOther} onSyncGround={syncGround} />
       ))}
       </div>
       {reflect && plane && (
@@ -926,11 +927,12 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
   const clearOwnDyn = () => { try { kv.remove(dynKey); } catch { /* bỏ qua */ } bumpDyn((x) => x + 1); thresholdStore.changed(); };
   const dynWhy = own !== null ? 'công tắc riêng của object này' : auto.by === 'attr' ? `theo attribute ${auto.attr} = ${auto.value}` : 'theo class';
   /** Ghi cuboid mới vào frame f. Dynamic size tắt mà kích thước đổi → áp kích thước mới cho mọi keyframe. */
-  const commit = (f: number, cub: Cuboid, all?: 'rot' | 'move' | 'size', lb?: LocalBox) => {
+  const commit = (f: number, cub: Cuboid, all?: 'rot' | 'move' | 'size', lb?: LocalBox, back = false) => {
     const cur = track ? stateAt(track, f).cuboid : null;
+    const lo = back ? -Infinity : f + 1, hi = back ? f - 1 : Infinity; // Ctrl: các frame phía sau; Ctrl+Shift: các frame phía trước
     if (all === 'size' && track && lb && cur) {
       // Ctrl+kéo cạnh / góc: frame này đặt đúng box vừa kéo; mọi keyframe có box phía sau đổi cùng kích thước (tâm dời theo trục riêng của từng box)
-      let r = resizeKeyframes(upsertKf(track, f, cub), lb, f + 1);
+      let r = resizeKeyframes(upsertKf(track, f, cub), lb, lo, hi);
       if (!dyn) { // Dynamic size tắt: mọi keyframe phải cùng kích thước, kể cả các keyframe phía trước
         r = { ...r, track: { ...r.track, shapes: r.track.shapes.map((sh) => (sh.outside || sh.type !== 'cuboid' || sh.frame > f ? sh : { ...sh, points: serializeCuboid({ ...parseCuboid(sh.points), sx: cub.sx, sy: cub.sy, sz: cub.sz }, sh.points) })) } };
       }
@@ -938,18 +940,37 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
       return;
     }
     if (all === 'move' && track && cur) {
-      const r = translateKeyframes(upsertKf(track, f, cub), cub.x - cur.x, cub.y - cur.y, cub.z - cur.z, f + 1);
+      const r = translateKeyframes(upsertKf(track, f, cub), cub.x - cur.x, cub.y - cur.y, cub.z - cur.z, lo, hi);
       onTrack(num - 1, r.track, [f, ...r.frames]);
       return;
     }
     if (all === 'rot' && track && cur) {
       // Ctrl+Alt+kéo: độ xoay vừa kéo được cộng vào frame này và MỌI keyframe có box phía sau nó (quanh tâm từng box)
       const wrap = (a: number) => { let d = a; while (d > Math.PI) d -= 2 * Math.PI; while (d <= -Math.PI) d += 2 * Math.PI; return d; };
-      const r = rotateAllKeyframes(upsertKf(track, f, cub), wrap(cub.yaw - cur.yaw), cub.rx - cur.rx, cub.ry - cur.ry, f + 1); // frame này đặt đúng box vừa kéo (thành keyframe nếu chưa), các keyframe sau cộng độ xoay
+      const r = rotateAllKeyframes(upsertKf(track, f, cub), wrap(cub.yaw - cur.yaw), cub.rx - cur.rx, cub.ry - cur.ry, lo, hi); // frame này đặt đúng box vừa kéo (thành keyframe nếu chưa), các keyframe sau cộng độ xoay
       onTrack(num - 1, r.track, [f, ...r.frames]);
       return;
     }
     onEdit(num - 1, f, cub, !dyn && !!cur && !sameSize(cur, cub));
+  };
+  /** Ctrl + bấm đúp box xung quanh #n: từ frame f trở đi (Ctrl+Shift: từ frame f trở về trước), đáy box của object đang chọn bằng đáy box #n ở từng keyframe (frame nào #n không có box thì giữ nguyên). */
+  const syncGroundAfter = (n: number, f: number, back = false) => {
+    const other = ann.tracks[n - 1];
+    if (!track || !other) return;
+    const bottomAt = (g: number) => { const c = stateAt(other, g).cuboid; return c ? c.z - c.sz / 2 : null; };
+    const cur = stateAt(track, f).cuboid, b0 = bottomAt(f);
+    if (!cur || b0 === null) return;
+    let t = upsertKf(track, f, { ...cur, z: cur.z + (b0 - (cur.z - cur.sz / 2)) });
+    const frames = [f];
+    t = { ...t, shapes: t.shapes.map((sh) => {
+      if (sh.outside || sh.type !== 'cuboid' || (back ? sh.frame >= f : sh.frame <= f)) return sh;
+      const c = parseCuboid(sh.points), b = bottomAt(sh.frame);
+      if (b === null) return sh;
+      frames.push(sh.frame);
+      return { ...sh, points: serializeCuboid({ ...c, z: c.z + (b - (c.z - c.sz / 2)) }, sh.points) };
+    }) };
+    onTrack(num - 1, t, frames);
+    setNote(`Đã đồng bộ mặt đường với #${n}: đáy box #${num} = đáy box #${n} ở ${frames.length} keyframe ${back ? 'đến' : 'từ'} frame ${f}. Hoàn tác được.`);
   };
   const [refF, setRefF] = useState(initialFrame); // tab Ref: frame đang xem
   const frames = refView ? [refF] : pageFrames(list, k, prefs.perWin, overlap);
@@ -1084,14 +1105,14 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
   }, [ignoredOverlaps, num]);
   const EMPTY_NUMS: number[] = [];
   /** Dời box của object kia (đang chồng lấn với object đang chọn) ở frame f: ghi vào nháp như một lần sửa của object đó, hoàn tác được. */
-  const commitOther = (n: number, f: number, cub: Cuboid, allAfter = false) => {
+  const commitOther = (n: number, f: number, cub: Cuboid, allAfter = false, back = false) => {
     const tr = ann.tracks[n - 1], cur = tr ? stateAt(tr, f).cuboid : null;
     if (allAfter && tr && cur) {
       // Ctrl+Alt+kéo box chồng lấn: độ xoay vừa kéo cộng vào frame này (thành keyframe nếu chưa) và MỌI keyframe có box phía sau của object đó
       const d = cub.yaw - cur.yaw;
-      const r2 = rotateAllKeyframes(upsertKf(tr, f, cub), d, 0, 0, f + 1); // frame này đặt đúng box vừa xoay, các keyframe sau cộng độ xoay
+      const r2 = rotateAllKeyframes(upsertKf(tr, f, cub), d, 0, 0, back ? -Infinity : f + 1, back ? f - 1 : Infinity); // frame này đặt đúng box vừa xoay, các keyframe sau (Ctrl+Shift: trước) cộng độ xoay
       onTrack(n - 1, r2.track, [f, ...r2.frames]);
-      setNote(`Đã xoay object #${n} ở frame ${f} và mọi keyframe phía sau (đang chồng lấn với #${num}). Hoàn tác được.`);
+      setNote(`Đã xoay object #${n} ở frame ${f} và mọi keyframe phía ${back ? 'trước' : 'sau'} (đang chồng lấn với #${num}). Hoàn tác được.`);
       return;
     }
     onEdit(n - 1, f, cub, false);
@@ -1614,7 +1635,7 @@ export function BatchReview({ drift, midOut, onSplit, onFocusFrame, job, ann, ro
       onSuggest={(f, s) => setSugs((m) => (m.get(f) === s ? m : new Map(m).set(f, s)))} onAccept={accept}
       onFit={(f, r) => setFits((m) => (m.get(f) === r ? m : new Map(m).set(f, r)))} onSelect={() => onPickSelect(c.f)}
       onLoaded={(f) => setLoaded((s) => new Set(s).add(f))}
-      onCommit={commit} onZoom={zoomBy} onToggleKf={toggleKf} overlap={ovAt.get(c.f) ?? []} overlayCubs={ovCubs.get(c.f) ?? EMPTY_CUBS} overlayNums={ovNums.get(c.f) ?? EMPTY_NUMS} nbCount={(nbPicked.get(c.f) ?? EMPTY_NUMS).length} nearby={nbCand.has(c.f) ? { cand: nbCand.get(c.f)!, cfg: nbCfg.get(c.f) ?? nbDef } : NB_NONE} onNearby={onNearby} onCommitOther={commitOther} ignoredOverlap={ovIgnAt.get(c.f) ?? EMPTY_NUMS} onRestoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], false); setNote(`Đã hoàn lại cặp #${Math.min(num, o)}–#${Math.max(num, o)}: báo lại chồng lấn ở mọi frame.`); }} onIgnoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], true); setNote(`Đã bỏ qua cặp #${Math.min(num, o)}–#${Math.max(num, o)} (mọi frame).`); }} onOpenObject={setSelectedNum} tiltOn={true} onFocusFrame={onFocusFrame} fileFlags={(fileFlags.get(c.f) ?? NO_FLAGS).filter((x) => !x.det)} onMarkFlag={markFlagAsk} issues={issueMap.get(c.f) ?? NO_ISSUES} issueIgnored={(k) => ign.has(issueKey(job.id, num, c.f, k))} onIgnoreIssue={ignoreIssueAsk} qcOn={qcOn} qcNote={qcNotes[qcKey(job.id, num, c.f)] ?? ''} onQcNote={(f, t) => qcStore.set(job.id, num, f, t)} onToggleOutside={toggleOutside} onHover={(f) => { hoverRef.current = f; onHoverFrame(f); }} scene={scene}
+      onCommit={commit} onZoom={zoomBy} onToggleKf={toggleKf} overlap={ovAt.get(c.f) ?? []} overlayCubs={ovCubs.get(c.f) ?? EMPTY_CUBS} overlayNums={ovNums.get(c.f) ?? EMPTY_NUMS} nbCount={(nbPicked.get(c.f) ?? EMPTY_NUMS).length} nearby={nbCand.has(c.f) ? { cand: nbCand.get(c.f)!, cfg: nbCfg.get(c.f) ?? nbDef } : NB_NONE} onNearby={onNearby} onCommitOther={commitOther} onSyncGroundAll={syncGroundAfter} ignoredOverlap={ovIgnAt.get(c.f) ?? EMPTY_NUMS} onRestoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], false); setNote(`Đã hoàn lại cặp #${Math.min(num, o)}–#${Math.max(num, o)}: báo lại chồng lấn ở mọi frame.`); }} onIgnoreOverlap={(o) => { ignoreStore.set([overlapKey(job.id, num, o)], true); setNote(`Đã bỏ qua cặp #${Math.min(num, o)}–#${Math.max(num, o)} (mọi frame).`); }} onOpenObject={setSelectedNum} tiltOn={true} onFocusFrame={onFocusFrame} fileFlags={(fileFlags.get(c.f) ?? NO_FLAGS).filter((x) => !x.det)} onMarkFlag={markFlagAsk} issues={issueMap.get(c.f) ?? NO_ISSUES} issueIgnored={(k) => ign.has(issueKey(job.id, num, c.f, k))} onIgnoreIssue={ignoreIssueAsk} qcOn={qcOn} qcNote={qcNotes[qcKey(job.id, num, c.f)] ?? ''} onQcNote={(f, t) => qcStore.set(job.id, num, f, t)} onToggleOutside={toggleOutside} onHover={(f) => { hoverRef.current = f; onHoverFrame(f); }} scene={scene}
       refl={extra.refl ?? null} onBelow={extra.onBelow} onRefPlane={extra.onRefPlane}
     />
   );
